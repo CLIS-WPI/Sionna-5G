@@ -1,0 +1,19 @@
+2024-12-13 14:59:13,174 - root - INFO - Global seeds set successfully with seed: 42
+2024-12-13 14:59:13,585 - tensorflow - WARNING - From c:\Python311\Lib\site-packages\keras\src\backend.py:873: The name tf.get_default_graph is deprecated. Please use tf.compat.v1.get_default_graph instead.
+
+2024-12-13 14:59:13,686 - root - ERROR - Critical error during dataset generation: int() argument must be a string, a bytes-like object or a real number, not 'list'
+2024-12-13 14:59:13,687 - root - ERROR - Detailed error traceback:
+Traceback (most recent call last):
+  File "c:\Users\snatanzi\Desktop\5G-Sionna\Data\main.py", line 125, in main
+    generator = MIMODatasetGenerator(
+                ^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\snatanzi\Desktop\5G-Sionna\Data\dataset_generator\mimo_dataset_generator.py", line 45, in __init__
+    self.channel_model = ChannelModelManager(self.system_params)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\snatanzi\Desktop\5G-Sionna\Data\core\channel_model.py", line 40, in __init__
+    self.stream_management = StreamManagement(
+                             ^^^^^^^^^^^^^^^^^
+  File "c:\Python311\Lib\site-packages\sionna\mimo\stream_management.py", line 38, in __init__
+    self._num_streams_per_tx = int(num_streams_per_tx)
+                               ^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: int() argument must be a string, a bytes-like object or a real number, not 'list'

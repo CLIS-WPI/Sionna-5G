@@ -1,0 +1,30 @@
+2024-12-13 15:00:20,847 - root - INFO - Global seeds set successfully with seed: 42
+2024-12-13 15:00:21,316 - tensorflow - WARNING - From c:\Python311\Lib\site-packages\keras\src\backend.py:873: The name tf.get_default_graph is deprecated. Please use tf.compat.v1.get_default_graph instead.
+
+2024-12-13 15:00:21,486 - root - INFO - Starting MIMO dataset generation
+2024-12-13 15:00:21,487 - root - INFO - Total samples: 1000000
+2024-12-13 15:00:21,487 - root - INFO - Output path: dataset/mimo_dataset_20241213_150020.h5
+2024-12-13 15:00:21,487 - root - INFO - TX Antennas: 4
+2024-12-13 15:00:21,488 - root - INFO - RX Antennas: 4
+2024-12-13 15:00:21,488 - root - INFO - Prepared output directory: dataset
+2024-12-13 15:00:21,759 - root - ERROR - Dataset generation failed: cannot compute NotEqual as input #1(zero-based) was expected to be a int32 tensor but is a float tensor [Op:NotEqual] name: 
+2024-12-13 15:00:21,760 - root - ERROR - Critical error during dataset generation: cannot compute NotEqual as input #1(zero-based) was expected to be a int32 tensor but is a float tensor [Op:NotEqual] name: 
+2024-12-13 15:00:21,760 - root - ERROR - Detailed error traceback:
+Traceback (most recent call last):
+  File "c:\Users\snatanzi\Desktop\5G-Sionna\Data\main.py", line 138, in main
+    generator.generate_dataset(
+  File "c:\Users\snatanzi\Desktop\5G-Sionna\Data\dataset_generator\mimo_dataset_generator.py", line 187, in generate_dataset
+    metrics = self.metrics_calculator.calculate_enhanced_metrics(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\snatanzi\Desktop\5G-Sionna\Data\core\metrics_calculator.py", line 161, in calculate_enhanced_metrics
+    ber = compute_ber(tx_bits, rx_bits_combined)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Python311\Lib\site-packages\sionna\utils\metrics.py", line 116, in compute_ber
+    ber = tf.not_equal(b, b_hat)
+          ^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Python311\Lib\site-packages\tensorflow\python\util\traceback_utils.py", line 153, in error_handler
+    raise e.with_traceback(filtered_tb) from None
+  File "c:\Python311\Lib\site-packages\tensorflow\python\framework\ops.py", line 5883, in raise_from_not_ok_status
+    raise core._status_to_exception(e) from None  # pylint: disable=protected-access
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tensorflow.python.framework.errors_impl.InvalidArgumentError: cannot compute NotEqual as input #1(zero-based) was expected to be a int32 tensor but is a float tensor [Op:NotEqual] name: 

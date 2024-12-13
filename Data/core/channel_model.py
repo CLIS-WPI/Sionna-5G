@@ -38,7 +38,7 @@ class ChannelModelManager:
 
         # Initialize stream management with correct parameters
         self.stream_management = StreamManagement(
-            num_streams_per_tx=[1],  # List with one element since we have one transmitter
+            num_streams_per_tx=1,  # Single integer value instead of a list
             rx_tx_association=rx_tx_association  # Required parameter showing which RX is associated with which TX
         )
     def generate_qam_symbols(self, batch_size: int, mod_scheme: str) -> tf.Tensor:
