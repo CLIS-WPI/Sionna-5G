@@ -29,12 +29,15 @@ class ChannelModelManager:
         self._setup_resource_grid()
         self._setup_channel_model()
         
-        # Initialize mapper and stream management
-        self.mapper = Mapper("qam")
+        # Initialize mapper with correct number of bits (default to QPSK)
+        self.mapper = Mapper("qam", num_bits_per_symbol=2)
+        
+        # Initialize stream management with correct parameters
         self.stream_management = StreamManagement(
-            num_tx=self.system_params.num_tx,
-            num_rx=self.system_params.num_rx,
-            num_streams_per_tx=1
+            num_streams_per_tx=1,  # Number of streams per transmitter
+            num_tx_ant=self.system_params.num_tx,  # Number of transmit antennas
+            num_rx_ant=self.system_params.num_rx,  # Number of receive antennas
+            dtype=tf.complex64
         )
 
     def generate_qam_symbols(self, batch_size: int, mod_scheme: str) -> tf.Tensor:
@@ -49,6 +52,9 @@ class ChannelModelManager:
         num_bits_per_symbol = int(np.log2(constellation_size))
         total_bits = batch_size * self.system_params.num_tx * num_bits_per_symbol
         
+        # Create a mapper with the correct number of bits per symbol
+        mapper = Mapper("qam", num_bits_per_symbol=num_bits_per_symbol)
+        
         # Generate random bits
         bits = tf.random.uniform(
             [total_bits], 
@@ -61,7 +67,7 @@ class ChannelModelManager:
         bits = tf.reshape(bits, [batch_size, self.system_params.num_tx, num_bits_per_symbol])
         
         # Map bits to QAM symbols
-        symbols = self.mapper(bits)
+        symbols = mapper(bits)
         
         # Reshape to match expected dimensions
         return tf.reshape(symbols, [batch_size, self.system_params.num_tx, 1])
