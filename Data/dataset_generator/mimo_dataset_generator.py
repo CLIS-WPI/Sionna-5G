@@ -76,7 +76,7 @@ class MIMODatasetGenerator:
             datasets = {
                 'channel_response': (samples_per_mod, self.system_params.num_rx, self.system_params.num_tx),
                 'sinr': (samples_per_mod,),
-                'spectral_efficiency': (samples_per_mod, self.system_params.num_rx),  # Updated shape
+                'spectral_efficiency': (samples_per_mod,),  # Changed from (samples_per_mod, self.system_params.num_rx)
                 'effective_snr': (samples_per_mod,),
                 'eigenvalues': (samples_per_mod, self.system_params.num_rx),
                 'ber': (samples_per_mod,),

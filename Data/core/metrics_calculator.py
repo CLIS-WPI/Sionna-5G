@@ -110,7 +110,7 @@ class MetricsCalculator:
         return {
             'sinr': tf.squeeze(sinr_db),
             'spectral_efficiency': spectral_efficiency,
-            'effective_snr': effective_snr_db,  # Now has shape [batch_size]
+            'effective_snr': tf.squeeze(effective_snr_db),  # Added squeeze to ensure 1D
             'eigenvalues': eigenvalues
         }
     
