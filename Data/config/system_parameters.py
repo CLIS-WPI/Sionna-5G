@@ -283,7 +283,7 @@ class SystemParameters:
         logging.info("System parameters updated successfully")
 
     # Factory methods remain the same
-    def create_default_system_parameters() -> SystemParameters:
+    def create_default_system_parameters() -> "SystemParameters":
         """
         Factory method to create default system parameters
         
@@ -297,7 +297,7 @@ class SystemParameters:
         num_rx: int = 4, 
         carrier_frequency: float = 3.5e9,
         **kwargs
-    ) -> SystemParameters:
+    ) -> "SystemParameters":
         """
         Create custom system parameters with flexible configuration
         
