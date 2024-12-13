@@ -13,6 +13,8 @@ from typing import Tuple, Optional, Dict
 from sionna.mapping import Mapper, QAMSource
 from config.system_parameters import SystemParameters
 from utill.tensor_shape_validator import assert_tensor_shape, normalize_complex_tensor
+from sionna.mapping import Mapper
+from sionna.mimo import StreamManagement
 
 class ChannelModelManager:
     """
@@ -36,9 +38,14 @@ class ChannelModelManager:
         self._setup_antenna_arrays()
         self._setup_resource_grid()
         self._setup_channel_model()
-        # Add QAM source and mapper initialization
-        self.qam_source = None  # Will be set dynamically
+        
+        # Initialize mapper and stream management
         self.mapper = Mapper("qam")
+        self.stream_management = StreamManagement(
+            num_tx=self.system_params.num_tx,
+            num_rx=self.system_params.num_rx,
+            num_streams_per_tx=1
+        )
 
     def generate_qam_symbols(self, batch_size: int, mod_scheme: str) -> tf.Tensor:
         """
@@ -51,21 +58,33 @@ class ChannelModelManager:
         Returns:
             tf.Tensor: Generated QAM symbols
         """
-        # Determine bits per symbol based on modulation scheme
-        bits_per_symbol = {
-            'QPSK': 2,
-            '16QAM': 4,
-            '64QAM': 6
-        }.get(mod_scheme, 2)  # Default to QPSK if unknown
+        # Determine constellation size based on modulation scheme
+        constellation_size = {
+            'QPSK': 4,
+            '16QAM': 16,
+            '64QAM': 64
+        }.get(mod_scheme, 4)  # Default to QPSK if unknown
         
-        # Create or update QAM source if needed
-        self.qam_source = QAMSource(
-            num_bits_per_symbol=bits_per_symbol,
-            dtype=tf.complex64
+        # Calculate bits per symbol
+        num_bits_per_symbol = int(np.log2(constellation_size))
+        total_bits = batch_size * self.system_params.num_tx * num_bits_per_symbol
+        
+        # Generate random bits
+        bits = tf.random.uniform(
+            [total_bits], 
+            minval=0, 
+            maxval=2, 
+            dtype=tf.int32
         )
         
-        # Generate symbols
-        return self.qam_source([batch_size, self.system_params.num_tx, 1])
+        # Reshape bits for mapping
+        bits = tf.reshape(bits, [batch_size, self.system_params.num_tx, num_bits_per_symbol])
+        
+        # Map bits to QAM symbols
+        symbols = self.mapper(bits)
+        
+        # Reshape to match expected dimensions
+        return tf.reshape(symbols, [batch_size, self.system_params.num_tx, 1])
         
     def _setup_antenna_arrays(self) -> None:
         """
