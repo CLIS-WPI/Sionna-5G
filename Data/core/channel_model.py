@@ -34,9 +34,9 @@ class ChannelModelManager:
         
         # Initialize stream management with correct parameters
         self.stream_management = StreamManagement(
-            num_streams_per_tx=1,  # Number of streams per transmitter
-            num_tx_ant=self.system_params.num_tx,  # Number of transmit antennas
-            num_rx_ant=self.system_params.num_rx,  # Number of receive antennas
+            num_streams=1,  # Number of streams
+            num_tx=self.system_params.num_tx,  # Number of transmit antennas
+            num_rx=self.system_params.num_rx,  # Number of receive antennas
             dtype=tf.complex64
         )
 
