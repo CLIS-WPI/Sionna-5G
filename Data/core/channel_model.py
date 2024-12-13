@@ -10,10 +10,9 @@ from sionna.channel import RayleighBlockFading
 from sionna.channel.tr38901 import AntennaArray
 from sionna.ofdm import ResourceGrid
 from typing import Tuple, Optional, Dict
-from sionna.mapping import Mapper, QAMSource
+from sionna.mapping import Mapper
 from config.system_parameters import SystemParameters
 from utill.tensor_shape_validator import assert_tensor_shape, normalize_complex_tensor
-from sionna.mapping import Mapper
 from sionna.mimo import StreamManagement
 
 class ChannelModelManager:
@@ -57,7 +56,7 @@ class ChannelModelManager:
             maxval=2, 
             dtype=tf.int32
         )
-    
+
         # Reshape bits for mapping
         bits = tf.reshape(bits, [batch_size, self.system_params.num_tx, num_bits_per_symbol])
         
