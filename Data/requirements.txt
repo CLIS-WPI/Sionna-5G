@@ -1,0 +1,30 @@
+# Core Scientific Computing and Deep Learning
+numpy>=1.22.0,<2.0.0
+tensorflow>=2.13.0,<2.16.0
+tensorflow-probability>=0.20.0,<0.21.0
+
+# Wireless Communication Simulation
+sionna>=0.15.0,<0.16.0
+
+# Data Handling and Visualization
+h5py>=3.7.0,<4.0.0
+scipy>=1.9.0,<2.0.0
+matplotlib>=3.6.0,<4.0.0
+
+# Progress Tracking and Logging
+tqdm>=4.64.0,<5.0.0
+
+# Optional: Machine Learning and Statistical Analysis
+scikit-learn>=1.1.0,<2.0.0
+
+# Development Tools (optional, for contributors)
+pytest>=7.1.0,<8.0.0
+flake8>=4.0.0,<5.0.0
+black>=22.3.0,<23.0.0
+mypy>=0.971,<1.0.0
+sphinx>=5.0.0,<6.0.0
+
+# GPU Support (optional)
+tensorflow-gpu>=2.13.0,<2.16.0
+cuda-toolkit>=11.8,<12.0
+cudnn>=8.6,<9.0
