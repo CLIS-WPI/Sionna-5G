@@ -56,17 +56,9 @@ class MIMODatasetGenerator:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         self.logger.info(f"Prepared output directory: {os.path.dirname(save_path)}")
     
-    def _create_dataset_structure(
-        self, 
-        hdf5_file, 
-        num_samples: int
-    ):
+    def _create_dataset_structure(self, hdf5_file, num_samples: int):
         """
         Create HDF5 dataset structure
-        
-        Args:
-            hdf5_file (h5py.File): HDF5 file object
-            num_samples (int): Total number of samples
         """
         # Samples per modulation scheme
         samples_per_mod = num_samples // len(self.system_params.modulation_schemes)
@@ -84,7 +76,7 @@ class MIMODatasetGenerator:
             datasets = {
                 'channel_response': (samples_per_mod, self.system_params.num_rx, self.system_params.num_tx),
                 'sinr': (samples_per_mod,),
-                'spectral_efficiency': (samples_per_mod,),
+                'spectral_efficiency': (samples_per_mod, self.system_params.num_rx),  # Updated shape
                 'effective_snr': (samples_per_mod,),
                 'eigenvalues': (samples_per_mod, self.system_params.num_rx),
                 'ber': (samples_per_mod,),
