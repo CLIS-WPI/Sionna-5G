@@ -32,12 +32,15 @@ class ChannelModelManager:
         # Initialize mapper with correct number of bits (default to QPSK)
         self.mapper = Mapper("qam", num_bits_per_symbol=2)
 
-        # Initialize stream management with minimal parameters
-        self.stream_management = StreamManagement(
-            num_streams_per_tx=1,  # Number of streams per transmitter
-            dtype=tf.complex64
-        )
+        # Initialize stream management with correct parameters
+        # Create rx_tx_association matrix: each receiver is associated with transmitter 0
+        rx_tx_association = [[0] for _ in range(self.system_params.num_rx)]
 
+        # Initialize stream management with correct parameters
+        self.stream_management = StreamManagement(
+            num_streams_per_tx=[1],  # List with one element since we have one transmitter
+            rx_tx_association=rx_tx_association  # Required parameter showing which RX is associated with which TX
+        )
     def generate_qam_symbols(self, batch_size: int, mod_scheme: str) -> tf.Tensor:
         # Determine constellation size based on modulation scheme
         constellation_size = {

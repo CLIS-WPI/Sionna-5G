@@ -1,0 +1,16 @@
+2024-12-13 14:56:33,446 - root - INFO - Global seeds set successfully with seed: 42
+2024-12-13 14:56:33,831 - tensorflow - WARNING - From c:\Python311\Lib\site-packages\keras\src\backend.py:873: The name tf.get_default_graph is deprecated. Please use tf.compat.v1.get_default_graph instead.
+
+2024-12-13 14:56:33,930 - root - ERROR - Critical error during dataset generation: StreamManagement.__init__() missing 1 required positional argument: 'rx_tx_association'
+2024-12-13 14:56:33,930 - root - ERROR - Detailed error traceback:
+Traceback (most recent call last):
+  File "c:\Users\snatanzi\Desktop\5G-Sionna\Data\main.py", line 125, in main
+    generator = MIMODatasetGenerator(
+                ^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\snatanzi\Desktop\5G-Sionna\Data\dataset_generator\mimo_dataset_generator.py", line 45, in __init__
+    self.channel_model = ChannelModelManager(self.system_params)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\snatanzi\Desktop\5G-Sionna\Data\core\channel_model.py", line 36, in __init__
+    self.stream_management = StreamManagement(
+                             ^^^^^^^^^^^^^^^^^
+TypeError: StreamManagement.__init__() missing 1 required positional argument: 'rx_tx_association'
