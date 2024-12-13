@@ -28,7 +28,7 @@ class MetricsCalculator:
             system_params (Optional[SystemParameters]): System configuration
         """
         self.system_params = system_params or SystemParameters()
-    
+
     def calculate_performance_metrics(
         self, 
         channel_response: tf.Tensor, 
@@ -97,7 +97,8 @@ class MetricsCalculator:
         # Effective SNR calculation
         snr_linear_expanded = tf.expand_dims(snr_linear, axis=1)
         eigenvalues_snr = eigenvalues * snr_linear_expanded
-        effective_snr = tf.reduce_mean(eigenvalues_snr, axis=1)
+        # Take mean across antenna dimension to get single value per sample
+        effective_snr = tf.reduce_mean(eigenvalues_snr, axis=1)  # Shape: [batch_size]
         effective_snr_db = 10.0 * tf.math.log(effective_snr) / tf.math.log(10.0)
         
         # Spectral efficiency calculation
@@ -109,7 +110,7 @@ class MetricsCalculator:
         return {
             'sinr': tf.squeeze(sinr_db),
             'spectral_efficiency': spectral_efficiency,
-            'effective_snr': effective_snr_db,
+            'effective_snr': effective_snr_db,  # Now has shape [batch_size]
             'eigenvalues': eigenvalues
         }
     
