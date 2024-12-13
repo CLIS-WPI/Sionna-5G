@@ -122,40 +122,37 @@ class MetricsCalculator:
     ) -> Dict[str, Any]:
         """
         Calculate advanced metrics including Bit Error Rate (BER) and throughput
-        
-        Args:
-            channel_response (tf.Tensor): MIMO channel matrix
-            tx_symbols (tf.Tensor): Transmitted symbols
-            rx_symbols (tf.Tensor): Received symbols
-            snr_db (tf.Tensor): Signal-to-Noise Ratio in dB
-        
-        Returns:
-            Dict[str, Any]: Enhanced performance metrics
         """
         # Calculate base performance metrics
         base_metrics = self.calculate_performance_metrics(
             channel_response, tx_symbols, rx_symbols, snr_db
         )
         
-        # Generate tx bits (assuming QPSK modulation)
+        # Generate tx bits (ensuring int32 type)
         batch_size = tf.shape(channel_response)[0]
         bits_per_symbol = 2  # QPSK
         total_bits = self.system_params.num_tx * bits_per_symbol
-        tx_bits = tf.random.uniform(
-            [batch_size, total_bits], 
-            minval=0, 
-            maxval=2, 
+        tx_bits = tf.cast(
+            tf.random.uniform(
+                [batch_size, total_bits], 
+                minval=0, 
+                maxval=2
+            ),
             dtype=tf.int32
         )
         
         # Process received symbols for BER calculation
-        rx_real = tf.sign(tf.math.real(rx_symbols))
-        rx_imag = tf.sign(tf.math.imag(rx_symbols))
+        # Convert complex symbols to bits (ensuring int32 type)
+        rx_real = tf.cast(tf.sign(tf.math.real(rx_symbols)) > 0, tf.int32)
+        rx_imag = tf.cast(tf.sign(tf.math.imag(rx_symbols)) > 0, tf.int32)
         
-        rx_bits_combined = tf.concat([
-            tf.reshape(rx_real, [batch_size, -1]),
-            tf.reshape(rx_imag, [batch_size, -1])
-        ], axis=1)
+        rx_bits_combined = tf.cast(
+            tf.concat([
+                tf.reshape(rx_real, [batch_size, -1]),
+                tf.reshape(rx_imag, [batch_size, -1])
+            ], axis=1),
+            dtype=tf.int32
+        )
         
         # Calculate Bit Error Rate (BER)
         ber = compute_ber(tx_bits, rx_bits_combined)
@@ -172,7 +169,7 @@ class MetricsCalculator:
             **base_metrics,
             'ber': ber,
             'throughput': throughput,
-            'inference_time': 0.0  # Placeholder for future timing
+            'inference_time': 0.0
         }
     
     def calculate_ber(
