@@ -1,6 +1,14 @@
-*.xlsx  # Ignore all Excel files
-__pycache__/  # Ignore Python cache files
-*.log  # Ignore log files
 # Ignore all datasets
 Data/dataset/
+
+# Ignore virtual environments
+sionna_env/
+
+# Ignore Python cache
+__pycache__/
+*.pyc
+
+# Ignore large files
 *.h5
+*.log
+*.xlsx  # Ignore all Excel files
