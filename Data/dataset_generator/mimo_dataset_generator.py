@@ -179,11 +179,17 @@ class MIMODatasetGenerator:
                         metrics = self.metrics_calculator.calculate_enhanced_metrics(
                             h_with_pl, tx_symbols, rx_symbols, snr_db
                         )
-                        
+
+                        # Debug shapes
+                        print(f"Effective SNR shape: {metrics['effective_snr'].shape}")
+                        print(f"Target dataset shape: {mod_group['effective_snr'][start_idx:end_idx].shape}")
+
                         # Save data to HDF5
                         mod_group['channel_response'][start_idx:end_idx] = h_with_pl.numpy()
                         mod_group['sinr'][start_idx:end_idx] = metrics['sinr'].numpy()
                         mod_group['spectral_efficiency'][start_idx:end_idx] = metrics['spectral_efficiency'].numpy()
+                        print(f"Effective SNR shape: {metrics['effective_snr'].shape}")
+                        print(f"Target dataset shape: {mod_group['effective_snr'][start_idx:end_idx].shape}")
                         mod_group['effective_snr'][start_idx:end_idx] = metrics['effective_snr'].numpy()
                         mod_group['eigenvalues'][start_idx:end_idx] = metrics['eigenvalues'].numpy()
                         mod_group['ber'][start_idx:end_idx] = metrics['ber']
