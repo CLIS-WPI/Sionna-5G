@@ -8,7 +8,7 @@ import h5py
 import numpy as np
 import tensorflow as tf
 from tqdm import tqdm
-
+import datetime
 from config.system_parameters import SystemParameters
 from core.channel_model import ChannelModelManager
 from core.metrics_calculator import MetricsCalculator
@@ -58,164 +58,151 @@ class MIMODatasetGenerator:
     
     def _create_dataset_structure(self, hdf5_file, num_samples: int):
         """
-        Create HDF5 dataset structure
-        """
-        # Samples per modulation scheme
-        samples_per_mod = num_samples // len(self.system_params.modulation_schemes)
-        
-        # Create groups
-        modulation_data = hdf5_file.create_group('modulation_data')
-        path_loss_data = hdf5_file.create_group('path_loss_data')
-        config_data = hdf5_file.create_group('configuration')
-        
-        # Create datasets for each modulation scheme
-        for mod_scheme in self.system_params.modulation_schemes:
-            mod_group = modulation_data.create_group(mod_scheme)
-            
-            # Channel and metrics datasets
-            datasets = {
-                'channel_response': (samples_per_mod, self.system_params.num_rx, self.system_params.num_tx),
-                'sinr': (samples_per_mod,),
-                'spectral_efficiency': (samples_per_mod,),  # Changed from (samples_per_mod, self.system_params.num_rx)
-                'effective_snr': (samples_per_mod,),
-                'eigenvalues': (samples_per_mod, self.system_params.num_rx),
-                'ber': (samples_per_mod,),
-                'throughput': (samples_per_mod,),
-                'inference_time': (samples_per_mod,)
-            }
-            
-            for name, shape in datasets.items():
-                mod_group.create_dataset(
-                    name, 
-                    shape=shape, 
-                    dtype=np.float32 if name != 'channel_response' else np.complex64
-                )
-        
-        # Path loss datasets
-        path_loss_data.create_dataset('fspl', shape=(num_samples,), dtype=np.float32)
-        path_loss_data.create_dataset('scenario_pathloss', shape=(num_samples,), dtype=np.float32)
-        
-        # Store configuration parameters
-        for key, value in self.system_params.get_config_dict().items():
-            config_data.attrs[key] = str(value)
-    
-    def generate_dataset(
-        self, 
-        num_samples: int, 
-        save_path: str = 'dataset/mimo_dataset.h5'
-    ):
-        """
-        Generate comprehensive MIMO dataset
+        Create HDF5 dataset structure with comprehensive validation and documentation
         
         Args:
+            hdf5_file: HDF5 file object to create datasets in
             num_samples (int): Total number of samples to generate
-            save_path (str): Path to save HDF5 dataset
+            
+        Raises:
+            ValueError: If num_samples is not positive or not divisible by number of modulation schemes
+            RuntimeError: If HDF5 group creation fails
         """
         try:
-            # Prepare output directory
-            self._prepare_output_directory(save_path)
+            # Validate input parameters
+            if num_samples <= 0:
+                raise ValueError("Number of samples must be positive")
             
-            # Batch size and samples per modulation
-            batch_size = min(4096, num_samples)
+            if len(self.system_params.modulation_schemes) == 0:
+                raise ValueError("No modulation schemes specified")
+                
+            # Calculate samples per modulation scheme
             samples_per_mod = num_samples // len(self.system_params.modulation_schemes)
-            
-            # Create HDF5 file
-            with h5py.File(save_path, 'w') as f:
-                # Create dataset structure
-                self._create_dataset_structure(f, num_samples)
-                
-                # Progress tracking
-                total_progress = tqdm(
-                    total=num_samples, 
-                    desc="Total Dataset Generation", 
-                    unit="samples"
+            if samples_per_mod * len(self.system_params.modulation_schemes) != num_samples:
+                self.logger.warning(
+                    f"Total samples {num_samples} not exactly divisible by number of "
+                    f"modulation schemes {len(self.system_params.modulation_schemes)}. "
+                    f"Using {samples_per_mod} samples per modulation."
                 )
-                
-                # Generate data for each modulation scheme
-                for mod_scheme in self.system_params.modulation_schemes:
-                    mod_group = f['modulation_data'][mod_scheme]
-                    
-                    mod_progress = tqdm(
-                        total=samples_per_mod, 
-                        desc=f"{mod_scheme} Generation", 
-                        unit="samples", 
-                        leave=False
-                    )
-                    
-                    # Iterate through batches
-                    for batch_idx in range(samples_per_mod // batch_size):
-                        start_idx = batch_idx * batch_size
-                        end_idx = start_idx + batch_size
-                        
-                        # Generate random distances
-                        distances = tf.random.uniform(
-                            [batch_size], 10.0, 500.0
-                        )
-                        
-                        # Generate random SNR
-                        snr_db = tf.random.uniform(
-                            [batch_size], 
-                            self.system_params.snr_range[0], 
-                            self.system_params.snr_range[1]
-                        )
-                        
-                        # Generate channel samples
-                        h_perfect, h_noisy = self.channel_model.generate_channel_samples(
-                            batch_size, snr_db
-                        )
-                        
-                        # Apply path loss
-                        h_with_pl = self.path_loss_manager.apply_path_loss(
-                            h_perfect, distances
-                        )
-                        
-                        # Generate symbols
-                        tx_symbols = self.channel_model.generate_qam_symbols(batch_size, mod_scheme)
-                        
-                        # Simulate transmission
-                        rx_symbols = tf.matmul(h_with_pl, tx_symbols)
-                        
-                        # Calculate metrics
-                        metrics = self.metrics_calculator.calculate_enhanced_metrics(
-                            h_with_pl, tx_symbols, rx_symbols, snr_db
-                        )
 
-                        # Debug shapes
-                        print(f"Effective SNR shape: {metrics['effective_snr'].shape}")
-                        print(f"Target dataset shape: {mod_group['effective_snr'][start_idx:end_idx].shape}")
-
-                        # Save data to HDF5
-                        mod_group['channel_response'][start_idx:end_idx] = h_with_pl.numpy()
-                        mod_group['sinr'][start_idx:end_idx] = metrics['sinr'].numpy()
-                        mod_group['spectral_efficiency'][start_idx:end_idx] = metrics['spectral_efficiency'].numpy()
-                        print(f"Effective SNR shape: {metrics['effective_snr'].shape}")
-                        print(f"Target dataset shape: {mod_group['effective_snr'][start_idx:end_idx].shape}")
-                        mod_group['effective_snr'][start_idx:end_idx] = metrics['effective_snr'].numpy()
-                        mod_group['eigenvalues'][start_idx:end_idx] = metrics['eigenvalues'].numpy()
-                        mod_group['ber'][start_idx:end_idx] = metrics['ber']
-                        mod_group['throughput'][start_idx:end_idx] = metrics['throughput']
-                        
-                        # Save path loss data
-                        f['path_loss_data']['fspl'][start_idx:end_idx] = (
-                            self.path_loss_manager.calculate_free_space_path_loss(distances).numpy()
-                        )
-                        f['path_loss_data']['scenario_pathloss'][start_idx:end_idx] = (
-                            self.path_loss_manager.calculate_path_loss(distances).numpy()
-                        )
-                        
-                        # Update progress
-                        mod_progress.update(batch_size)
-                        total_progress.update(batch_size)
-                    
-                    mod_progress.close()
-                
-                total_progress.close()
+            # Create main groups with descriptions
+            modulation_data = hdf5_file.create_group('modulation_data')
+            modulation_data.attrs['description'] = 'Contains data for different modulation schemes'
             
-            self.logger.info(f"Dataset successfully generated at {save_path}")
-        
+            path_loss_data = hdf5_file.create_group('path_loss_data')
+            path_loss_data.attrs['description'] = 'Path loss measurements and calculations'
+            
+            config_data = hdf5_file.create_group('configuration')
+            config_data.attrs['description'] = 'System configuration parameters'
+            
+            # Add metadata
+            config_data.attrs.update({
+                'creation_date': datetime.now().isoformat(),
+                'total_samples': num_samples,
+                'samples_per_modulation': samples_per_mod,
+                'num_tx_antennas': self.system_params.num_tx,
+                'num_rx_antennas': self.system_params.num_rx
+            })
+
+            # Define dataset descriptions
+            dataset_descriptions = {
+                'channel_response': 'Complex MIMO channel matrix response',
+                'sinr': 'Signal-to-Interference-plus-Noise Ratio in dB',
+                'spectral_efficiency': 'Spectral efficiency in bits/s/Hz',
+                'effective_snr': 'Effective Signal-to-Noise Ratio in dB',
+                'eigenvalues': 'Eigenvalues of the channel matrix',
+                'ber': 'Bit Error Rate',
+                'throughput': 'System throughput in bits/s',
+                'inference_time': 'Processing time for inference'
+            }
+
+            # Create datasets for each modulation scheme
+            for mod_scheme in self.system_params.modulation_schemes:
+                mod_group = modulation_data.create_group(mod_scheme)
+                mod_group.attrs['description'] = f'Data for {mod_scheme} modulation'
+                
+                # Channel and metrics datasets with proper dtypes
+                datasets = {
+                    'channel_response': {
+                        'shape': (samples_per_mod, self.system_params.num_rx, self.system_params.num_tx),
+                        'dtype': np.complex64
+                    },
+                    'sinr': {
+                        'shape': (samples_per_mod,),
+                        'dtype': np.float32
+                    },
+                    'spectral_efficiency': {
+                        'shape': (samples_per_mod,),
+                        'dtype': np.float32
+                    },
+                    'effective_snr': {
+                        'shape': (samples_per_mod,),
+                        'dtype': np.float32
+                    },
+                    'eigenvalues': {
+                        'shape': (samples_per_mod, self.system_params.num_rx),
+                        'dtype': np.float32
+                    },
+                    'ber': {
+                        'shape': (samples_per_mod,),
+                        'dtype': np.float32
+                    },
+                    'throughput': {
+                        'shape': (samples_per_mod,),
+                        'dtype': np.float32
+                    },
+                    'inference_time': {
+                        'shape': (samples_per_mod,),
+                        'dtype': np.float32
+                    }
+                }
+                
+                # Create datasets with descriptions and chunking
+                for name, config in datasets.items():
+                    dataset = mod_group.create_dataset(
+                        name,
+                        shape=config['shape'],
+                        dtype=config['dtype'],
+                        chunks=True,  # Enable chunking for better I/O performance
+                        compression='gzip',  # Enable compression
+                        compression_opts=4  # Compression level
+                    )
+                    # Add description
+                    dataset.attrs['description'] = dataset_descriptions[name]
+                    dataset.attrs['units'] = self._get_dataset_units(name)
+
+            # Create path loss datasets
+            for name in ['fspl', 'scenario_pathloss']:
+                dataset = path_loss_data.create_dataset(
+                    name,
+                    shape=(num_samples,),
+                    dtype=np.float32,
+                    chunks=True,
+                    compression='gzip'
+                )
+                dataset.attrs['description'] = f'{name.upper()} measurements'
+                dataset.attrs['units'] = 'dB'
+
+            self.logger.info("Dataset structure created successfully")
+            
         except Exception as e:
-            self.logger.error(f"Dataset generation failed: {e}")
+            self.logger.error(f"Failed to create dataset structure: {str(e)}")
             raise
+
+    def _get_dataset_units(self, dataset_name: str) -> str:
+        """Helper method to return appropriate units for each dataset type"""
+        units_map = {
+            'channel_response': 'complex',
+            'sinr': 'dB',
+            'spectral_efficiency': 'bits/s/Hz',
+            'effective_snr': 'dB',
+            'eigenvalues': 'linear',
+            'ber': 'ratio',
+            'throughput': 'bits/s',
+            'inference_time': 'seconds'
+        }
+        return units_map.get(dataset_name, 'dimensionless')
+
     
     def verify_dataset(self, save_path: str):
         """
