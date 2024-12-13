@@ -23,20 +23,18 @@ class ChannelModelManager:
     def __init__(self, system_params: Optional[SystemParameters] = None):
         # Use default parameters if not provided
         self.system_params = system_params or SystemParameters()
-        
+
         # Initialize channel components
         self._setup_antenna_arrays()
         self._setup_resource_grid()
         self._setup_channel_model()
-        
+
         # Initialize mapper with correct number of bits (default to QPSK)
         self.mapper = Mapper("qam", num_bits_per_symbol=2)
-        
-        # Initialize stream management with correct parameters
+
+        # Initialize stream management with minimal parameters
         self.stream_management = StreamManagement(
-            num_streams=1,  # Number of streams
-            num_tx=self.system_params.num_tx,  # Number of transmit antennas
-            num_rx=self.system_params.num_rx,  # Number of receive antennas
+            num_streams_per_tx=1,  # Number of streams per transmitter
             dtype=tf.complex64
         )
 
