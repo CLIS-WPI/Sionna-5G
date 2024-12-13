@@ -1,0 +1,30 @@
+2024-12-13 12:44:49,889 - root - INFO - Global seeds set successfully with seed: 42
+2024-12-13 12:44:50,394 - tensorflow - WARNING - From c:\Python311\Lib\site-packages\keras\src\backend.py:873: The name tf.get_default_graph is deprecated. Please use tf.compat.v1.get_default_graph instead.
+
+2024-12-13 12:44:50,580 - root - INFO - Starting MIMO dataset generation
+2024-12-13 12:44:50,581 - root - INFO - Total samples: 1000000
+2024-12-13 12:44:50,581 - root - INFO - Output path: dataset/mimo_dataset_20241213_124449.h5
+2024-12-13 12:44:50,581 - root - INFO - TX Antennas: 4
+2024-12-13 12:44:50,582 - root - INFO - RX Antennas: 4
+2024-12-13 12:44:50,582 - root - INFO - Prepared output directory: dataset
+2024-12-13 12:44:50,608 - root - ERROR - Dataset generation failed: cannot compute AddV2 as input #1(zero-based) was expected to be a float tensor but is a complex64 tensor [Op:AddV2] name: 
+2024-12-13 12:44:50,608 - root - ERROR - Critical error during dataset generation: cannot compute AddV2 as input #1(zero-based) was expected to be a float tensor but is a complex64 tensor [Op:AddV2] name: 
+2024-12-13 12:44:50,609 - root - ERROR - Detailed error traceback:
+Traceback (most recent call last):
+  File "c:\Users\snatanzi\Desktop\5G-Sionna\Data\main.py", line 138, in main
+    generator.generate_dataset(
+  File "c:\Users\snatanzi\Desktop\5G-Sionna\Data\dataset_generator\mimo_dataset_generator.py", line 171, in generate_dataset
+    h_perfect, h_noisy = self.channel_model.generate_channel_samples(
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\snatanzi\Desktop\5G-Sionna\Data\core\channel_model.py", line 133, in generate_channel_samples
+    h_normalized = normalize_complex_tensor(h)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\snatanzi\Desktop\5G-Sionna\Data\utill\tensor_shape_validator.py", line 121, in normalize_complex_tensor
+    return tensor / (norm_factor + tf.complex(1e-10, 0.0))
+                     ~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~
+  File "c:\Python311\Lib\site-packages\tensorflow\python\util\traceback_utils.py", line 153, in error_handler
+    raise e.with_traceback(filtered_tb) from None
+  File "c:\Python311\Lib\site-packages\tensorflow\python\framework\ops.py", line 5883, in raise_from_not_ok_status
+    raise core._status_to_exception(e) from None  # pylint: disable=protected-access
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tensorflow.python.framework.errors_impl.InvalidArgumentError: cannot compute AddV2 as input #1(zero-based) was expected to be a float tensor but is a complex64 tensor [Op:AddV2] name: 

@@ -71,21 +71,16 @@ class SystemParameters:
     ):
         """
         Flexible initialization method
-        
-        Args:
-            num_tx (int): Number of transmit antennas
-            num_rx (int): Number of receive antennas
-            total_samples (int): Total number of samples
-            **kwargs: Additional configuration parameters
         """
         # Initialize default values from dataclass fields
         for field in dataclasses.fields(self):
-            default_value = field.default
             if isinstance(field.default, dataclasses._MISSING_TYPE):
                 if field.default_factory is not dataclasses.MISSING:
-                    efault_value = field.default_factory()
+                    default_value = field.default_factory()
+                else:
+                    default_value = None
             else:
-                default_value = None
+                default_value = field.default
             object.__setattr__(self, field.name, default_value)
 
         # Set basic parameters
@@ -102,7 +97,6 @@ class SystemParameters:
 
         # Call post-initialization
         self.__post_init__()
-
     def _validate_parameters(self):
         """
         Rigorously validate system parameters for consistency and physical plausibility
