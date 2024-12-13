@@ -21,16 +21,7 @@ class ChannelModelManager:
     Advanced channel model management for MIMO communication systems
     """
     
-    def __init__(
-        self, 
-        system_params: Optional[SystemParameters] = None
-    ):
-        """
-        Initialize channel model with system parameters
-        
-        Args:
-            system_params (Optional[SystemParameters]): System configuration
-        """
+    def __init__(self, system_params: Optional[SystemParameters] = None):
         # Use default parameters if not provided
         self.system_params = system_params or SystemParameters()
         
@@ -48,16 +39,6 @@ class ChannelModelManager:
         )
 
     def generate_qam_symbols(self, batch_size: int, mod_scheme: str) -> tf.Tensor:
-        """
-        Generate QAM symbols based on modulation scheme
-        
-        Args:
-            batch_size (int): Number of samples to generate
-            mod_scheme (str): Modulation scheme (e.g., 'QPSK', '16QAM', '64QAM')
-        
-        Returns:
-            tf.Tensor: Generated QAM symbols
-        """
         # Determine constellation size based on modulation scheme
         constellation_size = {
             'QPSK': 4,
@@ -76,7 +57,7 @@ class ChannelModelManager:
             maxval=2, 
             dtype=tf.int32
         )
-        
+    
         # Reshape bits for mapping
         bits = tf.reshape(bits, [batch_size, self.system_params.num_tx, num_bits_per_symbol])
         
