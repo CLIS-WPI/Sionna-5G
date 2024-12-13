@@ -78,6 +78,16 @@ class SystemParameters:
             total_samples (int): Total number of samples
             **kwargs: Additional configuration parameters
         """
+        # Initialize default values from dataclass fields
+        for field in dataclasses.fields(self):
+            default_value = field.default
+            if isinstance(field.default, dataclasses._MISSING_TYPE):
+                if field.default_factory is not dataclasses.MISSING:
+                    efault_value = field.default_factory()
+            else:
+                default_value = None
+            object.__setattr__(self, field.name, default_value)
+
         # Set basic parameters
         object.__setattr__(self, 'num_tx', num_tx)
         object.__setattr__(self, 'num_rx', num_rx)
