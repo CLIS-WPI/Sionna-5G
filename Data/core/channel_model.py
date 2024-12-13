@@ -10,7 +10,7 @@ from sionna.channel import RayleighBlockFading
 from sionna.channel.tr38901 import AntennaArray
 from sionna.ofdm import ResourceGrid
 from typing import Tuple, Optional, Dict
-
+from sionna.mapping import Mapper, QAMSource
 from config.system_parameters import SystemParameters
 from utill.tensor_shape_validator import assert_tensor_shape, normalize_complex_tensor
 
@@ -36,7 +36,37 @@ class ChannelModelManager:
         self._setup_antenna_arrays()
         self._setup_resource_grid()
         self._setup_channel_model()
-    
+        # Add QAM source and mapper initialization
+        self.qam_source = None  # Will be set dynamically
+        self.mapper = Mapper("qam")
+
+    def generate_qam_symbols(self, batch_size: int, mod_scheme: str) -> tf.Tensor:
+        """
+        Generate QAM symbols based on modulation scheme
+        
+        Args:
+            batch_size (int): Number of samples to generate
+            mod_scheme (str): Modulation scheme (e.g., 'QPSK', '16QAM', '64QAM')
+        
+        Returns:
+            tf.Tensor: Generated QAM symbols
+        """
+        # Determine bits per symbol based on modulation scheme
+        bits_per_symbol = {
+            'QPSK': 2,
+            '16QAM': 4,
+            '64QAM': 6
+        }.get(mod_scheme, 2)  # Default to QPSK if unknown
+        
+        # Create or update QAM source if needed
+        self.qam_source = QAMSource(
+            num_bits_per_symbol=bits_per_symbol,
+            dtype=tf.complex64
+        )
+        
+        # Generate symbols
+        return self.qam_source([batch_size, self.system_params.num_tx, 1])
+        
     def _setup_antenna_arrays(self) -> None:
         """
         Configure antenna arrays for transmitter and receiver

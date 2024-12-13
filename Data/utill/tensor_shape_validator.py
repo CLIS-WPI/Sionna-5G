@@ -117,8 +117,12 @@ def normalize_complex_tensor(
     # Compute normalization factor
     norm_factor = tf.reduce_mean(magnitude, axis=axis, keepdims=True)
     
-    # Avoid division by zero
-    return tensor / (norm_factor + tf.complex(1e-10, 0.0))
+    # Convert norm_factor to complex before adding epsilon
+    norm_factor = tf.cast(norm_factor, dtype=tf.complex64)
+    epsilon = tf.complex(1e-10, 0.0)
+    
+    # Avoid division by zero with complex epsilon
+    return tensor / (norm_factor + epsilon)
 
 def validate_tensor_properties(
     tensor: tf.Tensor, 

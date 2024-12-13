@@ -178,9 +178,7 @@ class MIMODatasetGenerator:
                         )
                         
                         # Generate symbols
-                        tx_symbols = self.channel_model.resource_grid.qam_source(
-                            num_bits_per_symbol=2*(mod_scheme.count('16')*2 + mod_scheme.count('64')*3)
-                        )([batch_size, self.system_params.num_tx, 1])
+                        tx_symbols = self.channel_model.generate_qam_symbols(batch_size, mod_scheme)
                         
                         # Simulate transmission
                         rx_symbols = tf.matmul(h_with_pl, tx_symbols)
