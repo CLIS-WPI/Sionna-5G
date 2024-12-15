@@ -84,10 +84,10 @@ class MetricsCalculator:
         signal = tf.matmul(H, tx_symbols)
         
         # Signal power calculation
-        signal_power = tf.reduce_mean(tf.abs(signal) ** 2, axis=[1, 2])
+        signal_power = tf.reduce_mean(tf.abs(rx_symbols)**2, axis=-1)
         
         # Noise power calculation
-        noise_power = 1.0 / tf.squeeze(snr_linear)
+        noise_power = signal_power / tf.pow(10.0, snr_db/10.0)
         
         # SINR calculation
         sinr = signal_power / noise_power
@@ -98,9 +98,8 @@ class MetricsCalculator:
         snr_linear_expanded = tf.expand_dims(snr_linear, axis=1)
         eigenvalues_snr = eigenvalues * snr_linear_expanded
         # Take mean across antenna dimension to get single value per sample
-        effective_snr = tf.reduce_mean(eigenvalues_snr, axis=1)  # Shape: [batch_size]
+        effective_snr = 10 * tf.math.log(signal_power/noise_power) / tf.math.log(10.0)
         effective_snr_db = 10.0 * tf.math.log(effective_snr) / tf.math.log(10.0)
-        
         # Spectral efficiency calculation
         spectral_efficiency = tf.reduce_sum(
             tf.math.log(1.0 + eigenvalues * snr_linear_expanded) / tf.math.log(2.0),

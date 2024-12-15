@@ -156,7 +156,7 @@ class ChannelModelManager:
             mean=0.0, 
             stddev=1.0
         )
-        h = tf.complex(h_real, h_imag)
+        h = self.channel_model.generate()
         
         # Validate tensor shapes
         h = assert_tensor_shape(
@@ -166,7 +166,7 @@ class ChannelModelManager:
         )
         
         # Normalize channel power
-        h_normalized = normalize_complex_tensor(h)
+        h_normalized = h / tf.sqrt(tf.reduce_mean(tf.abs(h)**2))
         
         # Noise power calculation
         noise_power = tf.cast(1.0 / tf.pow(10.0, snr_db / 10.0), dtype=tf.float32)

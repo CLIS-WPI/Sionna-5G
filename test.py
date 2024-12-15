@@ -1,110 +1,86 @@
-import pandas as pd
+import h5py
 import numpy as np
-import matplotlib.pyplot as plt
+import os
 
+# Define expected ranges and metrics
+EXPECTED_RANGES = {
+    "ber": {"range": (0, 1)},  # Bit Error Rate
+    "sinr": {"range": (0, 40)},  # SINR in dB
+    "spectral_efficiency": {"range": (0, 10)},  # Spectral Efficiency
+    "throughput": {"range": (0, 100)},  # Throughput percentage
+    "effective_snr": {"range": (-10, 30)},  # Effective SNR
+    "eigenvalues": {"shape": (-1, 4)},  # Channel Eigenvalues
+    "channel_response": {"shape": (-1, 4, 4)},  # Channel Matrix
+    "path_loss_data/fspl": {"range": (20, 160)},  # Path Loss
+    "path_loss_data/scenario_pathloss": {"range": (20, 160)},  # Scenario-Specific Path Loss
+}
 
-def validate_dataset(dataset_file):
-    """
-    Validate the dataset features against expected ranges and generate statistics.
+# Function to display statistics for numerical features
+def check_statistics(data, feature_name, expected_range=None, expected_shape=None):
+    print(f"\n--- Validating {feature_name} ---")
+    print(f"Shape: {data.shape}")
+    print(f"Min: {np.min(data)}, Max: {np.max(data)}")
+    print(f"Mean: {np.mean(data)}, Variance: {np.var(data)}")
 
-    Args:
-        dataset_file (str): Path to the dataset file (e.g., CSV file).
-
-    Returns:
-        None
-    """
-    # Load the dataset
-    print(f"Loading dataset from {dataset_file}...")
-
-    # Expected ranges and categories based on the simulation plan
-    expected_ranges = {
-        "SINR (dB)": (-5, 25),
-        "Spectral Efficiency (bits/s/Hz)": (4, 8),
-        "Throughput (Mbps)": (0, 100),  # Example range
-        "Modulation Order": [4, 16, 64],  # QPSK, 16-QAM, 64-QAM
-        "SNR (dB)": (-10, 30),
-    }
-
-    print("\n--- Dataset Validation ---")
-    for feature, expected_range in expected_ranges.items():
-        if feature in dataset.columns:
-            data = dataset[feature]
-            print(f"\nFeature: {feature}")
-            print(f"Min: {data.min()}, Max: {data.max()}")
-            print(f"Mean: {data.mean()}, Std: {data.std()}")
-
-            # Check range or categories
-            if isinstance(expected_range, tuple):
-                out_of_range = data[(data < expected_range[0]) | (data > expected_range[1])]
-                if not out_of_range.empty:
-                    print(f"Warning: {len(out_of_range)} values out of range {expected_range}.")
-            elif isinstance(expected_range, list):
-                invalid_values = data[~data.isin(expected_range)]
-                if not invalid_values.empty:
-                    print(f"Warning: {len(invalid_values)} invalid values. Allowed: {expected_range}.")
-
-            # Plot histogram
-            plt.hist(data, bins=30, alpha=0.7)
-            plt.title(f"Distribution of {feature}")
-            plt.xlabel(feature)
-            plt.ylabel("Frequency")
-            plt.grid()
-            plt.show()
+    # Check range
+    if expected_range:
+        min_val, max_val = expected_range
+        invalid = np.where((data < min_val) | (data > max_val))
+        if len(invalid[0]) > 0:
+            print(f"Warning: {len(invalid[0])} values out of range [{min_val}, {max_val}].")
         else:
-            print(f"Feature {feature} not found in dataset!")
+            print(f"All values within the range [{min_val}, {max_val}].")
+    
+    # Check shape
+    if expected_shape:
+        if data.shape[1:] != expected_shape[1:]:
+            print(f"Warning: Shape mismatch. Expected: {expected_shape}, Found: {data.shape}")
 
-    print("\nValidation Complete.")
+# Validate features inside modulation_data
+def validate_modulation_data(group):
+    for mod_scheme in group:
+        print(f"\n--- Modulation Scheme: {mod_scheme} ---")
+        for feature in group[mod_scheme]:
+            if feature in EXPECTED_RANGES:
+                data = np.array(group[mod_scheme][feature])
+                check_statistics(data, f"{mod_scheme}/{feature}", 
+                                 expected_range=EXPECTED_RANGES[feature].get("range"),
+                                 expected_shape=EXPECTED_RANGES[feature].get("shape"))
 
+# Validate path loss data
+def validate_path_loss(group):
+    for path_feature in group:
+        full_key = f"path_loss_data/{path_feature}"
+        if full_key in EXPECTED_RANGES:
+            data = np.array(group[path_feature])
+            check_statistics(data, full_key, expected_range=EXPECTED_RANGES[full_key]["range"])
 
-def check_plan_alignment(plan_features, dataset_file):
-    """
-    Check alignment between simulation plan features and dataset features.
+# Main validation function
+def validate_dataset(file_path):
+    if not os.path.exists(file_path):
+        print(f"Error: File '{file_path}' does not exist.")
+        return
 
-    Args:
-        plan_features (list): Features expected from the simulation plan.
-        dataset_file (str): Path to the dataset file (e.g., CSV file).
+    print(f"Reading Dataset: {file_path}")
+    with h5py.File(file_path, 'r') as f:
+        print("\n--- Dataset Structure ---")
+        f.visit(print)  # Print the structure of the HDF5 file
+        
+        # Validate modulation data
+        if "modulation_data" in f:
+            validate_modulation_data(f["modulation_data"])
+        else:
+            print("Error: 'modulation_data' group is missing!")
 
-    Returns:
-        None
-    """
-    # Load the dataset
-    print(f"Loading dataset from {dataset_file}...")
-    dataset = pd.read_csv(dataset_file)
-    dataset_features = dataset.columns.tolist()
+        # Validate path loss data
+        if "path_loss_data" in f:
+            validate_path_loss(f["path_loss_data"])
+        else:
+            print("Error: 'path_loss_data' group is missing!")
 
-    # Check alignment
-    print("\n--- Alignment Check ---")
-    missing_features = [f for f in plan_features if f not in dataset_features]
-    extra_features = [f for f in dataset_features if f not in plan_features]
+# File Path to Dataset
+file_path = "dataset/mimo_dataset_20241213_192705.h5"
 
-    if missing_features:
-        print(f"Missing Features: {missing_features}")
-    else:
-        print("No features missing from the simulation plan!")
-
-    if extra_features:
-        print(f"Extra Features: {extra_features}")
-    else:
-        print("No extra features found in the dataset!")
-
-
+# Run Validation
 if __name__ == "__main__":
-    # Path to the dataset file
-    dataset_file = "mimo_dataset.csv"  # Replace with your dataset file path
-
-    # Expected features based on the simulation plan
-    plan_features = [
-        "SINR (dB)",
-        "Spectral Efficiency (bits/s/Hz)",
-        "Throughput (Mbps)",
-        "Modulation Order",
-        "SNR (dB)",
-        "Antenna Gain",
-        "Element Spacing",
-    ]
-
-    # Step 1: Validate dataset values and ranges
-    validate_dataset(dataset_file)
-
-    # Step 2: Check alignment between simulation plan and dataset features
-    check_plan_alignment(plan_features, dataset_file)
+    validate_dataset(file_path)
