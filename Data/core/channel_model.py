@@ -153,17 +153,18 @@ class ChannelModelManager:
             dtype=tf.complex64
         )
     
+    
     def generate_channel_samples(self, batch_size: int, snr_db: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
         try:
             # Cast batch_size to int32 if needed
             batch_size = tf.cast(batch_size, tf.int32)
             
-            # Generate random channel matrix with explicit complex64 dtype
+            # Generate random channel matrix
             h = self.channel_model(batch_size, num_time_steps=1)
             
-            # Ensure h is complex64 before squeezing
-            h = tf.cast(h, tf.complex64)
-            h = tf.squeeze(h, axis=1)  # Remove the time dimension
+            # The channel model output should already be complex
+            # Remove the time dimension
+            h = tf.squeeze(h, axis=1)
             
             # Validate tensor shapes
             h = assert_tensor_shape(
@@ -172,26 +173,27 @@ class ChannelModelManager:
                 'channel_matrix'
             )
             
-            # Normalize channel power while preserving complex type
+            # Normalize channel power while maintaining complex type
             h_normalized = normalize_complex_tensor(h)
             
-            # Ensure noise calculations maintain complex64 type
+            # Noise power calculation with improved numerical stability
             noise_power = tf.cast(1.0 / tf.pow(10.0, snr_db / 10.0), dtype=tf.float32)
-            noise_power = tf.maximum(noise_power, 1e-10)
+            noise_power = tf.maximum(noise_power, 1e-10)  # Prevent numerical issues
             noise_power = tf.reshape(noise_power, [-1, 1, 1])
             
-            # Generate complex noise with explicit complex64 type
-            noise_real = tf.random.normal(h_normalized.shape, mean=0.0, stddev=tf.sqrt(noise_power / 2))
-            noise_imag = tf.random.normal(h_normalized.shape, mean=0.0, stddev=tf.sqrt(noise_power / 2))
-            noise = tf.complex(noise_real, noise_imag)
-            noise = tf.cast(noise, tf.complex64)
+            # Generate complex noise directly
+            noise_std = tf.sqrt(noise_power / 2)
+            noise = tf.complex(
+                tf.random.normal(h_normalized.shape, mean=0.0, stddev=noise_std),
+                tf.random.normal(h_normalized.shape, mean=0.0, stddev=noise_std)
+            )
             
             return h_normalized, h_normalized + noise
             
         except Exception as e:
             self.logger.error(f"Error generating channel samples: {str(e)}")
             raise
-    
+
     def generate_mimo_channel(
         self, 
         batch_size: int
