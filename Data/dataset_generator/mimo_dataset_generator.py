@@ -250,8 +250,10 @@ class MIMODatasetGenerator:
                         h_perfect, h_noisy = self.channel_model.generate_channel_samples(batch_size, snr_db)
                         
                         # Fix channel response shape - ensure it's [batch_size, num_rx, num_tx]
-                        if len(h_perfect.shape) == 4:  
-                            h_perfect = h_perfect[:, 0, :, :]  # Take first slice
+                        if len(h_perfect.shape) == 4:
+                        # Take diagonal elements to get [batch_size, num_rx, num_tx]
+                            h_perfect = tf.linalg.diag_part(h_perfect)  # This will reduce from 4D to 3D
+                            h_perfect = tf.reshape(h_perfect, [batch_size, self.system_params.num_rx, self.system_params.num_tx])
                         
                         # Apply path loss
                         h_with_pl = self.path_loss_manager.apply_path_loss(h_perfect, distances)
