@@ -155,11 +155,14 @@ class ChannelModelManager:
     
     def generate_channel_samples(self, batch_size: int, snr_db: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
         try:
-            # Generate random channel matrix with num_time_steps=1 since we're generating
-            # one channel realization at a time
-            h = self.channel_model(batch_size, num_time_steps=1)  # Add num_time_steps parameter
+            # Cast batch_size to int32 if needed
+            batch_size = tf.cast(batch_size, tf.int32)
             
-            # Reshape the output to remove the time dimension since we only need one timestep
+            # Generate random channel matrix with explicit complex64 dtype
+            h = self.channel_model(batch_size, num_time_steps=1)
+            
+            # Ensure h is complex64 before squeezing
+            h = tf.cast(h, tf.complex64)
             h = tf.squeeze(h, axis=1)  # Remove the time dimension
             
             # Validate tensor shapes
@@ -169,19 +172,19 @@ class ChannelModelManager:
                 'channel_matrix'
             )
             
-            # Normalize channel power
+            # Normalize channel power while preserving complex type
             h_normalized = normalize_complex_tensor(h)
             
-            # Noise power calculation with improved numerical stability
+            # Ensure noise calculations maintain complex64 type
             noise_power = tf.cast(1.0 / tf.pow(10.0, snr_db / 10.0), dtype=tf.float32)
-            noise_power = tf.maximum(noise_power, 1e-10)  # Prevent numerical issues
+            noise_power = tf.maximum(noise_power, 1e-10)
             noise_power = tf.reshape(noise_power, [-1, 1, 1])
             
-            # Generate complex noise with proper scaling
-            noise = tf.complex(
-                tf.random.normal(h_normalized.shape, mean=0.0, stddev=tf.sqrt(noise_power / 2)),
-                tf.random.normal(h_normalized.shape, mean=0.0, stddev=tf.sqrt(noise_power / 2))
-            )
+            # Generate complex noise with explicit complex64 type
+            noise_real = tf.random.normal(h_normalized.shape, mean=0.0, stddev=tf.sqrt(noise_power / 2))
+            noise_imag = tf.random.normal(h_normalized.shape, mean=0.0, stddev=tf.sqrt(noise_power / 2))
+            noise = tf.complex(noise_real, noise_imag)
+            noise = tf.cast(noise, tf.complex64)
             
             return h_normalized, h_normalized + noise
             
