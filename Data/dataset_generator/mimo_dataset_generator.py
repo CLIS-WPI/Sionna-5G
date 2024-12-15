@@ -188,6 +188,7 @@ class MIMODatasetGenerator:
         except Exception as e:
             self.logger.error(f"Failed to create dataset structure: {str(e)}")
             raise
+    
 
     def generate_dataset(
         self, 
@@ -245,24 +246,30 @@ class MIMODatasetGenerator:
                             self.system_params.snr_range[1]
                         )
                         
-                        # Generate channel samples and symbols
+                        # Generate channel samples
                         h_perfect, h_noisy = self.channel_model.generate_channel_samples(batch_size, snr_db)
                         
                         # Fix channel response shape - ensure it's [batch_size, num_rx, num_tx]
-                        if len(h_perfect.shape) == 4:  # If shape is [batch_size, batch_size, num_rx, num_tx]
-                            h_perfect = h_perfect[:, 0, :, :]  # Take first slice to get [batch_size, num_rx, num_tx]
+                        if len(h_perfect.shape) == 4:  
+                            h_perfect = h_perfect[:, 0, :, :]  # Take first slice
                         
-                        # Apply path loss to properly shaped channel response
+                        # Apply path loss
                         h_with_pl = self.path_loss_manager.apply_path_loss(h_perfect, distances)
                         
-                        # Generate and process symbols
+                        # Generate and process symbols with correct shape
                         tx_symbols = self.channel_model.generate_qam_symbols(batch_size, mod_scheme)
-                        tx_symbols = tf.expand_dims(tx_symbols, -1)  # Add dimension for matrix multiplication
+                        tx_symbols = tf.reshape(tx_symbols, [batch_size, self.system_params.num_tx, 1])
+                        
+                        # Debug prints to verify shapes
+                        print("h_with_pl shape:", h_with_pl.shape)
+                        print("tx_symbols shape:", tx_symbols.shape)
+                        
+                        # Perform matrix multiplication
                         rx_symbols = tf.matmul(h_with_pl, tx_symbols)
                         
-                        # Calculate metrics with correct tensor shapes
+                        # Calculate metrics
                         metrics = self.metrics_calculator.calculate_performance_metrics(
-                            h_with_pl,  # Now should be shape (batch_size, num_rx, num_tx)
+                            h_with_pl,
                             tx_symbols,
                             rx_symbols,
                             snr_db
@@ -289,7 +296,7 @@ class MIMODatasetGenerator:
                         mod_group['effective_snr'][start_idx:end_idx] = effective_snr.numpy()
                         mod_group['eigenvalues'][start_idx:end_idx] = eigenvalues.numpy()
                         
-                        # Calculate enhanced metrics
+                        # Calculate and save enhanced metrics
                         enhanced_metrics = self.metrics_calculator.calculate_enhanced_metrics(
                             h_with_pl, tx_symbols, rx_symbols, snr_db
                         )
@@ -319,6 +326,7 @@ class MIMODatasetGenerator:
             self.logger.error(f"Dataset generation failed: {str(e)}")
             self.logger.error(f"Detailed error traceback:", exc_info=True)
             raise
+
     def _get_dataset_units(self, dataset_name: str) -> str:
         """Helper method to return appropriate units for each dataset type"""
         units_map = {
