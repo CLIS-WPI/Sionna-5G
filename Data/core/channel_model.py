@@ -155,8 +155,8 @@ class ChannelModelManager:
     
     def generate_channel_samples(self, batch_size: int, snr_db: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
         try:
-            # Use proper channel model generation
-            h = self.channel_model.generate()
+            # Generate random channel matrix
+            h = self.channel_model(batch_size)  # RayleighBlockFading is callable
             
             # Validate tensor shapes
             h = assert_tensor_shape(
