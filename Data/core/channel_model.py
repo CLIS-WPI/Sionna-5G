@@ -155,8 +155,12 @@ class ChannelModelManager:
     
     def generate_channel_samples(self, batch_size: int, snr_db: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
         try:
-            # Generate random channel matrix
-            h = self.channel_model(batch_size)  # RayleighBlockFading is callable
+            # Generate random channel matrix with num_time_steps=1 since we're generating
+            # one channel realization at a time
+            h = self.channel_model(batch_size, num_time_steps=1)  # Add num_time_steps parameter
+            
+            # Reshape the output to remove the time dimension since we only need one timestep
+            h = tf.squeeze(h, axis=1)  # Remove the time dimension
             
             # Validate tensor shapes
             h = assert_tensor_shape(
