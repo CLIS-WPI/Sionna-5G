@@ -160,14 +160,15 @@ class ChannelModelManager:
             batch_size = tf.cast(batch_size, tf.int32)
             
             # Generate random channel matrix
-            # The channel_model should return a complex tensor
             h_raw = self.channel_model(batch_size, num_time_steps=1)
             
-            # Ensure we have a complex64 tensor before any operations
-            h_complex = tf.dtypes.cast(h_raw, tf.complex64)
+            # Create complex tensor from real-valued output
+            h_real = tf.math.real(h_raw)
+            h_imag = tf.math.imag(h_raw)
+            h = tf.complex(h_real, h_imag)
             
-            # Remove the time dimension safely
-            h = tf.squeeze(h_complex, axis=1)
+            # Remove the time dimension
+            h = tf.squeeze(h, axis=1)
             
             # Validate tensor shapes
             h = assert_tensor_shape(
@@ -185,11 +186,10 @@ class ChannelModelManager:
             noise_power = tf.reshape(noise_power, [-1, 1, 1])
             
             # Generate complex Gaussian noise
-            std_dev = tf.sqrt(noise_power / 2)
-            noise = tf.complex(
-                tf.random.normal(h_normalized.shape, mean=0.0, stddev=std_dev),
-                tf.random.normal(h_normalized.shape, mean=0.0, stddev=std_dev)
-            )
+            noise_std = tf.sqrt(noise_power / 2)
+            noise_real = tf.random.normal(h_normalized.shape, mean=0.0, stddev=noise_std)
+            noise_imag = tf.random.normal(h_normalized.shape, mean=0.0, stddev=noise_std)
+            noise = tf.complex(noise_real, noise_imag)
             
             return h_normalized, h_normalized + noise
             
