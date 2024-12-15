@@ -236,21 +236,20 @@ class PathLossManager:
             # Get batch size from channel response
             batch_size = tf.shape(channel_response)[0]
             
+            # Ensure distance tensor matches batch size
+            distance = tf.slice(distance, [0], [batch_size])
+            
             # Calculate path loss in dB
             path_loss_db = self.calculate_path_loss(distance, scenario)
             
             # Convert path loss from dB to linear scale
             path_loss_linear = tf.pow(10.0, -path_loss_db / 20.0)
             
-            # Reshape path loss for broadcasting
-            # Ensure path_loss_linear matches batch size of channel_response
-            path_loss_linear = tf.reshape(path_loss_linear[:batch_size], [-1, 1, 1])
+            # Ensure path_loss_linear has correct batch size
+            path_loss_linear = tf.slice(path_loss_linear, [0], [batch_size])
             
-            # Ensure shapes are compatible for broadcasting
-            path_loss_linear = tf.broadcast_to(
-                path_loss_linear,
-                [batch_size, 1, 1]
-            )
+            # Reshape path loss for broadcasting
+            path_loss_linear = tf.reshape(path_loss_linear, [batch_size, 1, 1])
             
             # Apply path loss to channel response
             attenuated_channel = channel_response * tf.cast(
