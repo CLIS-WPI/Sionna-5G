@@ -214,6 +214,7 @@ class PathLossManager:
             self.logger.error("Detailed error traceback:", exc_info=True)
             raise
 
+    
     def apply_path_loss(
         self, 
         channel_response: tf.Tensor, 
@@ -221,46 +222,35 @@ class PathLossManager:
         scenario: str = 'umi'
     ) -> tf.Tensor:
         """
-        Apply path loss to channel response with improved handling
+        Apply path loss to channel response with proper shape handling
         
         Args:
-            channel_response (tf.Tensor): MIMO channel matrix
-            distance (tf.Tensor): Distance between transmitter and receiver
-            scenario (str): Path loss scenario
+            channel_response (tf.Tensor): MIMO channel matrix [batch_size, num_rx, num_tx]
+            distance (tf.Tensor): Distance between TX and RX [batch_size]
+            scenario (str): Path loss scenario ('umi' or 'uma')
         
         Returns:
             tf.Tensor: Channel response with applied path loss
         """
         try:
-            # Calculate path loss components separately
-            fspl_db = self.calculate_free_space_path_loss(distance)
-            scenario_pl_db = self.calculate_path_loss(distance, scenario)
+            # Get batch size from channel response
+            batch_size = tf.shape(channel_response)[0]
             
-            # Apply weights to different path loss components
-            fspl_weight = 0.7  # Free space path loss weight
-            scenario_weight = 0.3  # Scenario-specific path loss weight
+            # Calculate path loss in dB
+            path_loss_db = self.calculate_path_loss(distance, scenario)
             
-            # Weighted combination of path losses
-            total_path_loss_db = (fspl_weight * fspl_db + 
-                                scenario_weight * scenario_pl_db)
+            # Convert path loss from dB to linear scale
+            path_loss_linear = tf.pow(10.0, -path_loss_db / 20.0)
             
-            # Ensure path loss is within realistic bounds
-            min_total_pl = 20.0  # Minimum total path loss in dB
-            max_total_pl = 160.0  # Maximum total path loss in dB
-            total_path_loss_db = tf.clip_by_value(
-                total_path_loss_db, 
-                min_total_pl, 
-                max_total_pl
+            # Reshape path loss for broadcasting
+            # Ensure path_loss_linear matches batch size of channel_response
+            path_loss_linear = tf.reshape(path_loss_linear[:batch_size], [-1, 1, 1])
+            
+            # Ensure shapes are compatible for broadcasting
+            path_loss_linear = tf.broadcast_to(
+                path_loss_linear,
+                [batch_size, 1, 1]
             )
-            
-            # Convert to linear scale with numerical stability
-            path_loss_linear = tf.exp(-tf.math.log(10.0) * total_path_loss_db / 20.0)
-            
-            # Add small epsilon to avoid numerical issues
-            path_loss_linear = tf.maximum(path_loss_linear, 1e-10)
-            
-            # Reshape for broadcasting
-            path_loss_linear = tf.reshape(path_loss_linear, [-1, 1, 1])
             
             # Apply path loss to channel response
             attenuated_channel = channel_response * tf.cast(
