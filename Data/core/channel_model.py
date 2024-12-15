@@ -160,11 +160,14 @@ class ChannelModelManager:
             batch_size = tf.cast(batch_size, tf.int32)
             
             # Generate random channel matrix
-            h = self.channel_model(batch_size, num_time_steps=1)
+            # The channel_model should return a complex tensor
+            h_raw = self.channel_model(batch_size, num_time_steps=1)
             
-            # The channel model output should already be complex
-            # Remove the time dimension
-            h = tf.squeeze(h, axis=1)
+            # Ensure we have a complex64 tensor before any operations
+            h_complex = tf.dtypes.cast(h_raw, tf.complex64)
+            
+            # Remove the time dimension safely
+            h = tf.squeeze(h_complex, axis=1)
             
             # Validate tensor shapes
             h = assert_tensor_shape(
@@ -173,19 +176,19 @@ class ChannelModelManager:
                 'channel_matrix'
             )
             
-            # Normalize channel power while maintaining complex type
+            # Normalize channel power
             h_normalized = normalize_complex_tensor(h)
             
-            # Noise power calculation with improved numerical stability
+            # Calculate noise power
             noise_power = tf.cast(1.0 / tf.pow(10.0, snr_db / 10.0), dtype=tf.float32)
-            noise_power = tf.maximum(noise_power, 1e-10)  # Prevent numerical issues
+            noise_power = tf.maximum(noise_power, 1e-10)
             noise_power = tf.reshape(noise_power, [-1, 1, 1])
             
-            # Generate complex noise directly
-            noise_std = tf.sqrt(noise_power / 2)
+            # Generate complex Gaussian noise
+            std_dev = tf.sqrt(noise_power / 2)
             noise = tf.complex(
-                tf.random.normal(h_normalized.shape, mean=0.0, stddev=noise_std),
-                tf.random.normal(h_normalized.shape, mean=0.0, stddev=noise_std)
+                tf.random.normal(h_normalized.shape, mean=0.0, stddev=std_dev),
+                tf.random.normal(h_normalized.shape, mean=0.0, stddev=std_dev)
             )
             
             return h_normalized, h_normalized + noise
