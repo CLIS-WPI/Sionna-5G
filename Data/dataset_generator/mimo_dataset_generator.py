@@ -188,6 +188,7 @@ class MIMODatasetGenerator:
         except Exception as e:
             self.logger.error(f"Failed to create dataset structure: {str(e)}")
             raise
+
     def generate_dataset(
         self, 
         num_samples: int, 
@@ -246,42 +247,47 @@ class MIMODatasetGenerator:
                         
                         # Generate channel samples and symbols
                         h_perfect, h_noisy = self.channel_model.generate_channel_samples(batch_size, snr_db)
+                        
+                        # Fix channel response shape
+                        if len(h_perfect.shape) == 4:  # If shape is (batch, batch, rx, tx)
+                            h_perfect = h_perfect[:, 0, :, :]  # Take first slice to get (batch, rx, tx)
+                        
+                        # Apply path loss to properly shaped channel response
                         h_with_pl = self.path_loss_manager.apply_path_loss(h_perfect, distances)
+                        
+                        # Generate and process symbols
                         tx_symbols = self.channel_model.generate_qam_symbols(batch_size, mod_scheme)
+                        tx_symbols = tf.expand_dims(tx_symbols, -1)  # Add dimension for matrix multiplication
                         rx_symbols = tf.matmul(h_with_pl, tx_symbols)
                         
-                        # Calculate metrics
+                        # Calculate metrics with correct tensor shapes
                         metrics = self.metrics_calculator.calculate_performance_metrics(
-                            h_with_pl, tx_symbols, rx_symbols, snr_db
+                            h_with_pl,  # Now should be shape (batch_size, num_rx, num_tx)
+                            tx_symbols,
+                            rx_symbols,
+                            snr_db
                         )
 
-                        # Debug prints before processing
-                        print(f"Before processing:")
-                        print(f"Effective SNR shape: {metrics['effective_snr'].shape}")
-                        print(f"Spectral efficiency shape: {metrics['spectral_efficiency'].shape}")
-                        
                         # Process metrics to ensure correct shapes
                         effective_snr = tf.squeeze(metrics['effective_snr'])
                         spectral_efficiency = tf.squeeze(metrics['spectral_efficiency'])
+                        sinr = tf.squeeze(metrics['sinr'])
+                        eigenvalues = metrics['eigenvalues']
                         
-                        # Reduce if still has extra dimensions
+                        # Ensure all metrics have correct shape
                         if len(effective_snr.shape) > 1:
                             effective_snr = tf.reduce_mean(effective_snr, axis=1)
                         if len(spectral_efficiency.shape) > 1:
                             spectral_efficiency = tf.reduce_mean(spectral_efficiency, axis=1)
-                        
-                        # Debug prints after processing
-                        print(f"After processing:")
-                        print(f"Effective SNR shape: {effective_snr.shape}")
-                        print(f"Spectral efficiency shape: {spectral_efficiency.shape}")
-                        print(f"Target dataset shape: {mod_group['effective_snr'][start_idx:end_idx].shape}")
+                        if len(sinr.shape) > 1:
+                            sinr = tf.reduce_mean(sinr, axis=1)
 
                         # Save processed data to HDF5
                         mod_group['channel_response'][start_idx:end_idx] = h_with_pl.numpy()
-                        mod_group['sinr'][start_idx:end_idx] = tf.squeeze(metrics['sinr']).numpy()
+                        mod_group['sinr'][start_idx:end_idx] = sinr.numpy()
                         mod_group['spectral_efficiency'][start_idx:end_idx] = spectral_efficiency.numpy()
                         mod_group['effective_snr'][start_idx:end_idx] = effective_snr.numpy()
-                        mod_group['eigenvalues'][start_idx:end_idx] = metrics['eigenvalues'].numpy()
+                        mod_group['eigenvalues'][start_idx:end_idx] = eigenvalues.numpy()
                         
                         # Calculate enhanced metrics
                         enhanced_metrics = self.metrics_calculator.calculate_enhanced_metrics(
@@ -312,7 +318,7 @@ class MIMODatasetGenerator:
         except Exception as e:
             self.logger.error(f"Dataset generation failed: {str(e)}")
             self.logger.error(f"Detailed error traceback:", exc_info=True)
-            raise            
+            raise
     def _get_dataset_units(self, dataset_name: str) -> str:
         """Helper method to return appropriate units for each dataset type"""
         units_map = {
