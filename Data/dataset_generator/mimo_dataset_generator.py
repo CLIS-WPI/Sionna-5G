@@ -248,9 +248,9 @@ class MIMODatasetGenerator:
                         # Generate channel samples and symbols
                         h_perfect, h_noisy = self.channel_model.generate_channel_samples(batch_size, snr_db)
                         
-                        # Fix channel response shape
-                        if len(h_perfect.shape) == 4:  # If shape is (batch, batch, rx, tx)
-                            h_perfect = h_perfect[:, 0, :, :]  # Take first slice to get (batch, rx, tx)
+                        # Fix channel response shape - ensure it's [batch_size, num_rx, num_tx]
+                        if len(h_perfect.shape) == 4:  # If shape is [batch_size, batch_size, num_rx, num_tx]
+                            h_perfect = h_perfect[:, 0, :, :]  # Take first slice to get [batch_size, num_rx, num_tx]
                         
                         # Apply path loss to properly shaped channel response
                         h_with_pl = self.path_loss_manager.apply_path_loss(h_perfect, distances)
