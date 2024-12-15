@@ -14,6 +14,7 @@ from sionna.mapping import Mapper
 from config.system_parameters import SystemParameters
 from utill.tensor_shape_validator import assert_tensor_shape, normalize_complex_tensor
 from sionna.mimo import StreamManagement
+from utill.logging_config import LoggerManager
 
 class ChannelModelManager:
     """
@@ -23,11 +24,10 @@ class ChannelModelManager:
     def __init__(self, system_params: Optional[SystemParameters] = None):
         # Use default parameters if not provided
         self.system_params = system_params or SystemParameters()
-
-        # Initialize channel components
-        self._setup_antenna_arrays()
-        self._setup_resource_grid()
-        self._setup_channel_model()
+        self.logger = LoggerManager.get_logger(__name__)
+    
+        # Initialize logger
+        self.logger = LoggerManager.get_logger(__name__)
 
         # Initialize mapper with correct number of bits (default to QPSK)
         self.mapper = Mapper("qam", num_bits_per_symbol=2)
@@ -41,37 +41,60 @@ class ChannelModelManager:
             num_streams_per_tx=1,  # Single integer value instead of a list
             rx_tx_association=rx_tx_association  # Required parameter showing which RX is associated with which TX
         )
-    def generate_qam_symbols(self, batch_size: int, mod_scheme: str) -> tf.Tensor:
-        # Determine constellation size based on modulation scheme
-        constellation_size = {
-            'QPSK': 4,
-            '16QAM': 16,
-            '64QAM': 64
-        }.get(mod_scheme, 4)  # Default to QPSK if unknown
-        
-        # Calculate bits per symbol
-        num_bits_per_symbol = int(np.log2(constellation_size))
-        total_bits = batch_size * self.system_params.num_tx * num_bits_per_symbol
-        
-        # Create a mapper with the correct number of bits per symbol
-        mapper = Mapper("qam", num_bits_per_symbol=num_bits_per_symbol)
-        
-        # Generate random bits
-        bits = tf.random.uniform(
-            [total_bits], 
-            minval=0, 
-            maxval=2, 
-            dtype=tf.int32
-        )
 
-        # Reshape bits for mapping
-        bits = tf.reshape(bits, [batch_size, self.system_params.num_tx, num_bits_per_symbol])
-        
-        # Map bits to QAM symbols
-        symbols = mapper(bits)
-        
-        # Reshape to match expected dimensions
-        return tf.reshape(symbols, [batch_size, self.system_params.num_tx, 1])
+        # Initialize channel components
+        self._setup_antenna_arrays()
+        self._setup_resource_grid()
+        self._setup_channel_model()
+
+    def generate_qam_symbols(self, batch_size: int, mod_scheme: str) -> tf.Tensor:
+        try:
+            # Validate input parameters
+            if batch_size <= 0:
+                raise ValueError("Batch size must be positive")
+                
+            # Enhanced modulation scheme handling
+            constellation_size = {
+                'BPSK': 2,
+                'QPSK': 4,
+                '16QAM': 16,
+                '64QAM': 64,
+                '256QAM': 256
+            }.get(mod_scheme.upper())
+            
+            if constellation_size is None:
+                self.logger.warning(f"Unknown modulation scheme {mod_scheme}, defaulting to QPSK")
+                constellation_size = 4
+                
+            # Calculate bits per symbol
+            num_bits_per_symbol = int(np.log2(constellation_size))
+            total_bits = batch_size * self.system_params.num_tx * num_bits_per_symbol
+            
+            # Create mapper with proper configuration
+            mapper = Mapper("qam", num_bits_per_symbol=num_bits_per_symbol)
+            
+            # Generate random bits
+            bits = tf.random.uniform(
+                [total_bits], 
+                minval=0, 
+                maxval=2, 
+                dtype=tf.int32
+            )
+            
+            # Reshape bits for mapping
+            bits = tf.reshape(bits, [batch_size, self.system_params.num_tx, num_bits_per_symbol])
+            
+            # Map bits to QAM symbols
+            symbols = mapper(bits)
+            
+            # Normalize symbols
+            symbols = normalize_complex_tensor(symbols)
+            
+            return tf.reshape(symbols, [batch_size, self.system_params.num_tx, 1])
+            
+        except Exception as e:
+            self.logger.error(f"Error generating QAM symbols: {str(e)}")
+            raise
         
     def _setup_antenna_arrays(self) -> None:
         """
@@ -130,55 +153,37 @@ class ChannelModelManager:
             dtype=tf.complex64
         )
     
-    def generate_channel_samples(
-        self, 
-        batch_size: int, 
-        snr_db: tf.Tensor
-    ) -> Tuple[tf.Tensor, tf.Tensor]:
-        """
-        Generate MIMO channel samples with SNR-based noise
-        
-        Args:
-            batch_size (int): Number of channel realizations
-            snr_db (tf.Tensor): Signal-to-Noise Ratio in dB
-        
-        Returns:
-            Tuple[tf.Tensor, tf.Tensor]: Perfect and noisy channel responses
-        """
-        # Generate channel matrix with random complex entries
-        h_real = tf.random.normal(
-            shape=[batch_size, self.system_params.num_rx, self.system_params.num_tx], 
-            mean=0.0, 
-            stddev=1.0
-        )
-        h_imag = tf.random.normal(
-            shape=[batch_size, self.system_params.num_rx, self.system_params.num_tx], 
-            mean=0.0, 
-            stddev=1.0
-        )
-        h = self.channel_model.generate()
-        
-        # Validate tensor shapes
-        h = assert_tensor_shape(
-            h, 
-            [batch_size, self.system_params.num_rx, self.system_params.num_tx], 
-            'channel_matrix'
-        )
-        
-        # Normalize channel power
-        h_normalized = h / tf.sqrt(tf.reduce_mean(tf.abs(h)**2))
-        
-        # Noise power calculation
-        noise_power = tf.cast(1.0 / tf.pow(10.0, snr_db / 10.0), dtype=tf.float32)
-        noise_power = tf.reshape(noise_power, [-1, 1, 1])
-        
-        # Generate complex noise
-        noise = tf.complex(
-            tf.random.normal(h_normalized.shape, mean=0.0, stddev=tf.sqrt(noise_power / 2)),
-            tf.random.normal(h_normalized.shape, mean=0.0, stddev=tf.sqrt(noise_power / 2))
-        )
-        
-        return h_normalized, h_normalized + noise
+    def generate_channel_samples(self, batch_size: int, snr_db: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+        try:
+            # Use proper channel model generation
+            h = self.channel_model.generate()
+            
+            # Validate tensor shapes
+            h = assert_tensor_shape(
+                h, 
+                [batch_size, self.system_params.num_rx, self.system_params.num_tx], 
+                'channel_matrix'
+            )
+            
+            # Normalize channel power
+            h_normalized = normalize_complex_tensor(h)
+            
+            # Noise power calculation with improved numerical stability
+            noise_power = tf.cast(1.0 / tf.pow(10.0, snr_db / 10.0), dtype=tf.float32)
+            noise_power = tf.maximum(noise_power, 1e-10)  # Prevent numerical issues
+            noise_power = tf.reshape(noise_power, [-1, 1, 1])
+            
+            # Generate complex noise with proper scaling
+            noise = tf.complex(
+                tf.random.normal(h_normalized.shape, mean=0.0, stddev=tf.sqrt(noise_power / 2)),
+                tf.random.normal(h_normalized.shape, mean=0.0, stddev=tf.sqrt(noise_power / 2))
+            )
+            
+            return h_normalized, h_normalized + noise
+            
+        except Exception as e:
+            self.logger.error(f"Error generating channel samples: {str(e)}")
+            raise
     
     def generate_mimo_channel(
         self, 
