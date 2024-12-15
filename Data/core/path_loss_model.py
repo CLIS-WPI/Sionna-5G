@@ -8,9 +8,9 @@ import tensorflow as tf
 import numpy as np
 from sionna.channel import tr38901
 from typing import Optional, Tuple, Callable
-
 from config.system_parameters import SystemParameters
 from utill.tensor_shape_validator import assert_tensor_shape
+from utill.logging_config import LoggerManager
 
 class PathLossManager:
     """
@@ -27,7 +27,14 @@ class PathLossManager:
         Args:
             system_params (Optional[SystemParameters]): System configuration
         """
+        # Initialize system parameters
         self.system_params = system_params or SystemParameters()
+        
+        # Initialize logger
+        self.logger = LoggerManager.get_logger(__name__)
+        
+        # Set carrier frequency from system parameters
+        self.carrier_frequency = self.system_params.carrier_frequency
         
         # Initialize panel arrays and scenarios
         self._setup_antenna_arrays()
