@@ -161,7 +161,7 @@ class ChannelModelManager:
             batch_size = tf.cast(batch_size, tf.int32)
             
             # Generate channel matrix components directly
-            h_shape = [batch_size, 1, self.system_params.num_rx, self.system_params.num_tx]
+            h_shape = [batch_size, self.system_params.num_rx, self.system_params.num_tx]
             
             # Generate real and imaginary parts separately
             h_real = tf.random.normal(h_shape, mean=0.0, stddev=1.0/np.sqrt(2))
@@ -169,9 +169,6 @@ class ChannelModelManager:
             
             # Combine into complex tensor
             h = tf.complex(h_real, h_imag)
-            
-            # Remove time dimension
-            h = tf.squeeze(h, axis=1)
             
             # Validate tensor shape
             h = assert_tensor_shape(
