@@ -13,6 +13,7 @@ from core.channel_model import ChannelModelManager
 from core.metrics_calculator import MetricsCalculator
 from core.path_loss_model import PathLossManager
 from utill.logging_config import LoggerManager
+from utill.tensor_shape_validator import validate_tensor_shapes  
 from datetime import datetime
 
 class MIMODatasetGenerator:
@@ -240,19 +241,32 @@ class MIMODatasetGenerator:
                         
                         # Generate and reshape channel response
                         h_perfect, h_noisy = self.channel_model.generate_channel_samples(batch_size, snr_db)
-                        
+
+                        # Add debug logging
+                        self.logger.debug(f"Original h_perfect shape: {h_perfect.shape}")
+
                         # Ensure correct channel shape
                         if len(h_perfect.shape) == 4:
-                            # Take first slice of second dimension to reduce from 4D to 3D
-                            h_perfect = h_perfect[:, 0, :, :]
-                        
+                            # Reshape to remove extra dimension
+                            h_perfect = tf.squeeze(h_perfect, axis=1)  # This will remove the second dimension if it's size 1
+                            # Alternative approach if squeeze doesn't work:
+                            # h_perfect = tf.reshape(h_perfect, [batch_size, self.system_params.num_rx, self.system_params.num_tx])
+
+                        self.logger.debug(f"Reshaped h_perfect shape: {h_perfect.shape}")
+
                         # Validate channel shape
-                        validate_tensor_shapes({
-                            'channel_response': (
-                                h_perfect, 
-                                (batch_size, self.system_params.num_rx, self.system_params.num_tx)
-                            )
-                        })
+                        try:
+                            validate_tensor_shapes({
+                                'channel_response': (
+                                    h_perfect, 
+                                    (batch_size, self.system_params.num_rx, self.system_params.num_tx)
+                                )
+                            })
+                        except ValueError as e:
+                            self.logger.error(f"Channel shape validation failed: {str(e)}")
+                            self.logger.error(f"Current shape: {h_perfect.shape}")
+                            self.logger.error(f"Expected shape: ({batch_size}, {self.system_params.num_rx}, {self.system_params.num_tx})")
+                            raise
                         
                         # Apply path loss
                         h_with_pl = self.path_loss_manager.apply_path_loss(h_perfect, distances)

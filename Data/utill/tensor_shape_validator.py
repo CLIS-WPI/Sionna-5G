@@ -164,7 +164,7 @@ def validate_tensor_properties(
         )
     
     return tensor
-# Add this to utill/tensor_shape_validator.py
+
 
 def validate_tensor_shapes(tensors_dict):
     """
