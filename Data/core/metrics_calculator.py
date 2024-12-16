@@ -8,9 +8,10 @@ import tensorflow as tf
 import numpy as np
 from sionna.utils import compute_ber
 from typing import Dict, Any, Optional
-
+from utill.logging_config import LoggerManager
 from config.system_parameters import SystemParameters
 from utill.tensor_shape_validator import assert_tensor_shape
+from utill.logging_config import LoggerManager  
 
 class MetricsCalculator:
     """
@@ -27,7 +28,12 @@ class MetricsCalculator:
         Args:
             system_params (Optional[SystemParameters]): System configuration
         """
+        # Initialize system parameters
         self.system_params = system_params or SystemParameters()
+        
+        # Initialize logger
+        self.logger = LoggerManager.get_logger(__name__)
+
 
     def calculate_performance_metrics(
         self, 
@@ -48,70 +54,79 @@ class MetricsCalculator:
         Returns:
             Dict[str, tf.Tensor]: Performance metrics
         """
-        # Validate input tensor shapes
-        batch_size = tf.shape(channel_response)[0]
-        
-        assert_tensor_shape(
-            channel_response, 
-            [batch_size, self.system_params.num_rx, self.system_params.num_tx], 
-            'channel_response'
-        )
-        assert_tensor_shape(
-            tx_symbols, 
-            [batch_size, self.system_params.num_tx, 1], 
-            'tx_symbols'
-        )
-        assert_tensor_shape(
-            rx_symbols, 
-            [batch_size, self.system_params.num_rx, 1], 
-            'rx_symbols'
-        )
-        assert_tensor_shape(snr_db, [batch_size], 'snr_db')
-        
-        # Convert SNR to linear scale
-        snr_linear = tf.pow(10.0, snr_db / 10.0)
-        snr_linear = tf.reshape(snr_linear, [batch_size, 1])
-        
-        # Cast channel response to complex64
-        H = tf.cast(channel_response, tf.complex64)
-        
-        # Calculate channel eigenvalues
-        H_conj_transpose = tf.linalg.adjoint(H)
-        HH = tf.matmul(H_conj_transpose, H)
-        eigenvalues = tf.abs(tf.linalg.eigvalsh(HH))
-        
-        # Signal calculation
-        signal = tf.matmul(H, tx_symbols)
-        
-        # Signal power calculation
-        signal_power = tf.reduce_mean(tf.abs(rx_symbols)**2, axis=-1)
-        
-        # Noise power calculation
-        noise_power = signal_power / tf.pow(10.0, snr_db/10.0)
-        
-        # SINR calculation
-        sinr = signal_power / noise_power
-        sinr = tf.expand_dims(sinr, axis=-1)
-        sinr_db = 10.0 * tf.math.log(sinr) / tf.math.log(10.0)
-        
-        # Effective SNR calculation
-        snr_linear_expanded = tf.expand_dims(snr_linear, axis=1)
-        eigenvalues_snr = eigenvalues * snr_linear_expanded
-        # Take mean across antenna dimension to get single value per sample
-        effective_snr = 10 * tf.math.log(signal_power/noise_power) / tf.math.log(10.0)
-        effective_snr_db = 10.0 * tf.math.log(effective_snr) / tf.math.log(10.0)
-        # Spectral efficiency calculation
-        spectral_efficiency = tf.reduce_sum(
-            tf.math.log(1.0 + eigenvalues * snr_linear_expanded) / tf.math.log(2.0),
-            axis=1
-        )
-        
-        return {
-            'sinr': tf.squeeze(sinr_db),
-            'spectral_efficiency': tf.squeeze(spectral_efficiency),
-            'effective_snr': tf.squeeze(effective_snr_db),  # Added squeeze to ensure 1D
-            'eigenvalues': eigenvalues
-        }
+        try:
+            # Get batch size from input tensor
+            batch_size = tf.shape(channel_response)[0]
+            
+            # Print debug information
+            self.logger.debug(f"Input channel_response shape: {channel_response.shape}")
+            self.logger.debug(f"Batch size: {batch_size}")
+            
+            # Handle potential rank-4 tensor
+            if len(channel_response.shape) == 4:
+                # If shape is (batch_size, batch_size, num_rx, num_tx)
+                # We need to take only the first batch_size elements from the second dimension
+                channel_response = channel_response[:, :batch_size, :, :]
+                # Now reshape to (batch_size, num_rx, num_tx)
+                channel_response = tf.reshape(
+                    channel_response,
+                    [batch_size, self.system_params.num_rx, self.system_params.num_tx]
+                )
+            
+            # Validate tensor shapes
+            assert_tensor_shape(
+                channel_response,
+                [batch_size, self.system_params.num_rx, self.system_params.num_tx],
+                'channel_response'
+            )
+            assert_tensor_shape(
+                tx_symbols,
+                [batch_size, self.system_params.num_tx, 1],
+                'tx_symbols'
+            )
+            assert_tensor_shape(
+                rx_symbols,
+                [batch_size, self.system_params.num_rx, 1],
+                'rx_symbols'
+            )
+            
+            # Rest of your existing code...
+            # Calculate channel matrix properties
+            H_conj_transpose = tf.linalg.adjoint(channel_response)
+            HH = tf.matmul(H_conj_transpose, channel_response)
+            
+            # Calculate eigenvalues
+            eigenvalues = tf.abs(tf.linalg.eigvalsh(HH))
+            
+            # Convert SNR to linear scale
+            snr_linear = tf.pow(10.0, snr_db/10.0)
+            snr_linear = tf.reshape(snr_linear, [-1, 1])
+            
+            # Calculate SINR
+            signal_power = tf.reduce_mean(tf.abs(rx_symbols)**2, axis=-1)
+            noise_power = signal_power / snr_linear
+            sinr = 10.0 * tf.math.log(signal_power/noise_power) / tf.math.log(10.0)
+            
+            # Calculate spectral efficiency
+            spectral_efficiency = tf.reduce_sum(
+                tf.math.log(1.0 + eigenvalues * tf.reshape(snr_linear, [-1, 1])) / tf.math.log(2.0),
+                axis=1
+            )
+            
+            # Calculate effective SNR
+            effective_snr = tf.reduce_mean(eigenvalues, axis=1) * snr_linear
+            effective_snr_db = 10.0 * tf.math.log(effective_snr) / tf.math.log(10.0)
+            
+            return {
+                'sinr': tf.squeeze(sinr),
+                'spectral_efficiency': tf.squeeze(spectral_efficiency),
+                'effective_snr': tf.squeeze(effective_snr_db),
+                'eigenvalues': eigenvalues
+            }
+            
+        except Exception as e:
+            print(f"Error in calculate_performance_metrics: {str(e)}")
+            raise
     
     def calculate_enhanced_metrics(
         self, 
