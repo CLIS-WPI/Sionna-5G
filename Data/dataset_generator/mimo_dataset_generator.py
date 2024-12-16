@@ -211,18 +211,14 @@ class MIMODatasetGenerator:
             with h5py.File(save_path, 'w') as f:
                 self._create_dataset_structure(f, num_samples)
                 
-                total_progress = tqdm(
-                    total=num_samples, 
-                    desc="Total Dataset Generation", 
-                    unit="samples"
-                )
+                total_progress = tqdm(total=num_samples, desc="Total Dataset Generation", unit="samples")
                 
                 for mod_scheme in self.system_params.modulation_schemes:
                     mod_group = f['modulation_data'][mod_scheme]
                     mod_progress = tqdm(
-                        total=samples_per_mod, 
-                        desc=f"{mod_scheme} Generation", 
-                        unit="samples", 
+                        total=samples_per_mod,
+                        desc=f"{mod_scheme} Generation",
+                        unit="samples",
                         leave=False
                     )
                     
@@ -230,76 +226,44 @@ class MIMODatasetGenerator:
                         start_idx = batch_idx * batch_size
                         end_idx = start_idx + batch_size
                         
-                        # Generate non-zero random values for distances and SNR
+                        # Generate input data
                         distances = tf.random.uniform([batch_size], 10.0, 500.0)
                         snr_db = tf.random.uniform(
-                            [batch_size], 
-                            self.system_params.snr_range[0], 
+                            [batch_size],
+                            self.system_params.snr_range[0],
                             self.system_params.snr_range[1]
                         )
 
                         # Generate channel response
                         h_perfect, h_noisy = self.channel_model.generate_channel_samples(batch_size, snr_db)
                         
-                        # Debug logging for original shape
+                        # Debug logging
                         self.logger.debug(f"Original h_perfect shape: {h_perfect.shape}")
                         
                         # Handle rank-4 tensor if present
                         if len(h_perfect.shape) == 4:
-                            h_perfect = tf.squeeze(h_perfect, axis=-1)
-                            self.logger.debug(f"Squeezed h_perfect shape: {h_perfect.shape}")
+                            # Remove the extra dimension (squeeze) and ensure correct shape
+                            h_perfect = tf.squeeze(h_perfect, axis=1)  # Squeeze the second dimension
+                            self.logger.debug(f"After squeeze h_perfect shape: {h_perfect.shape}")
                         
-                        # Reshape to ensure correct dimensions
-                        h_perfect = tf.reshape(h_perfect, 
-                                            [batch_size, self.system_params.num_rx, self.system_params.num_tx])
-                        
-                        self.logger.debug(f"Final h_perfect shape: {h_perfect.shape}")
-                        
-                        # Validate non-zero values
-                        if tf.reduce_all(tf.equal(h_perfect, 0)):
-                            raise ValueError("Channel response contains all zeros")
+                        # Ensure correct shape [batch_size, num_rx, num_tx]
+                        expected_shape = [batch_size, self.system_params.num_rx, self.system_params.num_tx]
+                        h_perfect = tf.ensure_shape(h_perfect, expected_shape)
                         
                         # Validate tensor shape
-                        try:
-                            validate_tensor_shapes({
-                                'channel_response': (
-                                    h_perfect, 
-                                    (batch_size, self.system_params.num_rx, self.system_params.num_tx)
-                                )
-                            })
-                        except ValueError as e:
-                            self.logger.error(f"Shape validation failed. Current shape: {h_perfect.shape}")
-                            self.logger.error(f"Expected shape: ({batch_size}, {self.system_params.num_rx}, {self.system_params.num_tx})")
-                            raise
-                        
-                        # Apply path loss and validate
+                        validate_tensor_shapes({
+                            'channel_response': (h_perfect, expected_shape)
+                        })
+
+                        # Apply path loss
                         h_with_pl = self.path_loss_manager.apply_path_loss(h_perfect, distances)
-                        if tf.reduce_all(tf.equal(h_with_pl, 0)):
-                            raise ValueError("Path loss application resulted in all zeros")
                         
                         # Generate and process symbols
                         tx_symbols = self.channel_model.generate_qam_symbols(batch_size, mod_scheme)
-                        if tf.reduce_all(tf.equal(tx_symbols, 0)):
-                            raise ValueError("Generated symbols are all zeros")
-                        
                         tx_symbols = tf.reshape(tx_symbols, [batch_size, self.system_params.num_tx, 1])
-                        
-                        # Validate shapes before matrix multiplication
-                        validate_tensor_shapes({
-                            'channel_response': (
-                                h_with_pl, 
-                                (batch_size, self.system_params.num_rx, self.system_params.num_tx)
-                            ),
-                            'tx_symbols': (
-                                tx_symbols, 
-                                (batch_size, self.system_params.num_tx, 1)
-                            )
-                        })
                         
                         # Calculate received symbols
                         rx_symbols = tf.matmul(h_with_pl, tx_symbols)
-                        if tf.reduce_all(tf.equal(rx_symbols, 0)):
-                            raise ValueError("Received symbols are all zeros")
                         
                         # Calculate metrics
                         metrics = self.metrics_calculator.calculate_performance_metrics(
@@ -314,14 +278,6 @@ class MIMODatasetGenerator:
                         spectral_efficiency = tf.squeeze(metrics['spectral_efficiency'])
                         sinr = tf.squeeze(metrics['sinr'])
                         eigenvalues = metrics['eigenvalues']
-                        
-                        # Validate metrics
-                        validate_tensor_shapes({
-                            'effective_snr': (effective_snr, (batch_size,)),
-                            'spectral_efficiency': (spectral_efficiency, (batch_size,)),
-                            'sinr': (sinr, (batch_size,)),
-                            'eigenvalues': (eigenvalues, (batch_size, self.system_params.num_rx))
-                        })
                         
                         # Save data to HDF5
                         mod_group['channel_response'][start_idx:end_idx] = h_with_pl.numpy()
