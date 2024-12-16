@@ -227,125 +227,143 @@ class MIMODatasetGenerator:
                         leave=False
                     )
                     
-                for batch_idx in range(samples_per_mod // batch_size):
-                    start_idx = batch_idx * batch_size
-                    end_idx = start_idx + batch_size
-                    
-                    # Generate input data
-                    distances = tf.random.uniform([batch_size], 10.0, 500.0)
-                    snr_db = tf.random.uniform(
-                        [batch_size], 
-                        self.system_params.snr_range[0], 
-                        self.system_params.snr_range[1]
-                    )
-
-                    # Generate and reshape channel response (fix indentation here)
-                    h_perfect, h_noisy = self.channel_model.generate_channel_samples(batch_size, snr_db)
-                    
-                    # Add debug logging
-                    self.logger.debug(f"Original h_perfect shape: {h_perfect.shape}")
-                    
-                    # Ensure correct channel shape using tf.reshape
-                    h_perfect = tf.reshape(h_perfect, 
-                                        [batch_size, self.system_params.num_rx, self.system_params.num_tx])
-                    
-                    self.logger.debug(f"Reshaped h_perfect shape: {h_perfect.shape}")
-                    
-                    # Validate the reshaped tensor
-                    try:
-                        validate_tensor_shapes({
-                            'channel_response': (
-                                h_perfect, 
-                                (batch_size, self.system_params.num_rx, self.system_params.num_tx)
-                            )
-                        })
-                    except ValueError as e:
-                        self.logger.error(f"Shape validation failed. Current shape: {h_perfect.shape}")
-                        self.logger.error(f"Expected shape: ({batch_size}, {self.system_params.num_rx}, {self.system_params.num_tx})")
-                        raise
+                    for batch_idx in range(samples_per_mod // batch_size):
+                        start_idx = batch_idx * batch_size
+                        end_idx = start_idx + batch_size
                         
-                    # Apply path loss
-                    h_with_pl = self.path_loss_manager.apply_path_loss(h_perfect, distances)
+                        # Generate non-zero random values for distances and SNR
+                        distances = tf.random.uniform([batch_size], 10.0, 500.0)
+                        snr_db = tf.random.uniform(
+                            [batch_size], 
+                            self.system_params.snr_range[0], 
+                            self.system_params.snr_range[1]
+                        )
+
+                        # Generate and validate channel response
+                        h_perfect, h_noisy = self.channel_model.generate_channel_samples(batch_size, snr_db)
+                        
+                        # Validate non-zero values in channel response
+                        if tf.reduce_all(tf.equal(h_perfect, 0)):
+                            raise ValueError("Channel response contains all zeros")
+                        
+                        # Add debug logging
+                        self.logger.debug(f"Original h_perfect shape: {h_perfect.shape}")
+                        
+                        # Reshape and validate channel response
+                        h_perfect = tf.reshape(h_perfect, 
+                                            [batch_size, self.system_params.num_rx, self.system_params.num_tx])
+                        
+                        self.logger.debug(f"Reshaped h_perfect shape: {h_perfect.shape}")
+                        
+                        # Validate the reshaped tensor
+                        try:
+                            validate_tensor_shapes({
+                                'channel_response': (
+                                    h_perfect, 
+                                    (batch_size, self.system_params.num_rx, self.system_params.num_tx)
+                                )
+                            })
+                        except ValueError as e:
+                            self.logger.error(f"Shape validation failed. Current shape: {h_perfect.shape}")
+                            self.logger.error(f"Expected shape: ({batch_size}, {self.system_params.num_rx}, {self.system_params.num_tx})")
+                            raise
+                        
+                        # Apply path loss and validate
+                        h_with_pl = self.path_loss_manager.apply_path_loss(h_perfect, distances)
+                        if tf.reduce_all(tf.equal(h_with_pl, 0)):
+                            raise ValueError("Path loss application resulted in all zeros")
                         
                         # Generate and process symbols
-                    tx_symbols = self.channel_model.generate_qam_symbols(batch_size, mod_scheme)
-                    tx_symbols = tf.reshape(tx_symbols, [batch_size, self.system_params.num_tx, 1])
+                        tx_symbols = self.channel_model.generate_qam_symbols(batch_size, mod_scheme)
+                        if tf.reduce_all(tf.equal(tx_symbols, 0)):
+                            raise ValueError("Generated symbols are all zeros")
                         
-                    # Validate shapes before matrix multiplication
-                    validate_tensor_shapes({
-                        'channel_response': (
-                            h_with_pl, 
-                            (batch_size, self.system_params.num_rx, self.system_params.num_tx)
-                        ),
-                        'tx_symbols': (
-                            tx_symbols, 
-                            (batch_size, self.system_params.num_tx, 1)
+                        tx_symbols = tf.reshape(tx_symbols, [batch_size, self.system_params.num_tx, 1])
+                        
+                        # Validate shapes before matrix multiplication
+                        validate_tensor_shapes({
+                            'channel_response': (
+                                h_with_pl, 
+                                (batch_size, self.system_params.num_rx, self.system_params.num_tx)
+                            ),
+                            'tx_symbols': (
+                                tx_symbols, 
+                                (batch_size, self.system_params.num_tx, 1)
+                            )
+                        })
+                        
+                        # Calculate and validate received symbols
+                        rx_symbols = tf.matmul(h_with_pl, tx_symbols)
+                        if tf.reduce_all(tf.equal(rx_symbols, 0)):
+                            raise ValueError("Received symbols are all zeros")
+                        
+                        # Calculate metrics with validated shapes
+                        metrics = self.metrics_calculator.calculate_performance_metrics(
+                            h_with_pl,
+                            tx_symbols,
+                            rx_symbols,
+                            snr_db
                         )
-                    })
                         
-                    # Calculate received symbols
-                    rx_symbols = tf.matmul(h_with_pl, tx_symbols)
+                        # Process and validate metrics
+                        effective_snr = tf.squeeze(metrics['effective_snr'])
+                        spectral_efficiency = tf.squeeze(metrics['spectral_efficiency'])
+                        sinr = tf.squeeze(metrics['sinr'])
+                        eigenvalues = metrics['eigenvalues']
                         
-                    # Validate received symbols shape
-                    validate_tensor_shapes({
-                        'rx_symbols': (
-                            rx_symbols, 
-                            (batch_size, self.system_params.num_rx, 1)
+                        # Validate metrics for zero values
+                        for metric_name, metric_value in {
+                            'effective_snr': effective_snr,
+                            'spectral_efficiency': spectral_efficiency,
+                            'sinr': sinr,
+                            'eigenvalues': eigenvalues
+                        }.items():
+                            if tf.reduce_all(tf.equal(metric_value, 0)):
+                                raise ValueError(f"Metric {metric_name} contains all zeros")
+                        
+                        # Ensure metrics have correct shapes
+                        validate_tensor_shapes({
+                            'effective_snr': (effective_snr, (batch_size,)),
+                            'spectral_efficiency': (spectral_efficiency, (batch_size,)),
+                            'sinr': (sinr, (batch_size,)),
+                            'eigenvalues': (
+                                eigenvalues, 
+                                (batch_size, self.system_params.num_rx)
+                            )
+                        })
+                        
+                        # Save data to HDF5
+                        mod_group['channel_response'][start_idx:end_idx] = h_with_pl.numpy()
+                        mod_group['sinr'][start_idx:end_idx] = sinr.numpy()
+                        mod_group['spectral_efficiency'][start_idx:end_idx] = spectral_efficiency.numpy()
+                        mod_group['effective_snr'][start_idx:end_idx] = effective_snr.numpy()
+                        mod_group['eigenvalues'][start_idx:end_idx] = eigenvalues.numpy()
+                        
+                        # Calculate and save enhanced metrics
+                        enhanced_metrics = self.metrics_calculator.calculate_enhanced_metrics(
+                            h_with_pl, tx_symbols, rx_symbols, snr_db
                         )
-                    })
                         
-                    # Calculate metrics with validated shapes
-                    metrics = self.metrics_calculator.calculate_performance_metrics(
-                        h_with_pl,
-                        tx_symbols,
-                        rx_symbols,
-                        snr_db
-                    )
+                        # Validate enhanced metrics
+                        for metric_name, metric_value in enhanced_metrics.items():
+                            if tf.reduce_all(tf.equal(metric_value, 0)):
+                                raise ValueError(f"Enhanced metric {metric_name} contains all zeros")
                         
-                    # Process and validate metrics
-                    effective_snr = tf.squeeze(metrics['effective_snr'])
-                    spectral_efficiency = tf.squeeze(metrics['spectral_efficiency'])
-                    sinr = tf.squeeze(metrics['sinr'])
-                    eigenvalues = metrics['eigenvalues']
+                        mod_group['ber'][start_idx:end_idx] = enhanced_metrics['ber']
+                        mod_group['throughput'][start_idx:end_idx] = enhanced_metrics['throughput']
                         
-                    # Ensure metrics have correct shapes
-                    validate_tensor_shapes({
-                        'effective_snr': (effective_snr, (batch_size,)),
-                        'spectral_efficiency': (spectral_efficiency, (batch_size,)),
-                        'sinr': (sinr, (batch_size,)),
-                        'eigenvalues': (
-                            eigenvalues, 
-                            (batch_size, self.system_params.num_rx)
+                        # Save path loss data
+                        f['path_loss_data']['fspl'][start_idx:end_idx] = (
+                            self.path_loss_manager.calculate_free_space_path_loss(distances).numpy()
                         )
-                    })
+                        f['path_loss_data']['scenario_pathloss'][start_idx:end_idx] = (
+                            self.path_loss_manager.calculate_path_loss(distances).numpy()
+                        )
                         
-                    # Save data to HDF5
-                    mod_group['channel_response'][start_idx:end_idx] = h_with_pl.numpy()
-                    mod_group['sinr'][start_idx:end_idx] = sinr.numpy()
-                    mod_group['spectral_efficiency'][start_idx:end_idx] = spectral_efficiency.numpy()
-                    mod_group['effective_snr'][start_idx:end_idx] = effective_snr.numpy()
-                    mod_group['eigenvalues'][start_idx:end_idx] = eigenvalues.numpy()
-                        
-                    # Calculate and save enhanced metrics
-                    enhanced_metrics = self.metrics_calculator.calculate_enhanced_metrics(
-                        h_with_pl, tx_symbols, rx_symbols, snr_db
-                    )
-                        
-                    mod_group['ber'][start_idx:end_idx] = enhanced_metrics['ber']
-                    mod_group['throughput'][start_idx:end_idx] = enhanced_metrics['throughput']
-                        
-                    # Save path loss data
-                    f['path_loss_data']['fspl'][start_idx:end_idx] = (
-                        self.path_loss_manager.calculate_free_space_path_loss(distances).numpy()
-                    )
-                    f['path_loss_data']['scenario_pathloss'][start_idx:end_idx] = (
-                        self.path_loss_manager.calculate_path_loss(distances).numpy()
-                    )
-                        
-                    mod_progress.update(batch_size)
-                    total_progress.update(batch_size)
+                        mod_progress.update(batch_size)
+                        total_progress.update(batch_size)
                     
-                mod_progress.close()
+                    mod_progress.close()
                 
                 total_progress.close()
             
