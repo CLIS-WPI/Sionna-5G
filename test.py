@@ -79,7 +79,7 @@ def validate_dataset(file_path):
             print("Error: 'path_loss_data' group is missing!")
 
 # File Path to Dataset
-file_path = "dataset/mimo_dataset_20241213_192705.h5"
+file_path = "dataset/mimo_dataset_20241216_172003.h5"
 
 # Run Validation
 if __name__ == "__main__":
