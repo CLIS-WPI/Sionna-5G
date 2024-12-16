@@ -164,7 +164,36 @@ def validate_tensor_properties(
         )
     
     return tensor
+# Add this to utill/tensor_shape_validator.py
 
+def validate_tensor_shapes(tensors_dict):
+    """
+    Validate multiple tensor shapes at once
+    
+    Args:
+        tensors_dict (dict): Dictionary of tensor names and their expected shapes
+                            Format: {'tensor_name': (tensor, expected_shape)}
+    
+    Raises:
+        ValueError: If any tensor shape doesn't match expected shape
+    """
+    for tensor_name, (tensor, expected_shape) in tensors_dict.items():
+        actual_shape = tensor.shape
+        if len(actual_shape) != len(expected_shape):
+            raise ValueError(
+                f"Rank mismatch for {tensor_name}:\n"
+                f"   Expected rank: {len(expected_shape)}\n"
+                f"   Actual rank: {len(actual_shape)}"
+            )
+        
+        for dim_actual, dim_expected in zip(actual_shape, expected_shape):
+            if dim_expected is not None and dim_actual != dim_expected:
+                raise ValueError(
+                    f"Shape mismatch for {tensor_name}:\n"
+                    f"   Expected shape: {expected_shape}\n"
+                    f"   Actual shape: {actual_shape}"
+                )
+            
 # Example usage demonstrating utility functions
 def example_usage():
     # Shape validation

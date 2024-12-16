@@ -196,36 +196,29 @@ class MIMODatasetGenerator:
         save_path: str = 'dataset/mimo_dataset.h5'
     ):
         """
-        Generate comprehensive MIMO dataset
+        Generate comprehensive MIMO dataset with enhanced shape validation
         
         Args:
             num_samples (int): Total number of samples to generate
             save_path (str): Path to save HDF5 dataset
         """
         try:
-            # Prepare output directory
             self._prepare_output_directory(save_path)
             
-            # Batch size and samples per modulation
             batch_size = min(4096, num_samples)
             samples_per_mod = num_samples // len(self.system_params.modulation_schemes)
             
-            # Create HDF5 file
             with h5py.File(save_path, 'w') as f:
-                # Create dataset structure
                 self._create_dataset_structure(f, num_samples)
                 
-                # Progress tracking
                 total_progress = tqdm(
                     total=num_samples, 
                     desc="Total Dataset Generation", 
                     unit="samples"
                 )
                 
-                # Generate data for each modulation scheme
                 for mod_scheme in self.system_params.modulation_schemes:
                     mod_group = f['modulation_data'][mod_scheme]
-                    
                     mod_progress = tqdm(
                         total=samples_per_mod, 
                         desc=f"{mod_scheme} Generation", 
@@ -233,12 +226,11 @@ class MIMODatasetGenerator:
                         leave=False
                     )
                     
-                    # Iterate through batches
                     for batch_idx in range(samples_per_mod // batch_size):
                         start_idx = batch_idx * batch_size
                         end_idx = start_idx + batch_size
                         
-                        # Generate random distances and SNR
+                        # Generate input data
                         distances = tf.random.uniform([batch_size], 10.0, 500.0)
                         snr_db = tf.random.uniform(
                             [batch_size], 
@@ -246,52 +238,78 @@ class MIMODatasetGenerator:
                             self.system_params.snr_range[1]
                         )
                         
-                        # Generate channel samples
+                        # Generate and reshape channel response
                         h_perfect, h_noisy = self.channel_model.generate_channel_samples(batch_size, snr_db)
                         
-                        # Fix channel response shape - ensure it's [batch_size, num_rx, num_tx]
+                        # Ensure correct channel shape
                         if len(h_perfect.shape) == 4:
-                        # Take diagonal elements to get [batch_size, num_rx, num_tx]
-                            h_perfect = tf.linalg.diag_part(h_perfect)  # This will reduce from 4D to 3D
-                            h_perfect = tf.reshape(h_perfect, [batch_size, self.system_params.num_rx, self.system_params.num_tx])
+                            # Take first slice of second dimension to reduce from 4D to 3D
+                            h_perfect = h_perfect[:, 0, :, :]
+                        
+                        # Validate channel shape
+                        validate_tensor_shapes({
+                            'channel_response': (
+                                h_perfect, 
+                                (batch_size, self.system_params.num_rx, self.system_params.num_tx)
+                            )
+                        })
                         
                         # Apply path loss
                         h_with_pl = self.path_loss_manager.apply_path_loss(h_perfect, distances)
                         
-                        # Generate and process symbols with correct shape
+                        # Generate and process symbols
                         tx_symbols = self.channel_model.generate_qam_symbols(batch_size, mod_scheme)
                         tx_symbols = tf.reshape(tx_symbols, [batch_size, self.system_params.num_tx, 1])
                         
-                        # Debug prints to verify shapes
-                        print("h_with_pl shape:", h_with_pl.shape)
-                        print("tx_symbols shape:", tx_symbols.shape)
+                        # Validate shapes before matrix multiplication
+                        validate_tensor_shapes({
+                            'channel_response': (
+                                h_with_pl, 
+                                (batch_size, self.system_params.num_rx, self.system_params.num_tx)
+                            ),
+                            'tx_symbols': (
+                                tx_symbols, 
+                                (batch_size, self.system_params.num_tx, 1)
+                            )
+                        })
                         
-                        # Perform matrix multiplication
+                        # Calculate received symbols
                         rx_symbols = tf.matmul(h_with_pl, tx_symbols)
                         
-                        # Calculate metrics
+                        # Validate received symbols shape
+                        validate_tensor_shapes({
+                            'rx_symbols': (
+                                rx_symbols, 
+                                (batch_size, self.system_params.num_rx, 1)
+                            )
+                        })
+                        
+                        # Calculate metrics with validated shapes
                         metrics = self.metrics_calculator.calculate_performance_metrics(
                             h_with_pl,
                             tx_symbols,
                             rx_symbols,
                             snr_db
                         )
-
-                        # Process metrics to ensure correct shapes
+                        
+                        # Process and validate metrics
                         effective_snr = tf.squeeze(metrics['effective_snr'])
                         spectral_efficiency = tf.squeeze(metrics['spectral_efficiency'])
                         sinr = tf.squeeze(metrics['sinr'])
                         eigenvalues = metrics['eigenvalues']
                         
-                        # Ensure all metrics have correct shape
-                        if len(effective_snr.shape) > 1:
-                            effective_snr = tf.reduce_mean(effective_snr, axis=1)
-                        if len(spectral_efficiency.shape) > 1:
-                            spectral_efficiency = tf.reduce_mean(spectral_efficiency, axis=1)
-                        if len(sinr.shape) > 1:
-                            sinr = tf.reduce_mean(sinr, axis=1)
-
-                        # Save processed data to HDF5
+                        # Ensure metrics have correct shapes
+                        validate_tensor_shapes({
+                            'effective_snr': (effective_snr, (batch_size,)),
+                            'spectral_efficiency': (spectral_efficiency, (batch_size,)),
+                            'sinr': (sinr, (batch_size,)),
+                            'eigenvalues': (
+                                eigenvalues, 
+                                (batch_size, self.system_params.num_rx)
+                            )
+                        })
+                        
+                        # Save data to HDF5
                         mod_group['channel_response'][start_idx:end_idx] = h_with_pl.numpy()
                         mod_group['sinr'][start_idx:end_idx] = sinr.numpy()
                         mod_group['spectral_efficiency'][start_idx:end_idx] = spectral_efficiency.numpy()
@@ -314,7 +332,6 @@ class MIMODatasetGenerator:
                             self.path_loss_manager.calculate_path_loss(distances).numpy()
                         )
                         
-                        # Update progress
                         mod_progress.update(batch_size)
                         total_progress.update(batch_size)
                     
@@ -326,7 +343,7 @@ class MIMODatasetGenerator:
         
         except Exception as e:
             self.logger.error(f"Dataset generation failed: {str(e)}")
-            self.logger.error(f"Detailed error traceback:", exc_info=True)
+            self.logger.error("Detailed error traceback:", exc_info=True)
             raise
 
     def _get_dataset_units(self, dataset_name: str) -> str:
