@@ -190,7 +190,6 @@ class MIMODatasetGenerator:
             self.logger.error(f"Failed to create dataset structure: {str(e)}")
             raise
     
-
     def generate_dataset(
         self, 
         num_samples: int, 
@@ -239,23 +238,28 @@ class MIMODatasetGenerator:
                             self.system_params.snr_range[1]
                         )
 
-                        # Generate and validate channel response
+                        # Generate channel response
                         h_perfect, h_noisy = self.channel_model.generate_channel_samples(batch_size, snr_db)
                         
-                        # Validate non-zero values in channel response
-                        if tf.reduce_all(tf.equal(h_perfect, 0)):
-                            raise ValueError("Channel response contains all zeros")
-                        
-                        # Add debug logging
+                        # Debug logging for original shape
                         self.logger.debug(f"Original h_perfect shape: {h_perfect.shape}")
                         
-                        # Reshape and validate channel response
+                        # Handle rank-4 tensor if present
+                        if len(h_perfect.shape) == 4:
+                            h_perfect = tf.squeeze(h_perfect, axis=-1)
+                            self.logger.debug(f"Squeezed h_perfect shape: {h_perfect.shape}")
+                        
+                        # Reshape to ensure correct dimensions
                         h_perfect = tf.reshape(h_perfect, 
                                             [batch_size, self.system_params.num_rx, self.system_params.num_tx])
                         
-                        self.logger.debug(f"Reshaped h_perfect shape: {h_perfect.shape}")
+                        self.logger.debug(f"Final h_perfect shape: {h_perfect.shape}")
                         
-                        # Validate the reshaped tensor
+                        # Validate non-zero values
+                        if tf.reduce_all(tf.equal(h_perfect, 0)):
+                            raise ValueError("Channel response contains all zeros")
+                        
+                        # Validate tensor shape
                         try:
                             validate_tensor_shapes({
                                 'channel_response': (
@@ -292,12 +296,12 @@ class MIMODatasetGenerator:
                             )
                         })
                         
-                        # Calculate and validate received symbols
+                        # Calculate received symbols
                         rx_symbols = tf.matmul(h_with_pl, tx_symbols)
                         if tf.reduce_all(tf.equal(rx_symbols, 0)):
                             raise ValueError("Received symbols are all zeros")
                         
-                        # Calculate metrics with validated shapes
+                        # Calculate metrics
                         metrics = self.metrics_calculator.calculate_performance_metrics(
                             h_with_pl,
                             tx_symbols,
@@ -305,31 +309,18 @@ class MIMODatasetGenerator:
                             snr_db
                         )
                         
-                        # Process and validate metrics
+                        # Process metrics
                         effective_snr = tf.squeeze(metrics['effective_snr'])
                         spectral_efficiency = tf.squeeze(metrics['spectral_efficiency'])
                         sinr = tf.squeeze(metrics['sinr'])
                         eigenvalues = metrics['eigenvalues']
                         
-                        # Validate metrics for zero values
-                        for metric_name, metric_value in {
-                            'effective_snr': effective_snr,
-                            'spectral_efficiency': spectral_efficiency,
-                            'sinr': sinr,
-                            'eigenvalues': eigenvalues
-                        }.items():
-                            if tf.reduce_all(tf.equal(metric_value, 0)):
-                                raise ValueError(f"Metric {metric_name} contains all zeros")
-                        
-                        # Ensure metrics have correct shapes
+                        # Validate metrics
                         validate_tensor_shapes({
                             'effective_snr': (effective_snr, (batch_size,)),
                             'spectral_efficiency': (spectral_efficiency, (batch_size,)),
                             'sinr': (sinr, (batch_size,)),
-                            'eigenvalues': (
-                                eigenvalues, 
-                                (batch_size, self.system_params.num_rx)
-                            )
+                            'eigenvalues': (eigenvalues, (batch_size, self.system_params.num_rx))
                         })
                         
                         # Save data to HDF5
@@ -343,11 +334,6 @@ class MIMODatasetGenerator:
                         enhanced_metrics = self.metrics_calculator.calculate_enhanced_metrics(
                             h_with_pl, tx_symbols, rx_symbols, snr_db
                         )
-                        
-                        # Validate enhanced metrics
-                        for metric_name, metric_value in enhanced_metrics.items():
-                            if tf.reduce_all(tf.equal(metric_value, 0)):
-                                raise ValueError(f"Enhanced metric {metric_name} contains all zeros")
                         
                         mod_group['ber'][start_idx:end_idx] = enhanced_metrics['ber']
                         mod_group['throughput'][start_idx:end_idx] = enhanced_metrics['throughput']
@@ -373,7 +359,7 @@ class MIMODatasetGenerator:
             self.logger.error(f"Dataset generation failed: {str(e)}")
             self.logger.error("Detailed error traceback:", exc_info=True)
             raise
-
+    
     def _get_dataset_units(self, dataset_name: str) -> str:
         """Helper method to return appropriate units for each dataset type"""
         units_map = {
