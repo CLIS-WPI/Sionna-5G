@@ -128,18 +128,6 @@ class MetricsCalculator:
         rx_symbols: tf.Tensor, 
         snr_db: tf.Tensor
     ) -> Dict[str, Any]:
-        """
-        Calculate advanced metrics including Bit Error Rate (BER) and throughput with improved accuracy
-        
-        Args:
-            channel_response (tf.Tensor): MIMO channel matrix [batch_size, num_rx, num_tx]
-            tx_symbols (tf.Tensor): Transmitted symbols [batch_size, num_tx, 1]
-            rx_symbols (tf.Tensor): Received symbols [batch_size, num_rx, 1]
-            snr_db (tf.Tensor): Signal-to-Noise Ratio in dB [batch_size]
-        
-        Returns:
-            Dict[str, Any]: Enhanced performance metrics
-        """
         try:
             # Calculate base performance metrics
             base_metrics = self.calculate_performance_metrics(
@@ -152,11 +140,19 @@ class MetricsCalculator:
             # Apply channel equalization for improved symbol detection
             H = channel_response
             H_H = tf.transpose(H, perm=[0, 2, 1], conjugate=True)
-            H_inv = tf.linalg.inv(tf.matmul(H_H, H) + 1e-6 * tf.eye(tf.shape(H)[2]))
+            
+            # Create identity matrix with correct dtype
+            epsilon = tf.cast(1e-6, dtype=tf.complex64)
+            I = tf.eye(tf.shape(H)[2], batch_shape=[batch_size], dtype=tf.complex64)
+            I = I * epsilon  # Multiply after casting to ensure complex64
+            
+            # Now both tensors will be complex64
+            HH = tf.matmul(H_H, H)
+            H_inv = tf.linalg.inv(HH + I)
             equalizer = tf.matmul(H_inv, H_H)
             rx_symbols_eq = tf.matmul(equalizer, rx_symbols)
             
-            # Normalize received symbols
+            # Rest of the function remains the same...
             rx_symbols_norm = rx_symbols_eq / tf.sqrt(
                 tf.reduce_mean(tf.abs(rx_symbols_eq)**2, axis=[1, 2], keepdims=True)
             )
