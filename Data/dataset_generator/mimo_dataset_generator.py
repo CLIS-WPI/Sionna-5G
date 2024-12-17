@@ -15,7 +15,7 @@ from core.path_loss_model import PathLossManager
 from utill.logging_config import LoggerManager
 from utill.tensor_shape_validator import validate_tensor_shapes  
 from datetime import datetime
-
+from integrity.dataset_integrity_checker import MIMODatasetIntegrityChecker
 class MIMODatasetGenerator:
     """
     Comprehensive MIMO dataset generation framework
@@ -46,7 +46,40 @@ class MIMODatasetGenerator:
         self.channel_model = ChannelModelManager(self.system_params)
         self.metrics_calculator = MetricsCalculator(self.system_params)
         self.path_loss_manager = PathLossManager(self.system_params)
-    
+        self.integrity_checker = None
+        self.validation_thresholds = {
+            'eigenvalues': {'min': 1e-6, 'max': 10.0},
+            'effective_snr': {'min': -30.0, 'max': 40.0},
+            'spectral_efficiency': {'min': 0.0, 'max': 30.0},
+            'ber': {'min': 0.0, 'max': 0.5},
+            'sinr': {'min': -10.0, 'max': 30.0}
+        }
+
+    def _validate_batch_data(self, batch_data: dict) -> tuple[bool, list[str]]:
+        """
+        Validate batch data against defined thresholds
+        
+        Args:
+            batch_data: Dictionary containing batch tensors
+            
+        Returns:
+            Tuple[bool, List[str]]: Validation status and list of error messages
+        """
+        errors = []
+        try:
+            for key, threshold in self.validation_thresholds.items():
+                if key in batch_data:
+                    data = batch_data[key].numpy()
+                    if np.any(data < threshold['min']) or np.any(data > threshold['max']):
+                        errors.append(f"{key}: values outside threshold range [{threshold['min']}, {threshold['max']}]")
+                    if np.any(~np.isfinite(data)):
+                        errors.append(f"{key}: contains non-finite values")
+                        
+            return len(errors) == 0, errors
+        except Exception as e:
+            self.logger.error(f"Batch validation error: {str(e)}")
+            return False, [str(e)]
+                
     def _prepare_output_directory(self, save_path: str):
         """
         Prepare output directory for dataset
@@ -315,6 +348,33 @@ class MIMODatasetGenerator:
                         fspl = tf.slice(fspl, [0], [batch_size])
                         scenario_pl = tf.slice(scenario_pl, [0], [batch_size])
 
+                        # Validate batch data
+                        batch_data = {
+                            'eigenvalues': eigenvalues,
+                            'effective_snr': effective_snr,
+                            'spectral_efficiency': spectral_efficiency,
+                            'sinr': sinr,
+                            'ber': enhanced_metrics['ber']
+                        }
+
+                        MAX_RETRIES = 3
+                        retry_count = 0
+                        while retry_count < MAX_RETRIES:
+                            is_valid, validation_errors = self._validate_batch_data(batch_data)
+                            if is_valid:
+                                break
+                            
+                            retry_count += 1
+                            self.logger.warning(f"Invalid batch at index {batch_idx} (attempt {retry_count}/{MAX_RETRIES}):")
+                            for error in validation_errors:
+                                self.logger.warning(f"  - {error}")
+                            
+
+                        if retry_count == MAX_RETRIES:
+                            self.logger.error(f"Failed to generate valid batch after {MAX_RETRIES} attempts")
+                            continue
+
+                        # If validation passes, proceed with saving to HDF5...
                         # Save path loss data with correct shapes
                         f['path_loss_data']['fspl'][start_idx:end_idx] = fspl.numpy()
                         f['path_loss_data']['scenario_pathloss'][start_idx:end_idx] = scenario_pl.numpy()
@@ -325,7 +385,12 @@ class MIMODatasetGenerator:
                     mod_progress.close()
                 
                 total_progress.close()
-            
+
+            # Verify the complete dataset
+            if self.verify_dataset(save_path):
+                self.logger.info(f"Dataset successfully generated and verified at {save_path}")
+            else:
+                self.logger.warning("Dataset generated but failed verification")
             self.logger.info(f"Dataset successfully generated at {save_path}")
         
         except Exception as e:
@@ -348,37 +413,42 @@ class MIMODatasetGenerator:
         return units_map.get(dataset_name, 'dimensionless')
 
     
-    def verify_dataset(self, save_path: str):
+    def verify_dataset(self, save_path: str) -> bool:
         """
-        Verify dataset integrity and generate statistics
+        Verify dataset integrity using MIMODatasetIntegrityChecker
         
         Args:
-            save_path (str): Path to HDF5 dataset
+            save_path: Path to the HDF5 dataset
+            
+        Returns:
+            bool: True if verification passes, False otherwise
         """
         try:
-            with h5py.File(save_path, 'r') as f:
-                # Detailed dataset verification logic
-                total_size = 0
-                
-                for mod_scheme in self.system_params.modulation_schemes:
-                    mod_group = f['modulation_data'][mod_scheme]
-                    
-                    self.logger.info(f"\n{mod_scheme} Dataset Statistics:")
-                    for dataset_name, dataset in mod_group.items():
-                        size_mb = dataset.size * dataset.dtype.itemsize / (1024*1024)
-                        total_size += size_mb
-                        
-                        self.logger.info(f"  {dataset_name}:")
-                        self.logger.info(f"    Shape: {dataset.shape}")
-                        self.logger.info(f"    Type: {dataset.dtype}")
-                        self.logger.info(f"    Size: {size_mb:.2f} MB")
-                
-                self.logger.info(f"\nTotal dataset size: {total_size:.2f} MB")
+            self.integrity_checker = MIMODatasetIntegrityChecker(save_path)
+            integrity_report = self.integrity_checker.check_dataset_integrity()
             
-            return True
-        
+            if integrity_report['overall_status']:
+                self.logger.info("Dataset verification successful")
+                
+                # Log detailed statistics
+                for mod_scheme, mod_details in integrity_report['modulation_schemes'].items():
+                    self.logger.info(f"\n{mod_scheme} Statistics:")
+                    self.logger.info(f"  Samples: {mod_details['samples']}")
+                    self.logger.info(f"  Integrity: {'✅ VALID' if mod_details['integrity'] else '❌ INVALID'}")
+                    
+                    for dataset_name, dataset_info in mod_details['datasets'].items():
+                        self.logger.info(f"  {dataset_name}:")
+                        self.logger.info(f"    Shape: {dataset_info['shape']}")
+                        self.logger.info(f"    Statistics: {dataset_info['statistics']}")
+                
+                return True
+            else:
+                self.logger.warning("Dataset verification failed")
+                self.logger.debug(f"Integrity report: {integrity_report}")
+                return False
+                
         except Exception as e:
-            self.logger.error(f"Dataset verification failed: {e}")
+            self.logger.error(f"Dataset verification error: {str(e)}")
             return False
 
 # Example usage
