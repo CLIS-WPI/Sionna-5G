@@ -155,7 +155,7 @@ class ChannelModelManager:
     
     
     
-    def generate_channel_samples(self, batch_size: int, snr_db: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+    def generate_channel_samples(self, batch_size: int, snr_db: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
         try:
             # Cast batch_size to int32
             batch_size = tf.cast(batch_size, tf.int32)
@@ -180,6 +180,14 @@ class ChannelModelManager:
             # Normalize channel matrix
             h_normalized = normalize_complex_tensor(h)
             
+            # Calculate eigenvalues
+            h_hermitian = tf.matmul(
+                h_normalized, 
+                tf.transpose(h_normalized, perm=[0, 2, 1], conjugate=True)
+            )
+            eigenvalues = tf.linalg.eigvals(h_hermitian)
+            eigenvalues = tf.abs(eigenvalues)  # Get magnitude of complex eigenvalues
+            
             # Calculate noise power
             noise_power = tf.cast(1.0 / tf.pow(10.0, snr_db / 10.0), dtype=tf.float32)
             noise_power = tf.maximum(noise_power, 1e-10)
@@ -191,10 +199,75 @@ class ChannelModelManager:
             noise_imag = tf.random.normal(tf.shape(h_normalized), mean=0.0, stddev=noise_std)
             noise = tf.complex(noise_real, noise_imag)
             
-            return h_normalized, h_normalized + noise
+            # Calculate noisy channel
+            noisy_channel = h_normalized + noise
             
+            return h_normalized, noisy_channel, eigenvalues
+                
         except Exception as e:
             self.logger.error(f"Error generating channel samples: {str(e)}")
+            raise
+
+    def calculate_effective_snr(self, channel_response: tf.Tensor, snr_db: tf.Tensor) -> tf.Tensor:
+        """
+        Calculate effective SNR based on channel response and nominal SNR
+        """
+        try:
+            # Convert SNR to linear scale
+            snr_linear = tf.pow(10.0, snr_db/10.0)
+            
+            # Calculate channel gain (Frobenius norm squared)
+            channel_gain = tf.reduce_sum(
+                tf.abs(channel_response)**2, 
+                axis=[1, 2]
+            ) / (self.system_params.num_rx * self.system_params.num_tx)
+            
+            # Calculate effective SNR
+            effective_snr = channel_gain * snr_linear
+            
+            # Convert back to dB
+            effective_snr_db = 10.0 * tf.math.log(effective_snr) / tf.math.log(10.0)
+            
+            # Clip values to reasonable range
+            effective_snr_db = tf.clip_by_value(effective_snr_db, -30.0, 40.0)
+            
+            return effective_snr_db
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating effective SNR: {str(e)}")
+            raise
+
+    def calculate_spectral_efficiency(self, channel_response: tf.Tensor, snr_db: tf.Tensor) -> tf.Tensor:
+        """
+        Calculate spectral efficiency using the channel capacity formula
+        """
+        try:
+            # Convert SNR to linear scale
+            snr_linear = tf.pow(10.0, snr_db/10.0)
+            snr_linear = tf.reshape(snr_linear, [-1, 1, 1])
+            
+            # Calculate channel correlation matrix
+            h_hermitian = tf.matmul(
+                channel_response, 
+                tf.transpose(channel_response, perm=[0, 2, 1], conjugate=True)
+            )
+            
+            # Calculate eigenvalues
+            eigenvalues = tf.abs(tf.linalg.eigvals(h_hermitian))
+            
+            # Calculate capacity using eigenvalues
+            capacity = tf.reduce_sum(
+                tf.math.log(1.0 + snr_linear * eigenvalues) / tf.math.log(2.0),
+                axis=1
+            )
+            
+            # Convert to spectral efficiency (bits/s/Hz)
+            spectral_efficiency = capacity / self.system_params.num_tx
+            
+            return spectral_efficiency
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating spectral efficiency: {str(e)}")
             raise
         
     def generate_mimo_channel(

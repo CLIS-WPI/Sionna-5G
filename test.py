@@ -1,86 +1,230 @@
 import h5py
 import numpy as np
+import tensorflow as tf
 import os
+from datetime import datetime
+from typing import Dict, Any
 
-# Define expected ranges and metrics
-EXPECTED_RANGES = {
-    "ber": {"range": (0, 1)},  # Bit Error Rate
-    "sinr": {"range": (0, 40)},  # SINR in dB
-    "spectral_efficiency": {"range": (0, 10)},  # Spectral Efficiency
-    "throughput": {"range": (0, 100)},  # Throughput percentage
-    "effective_snr": {"range": (-10, 30)},  # Effective SNR
-    "eigenvalues": {"shape": (-1, 4)},  # Channel Eigenvalues
-    "channel_response": {"shape": (-1, 4, 4)},  # Channel Matrix
-    "path_loss_data/fspl": {"range": (20, 160)},  # Path Loss
-    "path_loss_data/scenario_pathloss": {"range": (20, 160)},  # Scenario-Specific Path Loss
-}
-
-# Function to display statistics for numerical features
-def check_statistics(data, feature_name, expected_range=None, expected_shape=None):
-    print(f"\n--- Validating {feature_name} ---")
-    print(f"Shape: {data.shape}")
-    print(f"Min: {np.min(data)}, Max: {np.max(data)}")
-    print(f"Mean: {np.mean(data)}, Variance: {np.var(data)}")
-
-    # Check range
-    if expected_range:
-        min_val, max_val = expected_range
-        invalid = np.where((data < min_val) | (data > max_val))
-        if len(invalid[0]) > 0:
-            print(f"Warning: {len(invalid[0])} values out of range [{min_val}, {max_val}].")
-        else:
-            print(f"All values within the range [{min_val}, {max_val}].")
+class MIMODatasetValidator:
+    """
+    Comprehensive MIMO dataset validation tool
+    """
     
-    # Check shape
-    if expected_shape:
-        if data.shape[1:] != expected_shape[1:]:
-            print(f"Warning: Shape mismatch. Expected: {expected_shape}, Found: {data.shape}")
+    def __init__(self, file_path: str):
+        self.file_path = file_path
+        self.expected_ranges = {
+            "ber": {
+                "range": (0, 1),
+                "description": "Bit Error Rate"
+            },
+            "sinr": {
+                "range": (-10, 40),
+                "description": "Signal-to-Interference-plus-Noise Ratio"
+            },
+            "spectral_efficiency": {
+                "range": (0, 12),
+                "description": "Spectral Efficiency"
+            },
+            "effective_snr": {
+                "range": (-10, 30),
+                "description": "Effective SNR"
+            },
+            "eigenvalues": {
+                "shape": (-1, 4),
+                "description": "Channel Matrix Eigenvalues"
+            },
+            "channel_response": {
+                "shape": (-1, 4, 4),
+                "description": "Complex Channel Response"
+            },
+            "path_loss_data/fspl": {
+                "range": (20, 160),
+                "description": "Free Space Path Loss"
+            },
+            "path_loss_data/scenario_pathloss": {
+                "range": (20, 160),
+                "description": "Scenario Path Loss"
+            }
+        }
 
-# Validate features inside modulation_data
-def validate_modulation_data(group):
-    for mod_scheme in group:
-        print(f"\n--- Modulation Scheme: {mod_scheme} ---")
-        for feature in group[mod_scheme]:
-            if feature in EXPECTED_RANGES:
-                data = np.array(group[mod_scheme][feature])
-                check_statistics(data, f"{mod_scheme}/{feature}", 
-                                 expected_range=EXPECTED_RANGES[feature].get("range"),
-                                 expected_shape=EXPECTED_RANGES[feature].get("shape"))
+    def check_statistics(self, data: np.ndarray, feature_name: str, 
+                        expected_range=None, expected_shape=None) -> Dict[str, Any]:
+        """Calculate comprehensive statistics for dataset features"""
+        stats = {
+            "shape": data.shape,
+            "dtype": str(data.dtype)
+        }
 
-# Validate path loss data
-def validate_path_loss(group):
-    for path_feature in group:
-        full_key = f"path_loss_data/{path_feature}"
-        if full_key in EXPECTED_RANGES:
-            data = np.array(group[path_feature])
-            check_statistics(data, full_key, expected_range=EXPECTED_RANGES[full_key]["range"])
-
-# Main validation function
-def validate_dataset(file_path):
-    if not os.path.exists(file_path):
-        print(f"Error: File '{file_path}' does not exist.")
-        return
-
-    print(f"Reading Dataset: {file_path}")
-    with h5py.File(file_path, 'r') as f:
-        print("\n--- Dataset Structure ---")
-        f.visit(print)  # Print the structure of the HDF5 file
-        
-        # Validate modulation data
-        if "modulation_data" in f:
-            validate_modulation_data(f["modulation_data"])
+        if np.iscomplexobj(data):
+            stats.update({
+                "magnitude_stats": {
+                    "min": float(np.min(np.abs(data))),
+                    "max": float(np.max(np.abs(data))),
+                    "mean": float(np.mean(np.abs(data))),
+                    "std": float(np.std(np.abs(data)))
+                },
+                "phase_stats": {
+                    "min": float(np.min(np.angle(data))),
+                    "max": float(np.max(np.angle(data))),
+                    "mean": float(np.mean(np.angle(data))),
+                    "std": float(np.std(np.angle(data)))
+                }
+            })
         else:
-            print("Error: 'modulation_data' group is missing!")
+            stats.update({
+                "numeric_stats": {
+                    "min": float(np.min(data)),
+                    "max": float(np.max(data)),
+                    "mean": float(np.mean(data)),
+                    "std": float(np.std(data))
+                }
+            })
 
-        # Validate path loss data
-        if "path_loss_data" in f:
-            validate_path_loss(f["path_loss_data"])
+        # Range validation
+        if expected_range:
+            min_val, max_val = expected_range
+            invalid_count = np.sum((np.real(data) < min_val) | (np.real(data) > max_val))
+            stats["range_check"] = {
+                "expected_range": expected_range,
+                "in_range": invalid_count == 0,
+                "invalid_count": int(invalid_count)
+            }
+
+        # Shape validation
+        if expected_shape:
+            stats["shape_check"] = {
+                "expected_shape": expected_shape,
+                "shape_valid": data.shape[1:] == expected_shape[1:]
+            }
+
+        return stats
+
+    def validate_modulation_data(self, group: h5py.Group) -> Dict[str, Any]:
+        """Validate data for each modulation scheme"""
+        results = {}
+        for mod_scheme in group:
+            mod_results = {}
+            print(f"\nValidating {mod_scheme} modulation scheme...")
+            
+            for feature in group[mod_scheme]:
+                if feature in self.expected_ranges:
+                    data = np.array(group[mod_scheme][feature])
+                    mod_results[feature] = self.check_statistics(
+                        data,
+                        f"{mod_scheme}/{feature}",
+                        expected_range=self.expected_ranges[feature].get("range"),
+                        expected_shape=self.expected_ranges[feature].get("shape")
+                    )
+            results[mod_scheme] = mod_results
+        return results
+
+    def validate_path_loss(self, group: h5py.Group) -> Dict[str, Any]:
+        """Validate path loss measurements"""
+        results = {}
+        for path_feature in group:
+            full_key = f"path_loss_data/{path_feature}"
+            if full_key in self.expected_ranges:
+                data = np.array(group[path_feature])
+                results[path_feature] = self.check_statistics(
+                    data,
+                    full_key,
+                    expected_range=self.expected_ranges[full_key]["range"]
+                )
+        return results
+
+    def validate_dataset(self) -> Dict[str, Any]:
+        """Main validation function"""
+        if not os.path.exists(self.file_path):
+            raise FileNotFoundError(f"Dataset file '{self.file_path}' not found.")
+
+        validation_results = {
+            "file_path": self.file_path,
+            "validation_time": datetime.now().isoformat(),
+            "structure": {},
+            "modulation_data": {},
+            "path_loss_data": {},
+            "configuration": {}
+        }
+
+        try:
+            with h5py.File(self.file_path, 'r') as f:
+                # Validate structure
+                validation_results["structure"]["groups"] = list(f.keys())
+                
+                # Validate configuration
+                if "configuration" in f:
+                    validation_results["configuration"] = {
+                        key: value for key, value in f["configuration"].attrs.items()
+                    }
+
+                # Validate modulation data
+                if "modulation_data" in f:
+                    validation_results["modulation_data"] = self.validate_modulation_data(f["modulation_data"])
+                else:
+                    validation_results["errors"] = validation_results.get("errors", []) + ["Missing modulation_data group"]
+
+                # Validate path loss data
+                if "path_loss_data" in f:
+                    validation_results["path_loss_data"] = self.validate_path_loss(f["path_loss_data"])
+                else:
+                    validation_results["errors"] = validation_results.get("errors", []) + ["Missing path_loss_data group"]
+
+                # Calculate total dataset size
+                total_size = sum(
+                    dataset.size * dataset.dtype.itemsize 
+                    for dataset in f.values() 
+                    if isinstance(dataset, h5py.Dataset)
+                )
+                validation_results["dataset_size_bytes"] = total_size
+
+        except Exception as e:
+            validation_results["status"] = "failed"
+            validation_results["error"] = str(e)
         else:
-            print("Error: 'path_loss_data' group is missing!")
+            validation_results["status"] = "success"
 
-# File Path to Dataset
-file_path = "dataset/mimo_dataset_20241216_172003.h5"
+        return validation_results
 
-# Run Validation
+def print_validation_results(results: Dict[str, Any]):
+    """Print formatted validation results"""
+    print("\n=== MIMO Dataset Validation Results ===")
+    print(f"File: {results['file_path']}")
+    print(f"Status: {results['status']}")
+    print(f"Dataset Size: {results['dataset_size_bytes'] / (1024*1024):.2f} MB")
+    
+    print("\nConfiguration:")
+    for key, value in results['configuration'].items():
+        print(f"  {key}: {value}")
+
+    print("\nModulation Schemes:")
+    for mod_scheme, mod_data in results['modulation_data'].items():
+        print(f"\n{mod_scheme}:")
+        for feature, stats in mod_data.items():
+            print(f"  {feature}:")
+            print(f"    Shape: {stats['shape']}")
+            if 'numeric_stats' in stats:
+                print(f"    Range: [{stats['numeric_stats']['min']:.4f}, {stats['numeric_stats']['max']:.4f}]")
+                print(f"    Mean: {stats['numeric_stats']['mean']:.4f}")
+                print(f"    Std: {stats['numeric_stats']['std']:.4f}")
+
+    print("\nPath Loss Data:")
+    for feature, stats in results['path_loss_data'].items():
+        print(f"\n{feature}:")
+        if 'numeric_stats' in stats:
+            print(f"  Range: [{stats['numeric_stats']['min']:.4f}, {stats['numeric_stats']['max']:.4f}]")
+            print(f"  Mean: {stats['numeric_stats']['mean']:.4f}")
+            print(f"  Std: {stats['numeric_stats']['std']:.4f}")
+
+def main():
+    # Example usage
+    file_path = "dataset/mimo_dataset_20241216_215734.h5"
+    validator = MIMODatasetValidator(file_path)
+    
+    try:
+        results = validator.validate_dataset()
+        print_validation_results(results)
+    except Exception as e:
+        print(f"Error validating dataset: {e}")
+
 if __name__ == "__main__":
-    validate_dataset(file_path)
+    main()
