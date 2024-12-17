@@ -190,11 +190,19 @@ class MetricsCalculator:
             normalization_factor = tf.cast(normalization_factor, dtype=tf.complex64)
             rx_symbols_norm = rx_symbols_eq / normalization_factor
             
-            # Get bits per symbol for current modulation
-            bits_per_symbol = self.get_bits_per_symbol(self.current_modulation)
+            # Improved symbol to bit conversion
+            rx_real = tf.cast(tf.math.real(rx_symbols_norm) > 0, tf.int32)
+            rx_imag = tf.cast(tf.math.imag(rx_symbols_norm) > 0, tf.int32)
             
-            # Generate tx bits - match the shape with rx_bits
-            total_bits = self.system_params.num_tx * bits_per_symbol * 2  # Multiply by 2 for I/Q
+            # Reshape real and imaginary parts
+            rx_real = tf.reshape(rx_real, [batch_size, -1])
+            rx_imag = tf.reshape(rx_imag, [batch_size, -1])
+            
+            # Combine real and imaginary bits
+            rx_bits_combined = tf.concat([rx_real, rx_imag], axis=1)
+            
+            # Generate tx bits to match rx_bits_combined shape
+            total_bits = tf.shape(rx_bits_combined)[1]
             tx_bits = tf.cast(
                 tf.random.uniform(
                     [batch_size, total_bits], 
@@ -203,20 +211,6 @@ class MetricsCalculator:
                 ),
                 dtype=tf.int32
             )
-            
-            # Improved symbol to bit conversion
-            rx_real = tf.cast(tf.math.real(rx_symbols_norm) > 0, tf.int32)
-            rx_imag = tf.cast(tf.math.imag(rx_symbols_norm) > 0, tf.int32)
-            
-            # Reshape real and imaginary parts to match tx_bits shape
-            rx_real = tf.reshape(rx_real, [batch_size, -1])
-            rx_imag = tf.reshape(rx_imag, [batch_size, -1])
-            
-            # Combine real and imaginary bits to match tx_bits shape
-            rx_bits_combined = tf.concat([rx_real, rx_imag], axis=1)
-            
-            # Ensure shapes match before BER calculation
-            tx_bits = tf.ensure_shape(tx_bits, rx_bits_combined.shape)
             
             # Calculate BER
             ber = compute_ber(tx_bits, rx_bits_combined)
@@ -243,7 +237,7 @@ class MetricsCalculator:
             
         except Exception as e:
             self.logger.error(f"Error in calculate_enhanced_metrics: {str(e)}")
-            raise
+            raise        
 
         
     def calculate_ber(
