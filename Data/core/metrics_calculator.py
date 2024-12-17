@@ -33,6 +33,37 @@ class MetricsCalculator:
         
         # Initialize logger
         self.logger = LoggerManager.get_logger(__name__)
+        
+        # Initialize current modulation
+        self.current_modulation = 'QPSK'  # Default modulation scheme
+    
+    def get_bits_per_symbol(self, mod_scheme: str) -> int:
+        """
+        Determine bits per symbol based on modulation scheme
+        
+        Args:
+            mod_scheme (str): Modulation scheme name
+        
+        Returns:
+            int: Number of bits per symbol
+        """
+        modulation_bits = {
+            'BPSK': 1,
+            'QPSK': 2,
+            '16QAM': 4,
+            '64QAM': 6,
+            '256QAM': 8
+        }
+        return modulation_bits.get(mod_scheme.upper(), 2)  # Default to QPSK if not found
+
+    def set_current_modulation(self, mod_scheme: str) -> None:
+        """
+        Set the current modulation scheme
+        
+        Args:
+            mod_scheme (str): Modulation scheme to use
+        """
+        self.current_modulation = mod_scheme
 
     def calculate_performance_metrics(
         self, 

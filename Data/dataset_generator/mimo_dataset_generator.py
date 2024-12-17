@@ -336,8 +336,9 @@ class MIMODatasetGenerator:
                         mod_group['eigenvalues'][start_idx:end_idx] = eigenvalues.numpy()
                         
                         # Calculate and save enhanced metrics
+                        self.metrics_calculator.set_current_modulation(mod_scheme)
                         enhanced_metrics = self.metrics_calculator.calculate_enhanced_metrics(
-                            h_with_pl, tx_symbols, rx_symbols, snr_db
+                        h_with_pl, tx_symbols, rx_symbols, snr_db
                         )
                         
                         mod_group['ber'][start_idx:end_idx] = enhanced_metrics['ber']
