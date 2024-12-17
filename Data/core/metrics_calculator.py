@@ -42,7 +42,7 @@ class MetricsCalculator:
         snr_db: tf.Tensor
     ) -> Dict[str, tf.Tensor]:
         """
-        Calculate comprehensive MIMO performance metrics with proper shape handling
+        Calculate comprehensive MIMO performance metrics with enhanced stability
         
         Args:
             channel_response (tf.Tensor): MIMO channel matrix [batch_size, num_rx, num_tx]
@@ -51,50 +51,62 @@ class MetricsCalculator:
             snr_db (tf.Tensor): Signal-to-Noise Ratio in dB [batch_size]
         
         Returns:
-            Dict[str, tf.Tensor]: Performance metrics with proper shapes
+            Dict[str, tf.Tensor]: Performance metrics with controlled ranges
         """
         try:
-            # Get batch size from input tensor
+            # Get batch size and validate shapes
             batch_size = tf.shape(channel_response)[0]
             
-            # Calculate channel matrix properties
+            # Calculate channel properties with enhanced numerical stability
             H_conj_transpose = tf.linalg.adjoint(channel_response)
-            HH = tf.matmul(H_conj_transpose, channel_response)
+            HH = tf.matmul(channel_response, H_conj_transpose)
             
-            # Calculate eigenvalues
+            # Calculate and normalize eigenvalues
             eigenvalues = tf.abs(tf.linalg.eigvalsh(HH))
+            eigenvalues = tf.maximum(eigenvalues, 1e-10)  # Prevent zero eigenvalues
+            eigenvalues = eigenvalues / tf.reduce_max(eigenvalues, axis=1, keepdims=True)
             
-            # Convert SNR to linear scale
-            snr_linear = tf.pow(10.0, snr_db/10.0)
-            snr_linear = tf.reshape(snr_linear, [-1, 1])  # Shape: [batch_size, 1]
+            # Process SNR with clipping
+            snr_db_clipped = tf.clip_by_value(snr_db, -20.0, 30.0)
+            snr_linear = tf.pow(10.0, snr_db_clipped/10.0)
+            snr_linear = tf.reshape(snr_linear, [-1, 1])
             
-            # Calculate signal power (reduce across spatial dimensions)
-            signal_power = tf.reduce_mean(tf.abs(rx_symbols)**2, axis=[1, 2])  # Shape: [batch_size]
+            # Calculate signal and noise power with stability checks
+            signal_power = tf.maximum(
+                tf.reduce_mean(tf.abs(rx_symbols)**2, axis=[1, 2]),
+                1e-10
+            )
             
-            # Calculate noise power
-            noise_power = signal_power / tf.squeeze(snr_linear)  # Shape: [batch_size]
+            noise_power = tf.maximum(
+                signal_power / tf.squeeze(snr_linear),
+                1e-10
+            )
             
-            # Calculate SINR (ensure shape is [batch_size])
+            # Calculate SINR with controlled range
             sinr = 10.0 * tf.math.log(signal_power/noise_power) / tf.math.log(10.0)
-            sinr = tf.reshape(sinr, [-1])  # Ensure shape is [batch_size]
+            sinr = tf.clip_by_value(sinr, -30.0, 40.0)
+            sinr = tf.reshape(sinr, [-1])
             
-            # Calculate spectral efficiency
+            # Calculate spectral efficiency with enhanced stability
             spectral_efficiency = tf.reduce_sum(
                 tf.math.log(1.0 + eigenvalues * tf.reshape(snr_linear, [-1, 1])) / tf.math.log(2.0),
                 axis=1
             )
-            spectral_efficiency = tf.reshape(spectral_efficiency, [-1])  # Shape: [batch_size]
+            spectral_efficiency = tf.maximum(spectral_efficiency, 0.0)
+            spectral_efficiency = tf.reshape(spectral_efficiency, [-1])
             
-            # Calculate effective SNR
+            # Calculate effective SNR with controlled range
             effective_snr = tf.reduce_mean(eigenvalues, axis=1) * tf.squeeze(snr_linear)
+            effective_snr = tf.maximum(effective_snr, 1e-10)
             effective_snr_db = 10.0 * tf.math.log(effective_snr) / tf.math.log(10.0)
-            effective_snr_db = tf.reshape(effective_snr_db, [-1])  # Shape: [batch_size]
+            effective_snr_db = tf.clip_by_value(effective_snr_db, -30.0, 40.0)
+            effective_snr_db = tf.reshape(effective_snr_db, [-1])
             
             return {
-                'sinr': sinr,  # Shape: [batch_size]
-                'spectral_efficiency': spectral_efficiency,  # Shape: [batch_size]
-                'effective_snr': effective_snr_db,  # Shape: [batch_size]
-                'eigenvalues': eigenvalues  # Shape: [batch_size, num_rx]
+                'sinr': sinr,  # Shape: [batch_size], Range: [-30, 40] dB
+                'spectral_efficiency': spectral_efficiency,  # Shape: [batch_size], Range: [0, inf)
+                'effective_snr': effective_snr_db,  # Shape: [batch_size], Range: [-30, 40] dB
+                'eigenvalues': eigenvalues  # Shape: [batch_size, num_rx], Range: [0, 1]
             }
             
         except Exception as e:

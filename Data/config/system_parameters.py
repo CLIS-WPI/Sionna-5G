@@ -24,7 +24,7 @@ class SystemParameters:
     
     # Channel Parameters
     num_paths: int = 10
-    snr_range: Tuple[float, float] = (-10, 30)  # dB
+    snr_range: Tuple[float, float] = (-20.0, 30.0)  # Using float values for precision
     noise_floor: float = -174  # dBm/Hz
     
     # Modulation Schemes

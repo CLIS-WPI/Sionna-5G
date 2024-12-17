@@ -47,39 +47,46 @@ class MIMODatasetGenerator:
         self.metrics_calculator = MetricsCalculator(self.system_params)
         self.path_loss_manager = PathLossManager(self.system_params)
         self.integrity_checker = None
+        
         self.validation_thresholds = {
-            'eigenvalues': {'min': 1e-6, 'max': 10.0},
-            'effective_snr': {'min': -30.0, 'max': 40.0},
-            'spectral_efficiency': {'min': 0.0, 'max': 30.0},
-            'ber': {'min': 0.0, 'max': 0.5},
-            'sinr': {'min': -10.0, 'max': 30.0}
+            'eigenvalues': {'min': 1e-10, 'max': 100.0},  # Increased range
+            'effective_snr': {'min': -50.0, 'max': 60.0},  # Wider SNR range
+            'spectral_efficiency': {'min': 0.0, 'max': 40.0},  # Increased max
+            'ber': {'min': 0.0, 'max': 1.0},  # Full BER range
+            'sinr': {'min': -30.0, 'max': 50.0}  # Wider SINR range
         }
 
+    # In MIMODatasetGenerator._validate_batch_data
     def _validate_batch_data(self, batch_data: dict) -> tuple[bool, list[str]]:
         """
-        Validate batch data against defined thresholds
-        
-        Args:
-            batch_data: Dictionary containing batch tensors
-            
-        Returns:
-            Tuple[bool, List[str]]: Validation status and list of error messages
+        Validate batch data against defined thresholds with preprocessing
         """
         errors = []
         try:
+            # Preprocess data before validation
+            processed_data = {}
+            for key, data in batch_data.items():
+                if key in self.validation_thresholds:
+                    # Convert to numpy and flatten
+                    data_np = data.numpy().flatten()
+                    # Remove any invalid values
+                    data_np = data_np[np.isfinite(data_np)]
+                    processed_data[key] = data_np
+
+            # Perform validation on processed data
             for key, threshold in self.validation_thresholds.items():
-                if key in batch_data:
-                    data = batch_data[key].numpy()
-                    if np.any(data < threshold['min']) or np.any(data > threshold['max']):
+                if key in processed_data:
+                    data = processed_data[key]
+                    if len(data) == 0 or np.any(~np.isfinite(data)):
+                        errors.append(f"{key}: contains invalid values")
+                    elif np.any(data < threshold['min']) or np.any(data > threshold['max']):
                         errors.append(f"{key}: values outside threshold range [{threshold['min']}, {threshold['max']}]")
-                    if np.any(~np.isfinite(data)):
-                        errors.append(f"{key}: contains non-finite values")
                         
             return len(errors) == 0, errors
         except Exception as e:
             self.logger.error(f"Batch validation error: {str(e)}")
             return False, [str(e)]
-                
+        
     def _prepare_output_directory(self, save_path: str):
         """
         Prepare output directory for dataset

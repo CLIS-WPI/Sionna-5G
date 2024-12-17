@@ -156,50 +156,55 @@ class ChannelModelManager:
     
     
     def generate_channel_samples(self, batch_size: int, snr_db: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
+        """
+        Generate MIMO channel samples with controlled scaling and normalization
+        
+        Args:
+            batch_size (int): Number of samples to generate
+            snr_db (tf.Tensor): Signal-to-Noise Ratio in dB
+            
+        Returns:
+            Tuple[tf.Tensor, tf.Tensor, tf.Tensor]: Perfect channel, noisy channel, eigenvalues
+        """
         try:
-            # Cast batch_size to int32
             batch_size = tf.cast(batch_size, tf.int32)
-            
-            # Generate channel matrix components directly
             h_shape = [batch_size, self.system_params.num_rx, self.system_params.num_tx]
+
+            # Use controlled standard deviation for better stability
+            std_dev = 1.0/np.sqrt(2.0 * self.system_params.num_tx)
             
-            # Generate real and imaginary parts separately
-            h_real = tf.random.normal(h_shape, mean=0.0, stddev=1.0/np.sqrt(2))
-            h_imag = tf.random.normal(h_shape, mean=0.0, stddev=1.0/np.sqrt(2))
-            
-            # Combine into complex tensor
+            # Generate channel components with controlled variance
+            h_real = tf.random.normal(h_shape, mean=0.0, stddev=std_dev)
+            h_imag = tf.random.normal(h_shape, mean=0.0, stddev=std_dev)
             h = tf.complex(h_real, h_imag)
             
-            # Validate tensor shape
-            h = assert_tensor_shape(
-                h, 
-                [batch_size, self.system_params.num_rx, self.system_params.num_tx], 
-                'channel_matrix'
-            )
-            
-            # Normalize channel matrix
+            # Validate and normalize channel matrix
+            h = assert_tensor_shape(h, h_shape, 'channel_matrix')
             h_normalized = normalize_complex_tensor(h)
             
-            # Calculate eigenvalues
+            # Calculate eigenvalues with proper normalization
             h_hermitian = tf.matmul(
                 h_normalized, 
                 tf.transpose(h_normalized, perm=[0, 2, 1], conjugate=True)
             )
-            eigenvalues = tf.linalg.eigvals(h_hermitian)
-            eigenvalues = tf.abs(eigenvalues)  # Get magnitude of complex eigenvalues
+            eigenvalues = tf.abs(tf.linalg.eigvals(h_hermitian))
             
-            # Calculate noise power
-            noise_power = tf.cast(1.0 / tf.pow(10.0, snr_db / 10.0), dtype=tf.float32)
+            # Normalize eigenvalues to [0, 1] range
+            eigenvalues = eigenvalues / tf.reduce_max(eigenvalues, axis=1, keepdims=True)
+            
+            # Clip SNR to valid range and calculate noise power
+            snr_db_clipped = tf.clip_by_value(snr_db, -20.0, 30.0)
+            noise_power = tf.pow(10.0, -snr_db_clipped / 10.0)
             noise_power = tf.maximum(noise_power, 1e-10)
             noise_power = tf.reshape(noise_power, [-1, 1, 1])
             
-            # Generate complex Gaussian noise
-            noise_std = tf.sqrt(noise_power / 2)
+            # Generate noise with controlled variance
+            noise_std = tf.sqrt(noise_power / 2.0)
             noise_real = tf.random.normal(tf.shape(h_normalized), mean=0.0, stddev=noise_std)
             noise_imag = tf.random.normal(tf.shape(h_normalized), mean=0.0, stddev=noise_std)
             noise = tf.complex(noise_real, noise_imag)
             
-            # Calculate noisy channel
+            # Add noise to channel
             noisy_channel = h_normalized + noise
             
             return h_normalized, noisy_channel, eigenvalues
