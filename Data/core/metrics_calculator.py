@@ -175,29 +175,26 @@ class MetricsCalculator:
             # Create identity matrix with correct dtype
             epsilon = tf.cast(1e-6, dtype=tf.complex64)
             I = tf.eye(tf.shape(H)[2], batch_shape=[batch_size], dtype=tf.complex64)
-            I = I * epsilon  # Multiply after casting to ensure complex64
+            I = I * epsilon
             
-            # Now both tensors will be complex64
+            # Channel equalization
             HH = tf.matmul(H_H, H)
             H_inv = tf.linalg.inv(HH + I)
             equalizer = tf.matmul(H_inv, H_H)
             rx_symbols_eq = tf.matmul(equalizer, rx_symbols)
             
-            # Calculate normalization factor with correct dtype
+            # Normalization
             normalization_factor = tf.sqrt(
                 tf.reduce_mean(tf.abs(rx_symbols_eq)**2, axis=[1, 2], keepdims=True)
             )
-            # Cast normalization factor to complex64
             normalization_factor = tf.cast(normalization_factor, dtype=tf.complex64)
-            
-            # Now both tensors are complex64 for division
             rx_symbols_norm = rx_symbols_eq / normalization_factor
             
-            # Generate tx bits with proper modulation handling
+            # Get bits per symbol for current modulation
             bits_per_symbol = self.get_bits_per_symbol(self.current_modulation)
-            total_bits = self.system_params.num_tx * bits_per_symbol
             
-            # Generate random bits for transmission
+            # Generate tx bits - match the shape with rx_bits
+            total_bits = self.system_params.num_tx * bits_per_symbol * 2  # Multiply by 2 for I/Q
             tx_bits = tf.cast(
                 tf.random.uniform(
                     [batch_size, total_bits], 
@@ -211,20 +208,21 @@ class MetricsCalculator:
             rx_real = tf.cast(tf.math.real(rx_symbols_norm) > 0, tf.int32)
             rx_imag = tf.cast(tf.math.imag(rx_symbols_norm) > 0, tf.int32)
             
-            # Combine real and imaginary bits
-            rx_bits_combined = tf.cast(
-                tf.concat([
-                    tf.reshape(rx_real, [batch_size, -1]),
-                    tf.reshape(rx_imag, [batch_size, -1])
-                ], axis=1),
-                dtype=tf.int32
-            )
+            # Reshape real and imaginary parts to match tx_bits shape
+            rx_real = tf.reshape(rx_real, [batch_size, -1])
+            rx_imag = tf.reshape(rx_imag, [batch_size, -1])
             
-            # Calculate BER with improved accuracy
+            # Combine real and imaginary bits to match tx_bits shape
+            rx_bits_combined = tf.concat([rx_real, rx_imag], axis=1)
+            
+            # Ensure shapes match before BER calculation
+            tx_bits = tf.ensure_shape(tx_bits, rx_bits_combined.shape)
+            
+            # Calculate BER
             ber = compute_ber(tx_bits, rx_bits_combined)
-            ber = tf.clip_by_value(ber, 0.0, 0.5)  # Limit maximum BER
+            ber = tf.clip_by_value(ber, 0.0, 0.5)
             
-            # Calculate throughput with proper scaling
+            # Calculate throughput
             bandwidth = (
                 self.system_params.num_subcarriers * 
                 self.system_params.subcarrier_spacing
@@ -233,7 +231,7 @@ class MetricsCalculator:
             throughput = spectral_efficiency * bandwidth
             
             # Add timing metrics
-            inference_time = tf.timestamp() - tf.timestamp()  # Placeholder for actual timing
+            inference_time = tf.timestamp() - tf.timestamp()
             
             return {
                 **base_metrics,
