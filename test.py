@@ -217,7 +217,7 @@ def print_validation_results(results: Dict[str, Any]):
 
 def main():
     # Example usage
-    file_path = "dataset/mimo_dataset_20241217_124858.h5"
+    file_path = "dataset/mimo_dataset_20241217_154459.h5"
     validator = MIMODatasetValidator(file_path)
     
     try:
