@@ -11,6 +11,7 @@ import os
 from config.system_parameters import SystemParameters
 from dataset_generator.mimo_dataset_generator import MIMODatasetGenerator
 from utill.logging_config import configure_logging, LoggerManager
+from integrity.dataset_integrity_checker import MIMODatasetIntegrityChecker
 os.makedirs('logs', exist_ok=True)
 
 def parse_arguments():
@@ -98,6 +99,22 @@ def generate_output_path(base_path=None):
     default_path = f"dataset/mimo_dataset_{timestamp}.h5"
     return base_path or default_path
 
+# main.py
+# MIMO Dataset Generation Command-Line Interface
+# Provides flexible command-line configuration for dataset generation and verification
+# Manages system configuration, logging, and dataset generation workflow
+
+import sys
+import argparse
+import logging
+from datetime import datetime
+import os
+from config.system_parameters import SystemParameters
+from dataset_generator.mimo_dataset_generator import MIMODatasetGenerator
+from utill.logging_config import configure_logging, LoggerManager
+from integrity.dataset_integrity_checker import MIMODatasetIntegrityChecker  # Add this import
+os.makedirs('logs', exist_ok=True)
+
 def main():
     """
     Main entry point for MIMO dataset generation
@@ -143,12 +160,24 @@ def main():
         # Verify dataset if requested
         if args.verify:
             logger.info("Verifying generated dataset...")
-            verification_result = generator.verify_dataset(output_path)
-            
-            if verification_result:
-                logger.info("Dataset verification successful")
-            else:
-                logger.warning("Dataset verification failed")
+            try:
+                # Create integrity checker instance with the dataset path
+                with MIMODatasetIntegrityChecker(output_path) as checker:
+                    integrity_report = checker.check_dataset_integrity()
+                    
+                    if integrity_report['overall_status']:
+                        logger.info("Dataset verification successful")
+                        # Log detailed statistics if needed
+                        for mod_scheme, mod_details in integrity_report['modulation_schemes'].items():
+                            logger.info(f"\n{mod_scheme} Statistics:")
+                            logger.info(f"  Samples: {mod_details['samples']}")
+                            logger.info(f"  Integrity: {'✓ VALID' if mod_details['integrity'] else '✗ INVALID'}")
+                    else:
+                        logger.warning("Dataset verification failed")
+                        logger.debug(f"Integrity report: {integrity_report}")
+            except Exception as e:
+                logger.error(f"Dataset verification error: {str(e)}")
+                return 1
         
         logger.info("MIMO dataset generation completed successfully")
         return 0

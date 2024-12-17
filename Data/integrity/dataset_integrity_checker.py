@@ -14,41 +14,31 @@ class MIMODatasetIntegrityChecker:
     Advanced dataset integrity verification for MIMO communication datasets
     """
 
-    # In MIMODatasetIntegrityChecker.__init__
-def __init__(self, dataset_path: str):
-    self.dataset_path = dataset_path
-    self.dataset = None
-    self.modulation_schemes = ['QPSK', '16QAM', '64QAM']
-    
-    # Update thresholds based on observed data ranges
-    self.validation_thresholds = {
-        'eigenvalues': {
-            'min': 0.0,  # Matches observed min
-            'max': 1.0   # Matches observed max
-        },
-        'effective_snr': {
-            'min': -25.1,  # Slightly below observed min (-25.0964)
-            'max': 30.0    # Matches observed max (29.9999)
-        },
-        'spectral_efficiency': {
-            'min': 0.0,    # Matches observed min
-            'max': 40.0    # Slightly above observed max (39.8688)
-        },
-        'ber': {
-            'min': 0.0,    # Matches observed min
-            'max': 0.51    # Slightly above observed max (0.5096)
-        },
-        'sinr': {
-            'min': -20.0,  # Matches observed min
-            'max': 30.0    # Matches observed max (29.9936)
+    def __init__(self, dataset_path: str):
+        """
+        Initialize the dataset integrity checker
+
+        Args:
+            dataset_path (str): Path to the HDF5 dataset file
+        """
+        self.dataset_path = dataset_path
+        self.dataset = None
+        self.modulation_schemes = ['QPSK', '16QAM', '64QAM']
+
+        # Update thresholds based on observed data ranges
+        self.validation_thresholds = {
+            'eigenvalues': {'min': 0.0, 'max': 1.0},
+            'effective_snr': {'min': -25.1, 'max': 30.0},
+            'spectral_efficiency': {'min': 0.0, 'max': 40.0},
+            'ber': {'min': 0.0, 'max': 0.51},
+            'sinr': {'min': -20.0, 'max': 30.0}
         }
-    }
 
     def __enter__(self):
         """
         Context manager entry point
         Opens the HDF5 file for reading
-        
+
         Returns:
             MIMODatasetIntegrityChecker: Instance of the checker
         """
@@ -66,7 +56,7 @@ def __init__(self, dataset_path: str):
     def check_dataset_integrity(self) -> Dict[str, Any]:
         """
         Perform comprehensive dataset integrity checks
-        
+
         Returns:
             Dict[str, Any]: Detailed integrity check results
         """
@@ -105,7 +95,7 @@ def __init__(self, dataset_path: str):
     def _check_dataset_structure(self) -> bool:
         """
         Validate overall dataset structure
-        
+
         Returns:
             bool: True if structure is valid
         """
@@ -121,7 +111,7 @@ def __init__(self, dataset_path: str):
     def _validate_configuration(self) -> Dict[str, Any]:
         """
         Validate dataset configuration parameters
-        
+
         Returns:
             Dict[str, Any]: Configuration validation results
         """
@@ -137,20 +127,17 @@ def __init__(self, dataset_path: str):
             if attr not in config_group.attrs:
                 config[attr] = {'status': False, 'message': 'Missing attribute'}
             else:
-                config[attr] = {
-                    'status': True,
-                    'value': config_group.attrs[attr]
-                }
+                config[attr] = {'status': True, 'value': config_group.attrs[attr]}
 
         return config
 
     def _check_modulation_scheme_integrity(self, mod_scheme: str) -> Dict[str, Any]:
         """
         Check integrity of a specific modulation scheme
-        
+
         Args:
             mod_scheme (str): Modulation scheme to check
-        
+
         Returns:
             Dict[str, Any]: Modulation scheme integrity report
         """
@@ -180,11 +167,11 @@ def __init__(self, dataset_path: str):
     def _analyze_dataset(self, dataset: h5py.Dataset, name: str) -> Dict[str, Any]:
         """
         Perform detailed analysis of a dataset
-        
+
         Args:
             dataset (h5py.Dataset): Dataset to analyze
             name (str): Dataset name
-        
+
         Returns:
             Dict[str, Any]: Dataset analysis report
         """
@@ -206,7 +193,7 @@ def __init__(self, dataset_path: str):
     def _perform_statistical_checks(self) -> Dict[str, Any]:
         """
         Perform advanced statistical checks across the dataset
-        
+
         Returns:
             Dict[str, Any]: Statistical analysis results
         """
@@ -229,10 +216,10 @@ def __init__(self, dataset_path: str):
     def _perform_distribution_test(self, data: np.ndarray) -> Dict[str, Any]:
         """
         Perform Kolmogorov-Smirnov distribution test
-        
+
         Args:
             data (np.ndarray): Data to test
-        
+
         Returns:
             Dict[str, Any]: Distribution test results
         """
@@ -250,10 +237,10 @@ def __init__(self, dataset_path: str):
 def verify_dataset_integrity(dataset_path: str) -> Dict[str, Any]:
     """
     Standalone function to verify dataset integrity
-    
+
     Args:
         dataset_path (str): Path to the HDF5 dataset
-    
+
     Returns:
         Dict[str, Any]: Comprehensive integrity check results
     """
