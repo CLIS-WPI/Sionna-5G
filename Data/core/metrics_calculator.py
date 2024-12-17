@@ -152,10 +152,15 @@ class MetricsCalculator:
             equalizer = tf.matmul(H_inv, H_H)
             rx_symbols_eq = tf.matmul(equalizer, rx_symbols)
             
-            # Rest of the function remains the same...
-            rx_symbols_norm = rx_symbols_eq / tf.sqrt(
+            # Calculate normalization factor with correct dtype
+            normalization_factor = tf.sqrt(
                 tf.reduce_mean(tf.abs(rx_symbols_eq)**2, axis=[1, 2], keepdims=True)
             )
+            # Cast normalization factor to complex64
+            normalization_factor = tf.cast(normalization_factor, dtype=tf.complex64)
+            
+            # Now both tensors are complex64 for division
+            rx_symbols_norm = rx_symbols_eq / normalization_factor
             
             # Generate tx bits with proper modulation handling
             bits_per_symbol = self.get_bits_per_symbol(self.current_modulation)
