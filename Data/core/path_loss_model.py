@@ -234,22 +234,33 @@ class PathLossManager:
             tf.Tensor: Channel response with applied path loss
         """
         try:
-            # Get dimensions
+            # Get dimensions and ensure proper shapes
             batch_size = tf.shape(channel_response)[0]
             num_rx = tf.shape(channel_response)[1]
             num_tx = tf.shape(channel_response)[2]
             
-            # Ensure distance has correct shape
+            # Debug logging
+            self.logger.debug(f"Channel response shape: {channel_response.shape}")
+            self.logger.debug(f"Distance shape before reshape: {distance.shape}")
+            
+            # Ensure distance has correct shape and length
             distance = tf.reshape(distance[:batch_size], [-1])
             
             # Calculate path loss (ensures 1D output)
             path_loss_db = self.calculate_path_loss(distance, scenario)
             
+            # Debug logging
+            self.logger.debug(f"Path loss dB shape: {path_loss_db.shape}")
+            
             # Convert to linear scale
             path_loss_linear = tf.pow(10.0, -path_loss_db / 20.0)
             
-            # Reshape path loss for broadcasting with channel response
-            path_loss_linear = tf.reshape(path_loss_linear, [batch_size, 1, 1])
+            # Reshape path loss for broadcasting
+            path_loss_linear = tf.reshape(path_loss_linear, [batch_size])  # Ensure 1D
+            path_loss_linear = tf.expand_dims(tf.expand_dims(path_loss_linear, axis=1), axis=2)
+            
+            # Debug logging
+            self.logger.debug(f"Path loss linear shape after reshape: {path_loss_linear.shape}")
             
             # Broadcast path loss to match channel response dimensions
             path_loss_broadcast = tf.broadcast_to(
@@ -268,6 +279,7 @@ class PathLossManager:
         except Exception as e:
             self.logger.error(f"Error applying path loss: {str(e)}")
             raise
+
     def generate_path_loss_statistics(
         self, 
         min_distance: float = 10.0, 
