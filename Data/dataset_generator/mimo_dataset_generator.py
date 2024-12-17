@@ -233,7 +233,7 @@ class MIMODatasetGenerator:
                         start_idx = batch_idx * batch_size
                         end_idx = start_idx + batch_size
                         
-                        # Generate input data
+                        # Generate input data with explicit batch size control
                         distances = tf.random.uniform([batch_size], 10.0, 500.0)
                         snr_db = tf.random.uniform(
                             [batch_size],
@@ -255,9 +255,11 @@ class MIMODatasetGenerator:
                         path_loss_db = self.path_loss_manager.calculate_path_loss(
                             distances[:batch_size], 'umi'
                         )
+                        # Ensure path loss has correct shape before converting to linear
+                        path_loss_db = tf.reshape(path_loss_db[:batch_size], [batch_size])
                         path_loss_linear = tf.pow(10.0, -path_loss_db / 20.0)
                         path_loss_shaped = tf.reshape(path_loss_linear, [batch_size, 1, 1])
-                        
+
                         # Apply path loss
                         h_with_pl = h_perfect * tf.cast(path_loss_shaped, dtype=h_perfect.dtype)
                         
@@ -276,10 +278,10 @@ class MIMODatasetGenerator:
                             snr_db
                         )
                         
-                        # Process metrics
-                        effective_snr = tf.squeeze(metrics['effective_snr'])
-                        spectral_efficiency = tf.squeeze(metrics['spectral_efficiency'])
-                        sinr = tf.squeeze(metrics['sinr'])
+                        # Process metrics with explicit shape control
+                        effective_snr = tf.reshape(tf.squeeze(metrics['effective_snr']), [batch_size])
+                        spectral_efficiency = tf.reshape(tf.squeeze(metrics['spectral_efficiency']), [batch_size])
+                        sinr = tf.reshape(tf.squeeze(metrics['sinr']), [batch_size])
                         eigenvalues = metrics['eigenvalues']
                         
                         # Save data to HDF5
@@ -297,10 +299,14 @@ class MIMODatasetGenerator:
                         mod_group['ber'][start_idx:end_idx] = enhanced_metrics['ber']
                         mod_group['throughput'][start_idx:end_idx] = enhanced_metrics['throughput']
                         
-                        # Save path loss data
-                        fspl = self.path_loss_manager.calculate_free_space_path_loss(distances[:batch_size])
-                        scenario_pl = self.path_loss_manager.calculate_path_loss(distances[:batch_size])
+                        # Calculate and reshape path loss data
+                        fspl = self.path_loss_manager.calculate_free_space_path_loss(distances)
+                        fspl = tf.reshape(fspl, [batch_size])
                         
+                        scenario_pl = self.path_loss_manager.calculate_path_loss(distances)
+                        scenario_pl = tf.reshape(scenario_pl, [batch_size])
+                        
+                        # Save path loss data with correct shapes
                         f['path_loss_data']['fspl'][start_idx:end_idx] = fspl.numpy()
                         f['path_loss_data']['scenario_pathloss'][start_idx:end_idx] = scenario_pl.numpy()
                         
@@ -317,7 +323,7 @@ class MIMODatasetGenerator:
             self.logger.error(f"Dataset generation failed: {str(e)}")
             self.logger.error("Detailed error traceback:", exc_info=True)
             raise
-    
+        
     def _get_dataset_units(self, dataset_name: str) -> str:
         """Helper method to return appropriate units for each dataset type"""
         units_map = {
