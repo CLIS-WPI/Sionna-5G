@@ -234,43 +234,31 @@ class PathLossManager:
             tf.Tensor: Channel response with applied path loss
         """
         try:
-            # Get dimensions and ensure proper shapes
+            # Get batch size from channel response
             batch_size = tf.shape(channel_response)[0]
-            num_rx = tf.shape(channel_response)[1]
-            num_tx = tf.shape(channel_response)[2]
             
-            # Debug logging
-            self.logger.debug(f"Channel response shape: {channel_response.shape}")
-            self.logger.debug(f"Distance shape before reshape: {distance.shape}")
+            # Log shapes before processing
+            self.logger.debug(f"Initial channel_response shape: {channel_response.shape}")
+            self.logger.debug(f"Initial distance shape: {distance.shape}")
             
-            # Ensure distance has correct shape and length
-            distance = tf.reshape(distance[:batch_size], [-1])
+            # Calculate path loss (1D output)
+            path_loss_db = self.calculate_path_loss(distance[:batch_size], scenario)
             
-            # Calculate path loss (ensures 1D output)
-            path_loss_db = self.calculate_path_loss(distance, scenario)
-            
-            # Debug logging
-            self.logger.debug(f"Path loss dB shape: {path_loss_db.shape}")
-            
-            # Convert to linear scale
+            # Convert to linear scale (maintaining 1D shape)
             path_loss_linear = tf.pow(10.0, -path_loss_db / 20.0)
             
-            # Reshape path loss for broadcasting
-            path_loss_linear = tf.reshape(path_loss_linear, [batch_size])  # Ensure 1D
-            path_loss_linear = tf.expand_dims(tf.expand_dims(path_loss_linear, axis=1), axis=2)
+            # Log intermediate shape
+            self.logger.debug(f"Path loss linear shape before reshape: {path_loss_linear.shape}")
             
-            # Debug logging
-            self.logger.debug(f"Path loss linear shape after reshape: {path_loss_linear.shape}")
+            # First ensure path_loss_linear is the correct length
+            path_loss_linear = tf.ensure_shape(path_loss_linear, [batch_size])
             
-            # Broadcast path loss to match channel response dimensions
-            path_loss_broadcast = tf.broadcast_to(
-                path_loss_linear,
-                [batch_size, num_rx, num_tx]
-            )
+            # Now reshape to broadcasting dimensions
+            path_loss_shaped = tf.reshape(path_loss_linear, [batch_size, 1, 1])
             
             # Apply path loss to channel response
             attenuated_channel = channel_response * tf.cast(
-                path_loss_broadcast,
+                path_loss_shaped,
                 dtype=channel_response.dtype
             )
             
@@ -278,8 +266,10 @@ class PathLossManager:
             
         except Exception as e:
             self.logger.error(f"Error applying path loss: {str(e)}")
+            self.logger.error(f"Shapes - channel_response: {channel_response.shape}, "
+                            f"distance: {distance.shape}")
             raise
-
+        
     def generate_path_loss_statistics(
         self, 
         min_distance: float = 10.0, 
