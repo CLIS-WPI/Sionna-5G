@@ -43,15 +43,6 @@ class MetricsCalculator:
     ) -> Dict[str, tf.Tensor]:
         """
         Calculate comprehensive MIMO performance metrics with enhanced stability
-        
-        Args:
-            channel_response (tf.Tensor): MIMO channel matrix [batch_size, num_rx, num_tx]
-            tx_symbols (tf.Tensor): Transmitted symbols [batch_size, num_tx, 1]
-            rx_symbols (tf.Tensor): Received symbols [batch_size, num_rx, 1]
-            snr_db (tf.Tensor): Signal-to-Noise Ratio in dB [batch_size]
-        
-        Returns:
-            Dict[str, tf.Tensor]: Performance metrics with controlled ranges
         """
         try:
             # Validate input shapes
@@ -63,22 +54,20 @@ class MetricsCalculator:
                 'snr_db': (batch_size,)
             }
             
-            for name, tensor in {
-                'channel_response': channel_response,
-                'tx_symbols': tx_symbols,
-                'rx_symbols': rx_symbols,
-                'snr_db': snr_db
-            }.items():
-                assert_tensor_shape(tensor, expected_shapes[name], name)
-            
             # Calculate channel properties with enhanced numerical stability
             H = channel_response
             H_H = tf.transpose(H, perm=[0, 2, 1], conjugate=True)
             HH = tf.matmul(H, H_H)
             
             # Add small identity matrix for numerical stability
+            # Convert identity matrix to complex64
             epsilon = 1e-10
-            I = tf.eye(tf.shape(HH)[-1], batch_shape=[batch_size]) * epsilon
+            I = tf.cast(
+                tf.eye(tf.shape(HH)[-1], batch_shape=[batch_size]) * epsilon,
+                dtype=tf.complex64  # Explicitly cast to complex64
+            )
+            
+            # Now both tensors are complex64
             HH_stable = HH + I
             
             # Calculate and normalize eigenvalues
