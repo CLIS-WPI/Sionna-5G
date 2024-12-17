@@ -7,7 +7,7 @@ import h5py
 import numpy as np
 import tensorflow as tf
 from typing import Dict, Any, Optional, Tuple, List
-
+from datetime import datetime
 
 class MIMODatasetIntegrityChecker:
     """
@@ -58,38 +58,97 @@ class MIMODatasetIntegrityChecker:
         Perform comprehensive dataset integrity checks
 
         Returns:
-            Dict[str, Any]: Detailed integrity check results
+            Dict[str, Any]: Detailed integrity check results including:
+                - overall_status: bool indicating if all checks passed
+                - total_samples: total number of samples in dataset
+                - modulation_schemes: detailed results for each modulation scheme
+                - configuration: configuration validation results
+                - statistical_checks: results of statistical analysis
+                - errors: list of any errors encountered
         """
         integrity_report = {
             'overall_status': True,
             'total_samples': 0,
             'modulation_schemes': {},
             'configuration': {},
-            'statistical_checks': {}
+            'statistical_checks': {},
+            'errors': []
         }
 
         try:
             # Check dataset structure
-            integrity_report['overall_status'] &= self._check_dataset_structure()
+            try:
+                structure_valid = self._check_dataset_structure()
+                integrity_report['overall_status'] &= structure_valid
+                if not structure_valid:
+                    integrity_report['errors'].append("Dataset structure validation failed")
+            except Exception as e:
+                integrity_report['errors'].append(f"Structure check error: {str(e)}")
+                integrity_report['overall_status'] = False
 
             # Configuration validation
-            integrity_report['configuration'] = self._validate_configuration()
+            try:
+                config_result = self._validate_configuration()
+                integrity_report['configuration'] = config_result
+                if not config_result.get('valid', False):
+                    integrity_report['overall_status'] = False
+                    integrity_report['errors'].append("Configuration validation failed")
+            except Exception as e:
+                integrity_report['errors'].append(f"Configuration validation error: {str(e)}")
+                integrity_report['overall_status'] = False
 
             # Check modulation-specific integrity
+            total_samples = 0
             for mod_scheme in self.modulation_schemes:
-                mod_report = self._check_modulation_scheme_integrity(mod_scheme)
-                integrity_report['modulation_schemes'][mod_scheme] = mod_report
-                integrity_report['overall_status'] &= mod_report['integrity']
+                try:
+                    mod_report = self._check_modulation_scheme_integrity(mod_scheme)
+                    integrity_report['modulation_schemes'][mod_scheme] = mod_report
+                    integrity_report['overall_status'] &= mod_report.get('integrity', False)
+                    total_samples += mod_report.get('samples', 0)
+                    
+                    if not mod_report.get('integrity', False):
+                        integrity_report['errors'].append(
+                            f"Integrity check failed for modulation scheme: {mod_scheme}"
+                        )
+                except Exception as e:
+                    integrity_report['errors'].append(
+                        f"Error checking modulation scheme {mod_scheme}: {str(e)}"
+                    )
+                    integrity_report['overall_status'] = False
+                    integrity_report['modulation_schemes'][mod_scheme] = {
+                        'integrity': False,
+                        'error': str(e)
+                    }
+
+            integrity_report['total_samples'] = total_samples
 
             # Statistical checks
-            integrity_report['statistical_checks'] = self._perform_statistical_checks()
+            try:
+                stat_checks = self._perform_statistical_checks()
+                integrity_report['statistical_checks'] = stat_checks
+                if not stat_checks.get('valid', False):
+                    integrity_report['overall_status'] = False
+                    integrity_report['errors'].append("Statistical checks failed")
+            except Exception as e:
+                integrity_report['errors'].append(f"Statistical check error: {str(e)}")
+                integrity_report['overall_status'] = False
+
+            # Final validation checks
+            if total_samples == 0:
+                integrity_report['overall_status'] = False
+                integrity_report['errors'].append("No valid samples found in dataset")
+
+            # Add timestamp
+            integrity_report['timestamp'] = datetime.now().isoformat()
 
             return integrity_report
 
         except Exception as e:
             return {
                 'overall_status': False,
-                'error': str(e)
+                'error': str(e),
+                'errors': [f"Critical error during integrity check: {str(e)}"],
+                'timestamp': datetime.now().isoformat()
             }
 
     def _check_dataset_structure(self) -> bool:

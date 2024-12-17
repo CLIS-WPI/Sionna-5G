@@ -158,25 +158,37 @@ def main():
         )
         
         # Verify dataset if requested
+        # In main.py, modify the verification part:
         if args.verify:
             logger.info("Verifying generated dataset...")
             try:
-                # Create integrity checker instance with the dataset path
                 with MIMODatasetIntegrityChecker(output_path) as checker:
                     integrity_report = checker.check_dataset_integrity()
                     
-                    if integrity_report['overall_status']:
+                    if integrity_report.get('overall_status', False):
                         logger.info("Dataset verification successful")
-                        # Log detailed statistics if needed
-                        for mod_scheme, mod_details in integrity_report['modulation_schemes'].items():
-                            logger.info(f"\n{mod_scheme} Statistics:")
-                            logger.info(f"  Samples: {mod_details['samples']}")
-                            logger.info(f"  Integrity: {'✓ VALID' if mod_details['integrity'] else '✗ INVALID'}")
+                        # Log detailed statistics
+                        for mod_scheme, mod_details in integrity_report.get('modulation_schemes', {}).items():
+                            logger.info(f"\nModulation Scheme: {mod_scheme}")
+                            logger.info(f"  Samples: {mod_details.get('samples', 0)}")
+                            logger.info(f"  Integrity: {'VALID' if mod_details.get('integrity', False) else 'INVALID'}")
+                            
+                            # Log dataset details if available
+                            for dataset_name, dataset_info in mod_details.get('datasets', {}).items():
+                                if dataset_info.get('valid', False):
+                                    logger.debug(f"    {dataset_name}: Valid")
+                                else:
+                                    logger.warning(f"    {dataset_name}: Invalid")
+                                    
                     else:
                         logger.warning("Dataset verification failed")
-                        logger.debug(f"Integrity report: {integrity_report}")
+                        if 'error' in integrity_report:
+                            logger.error(f"Verification error: {integrity_report['error']}")
+                        logger.debug(f"Full integrity report: {integrity_report}")
+                        
             except Exception as e:
                 logger.error(f"Dataset verification error: {str(e)}")
+                logger.debug("Verification failed with exception", exc_info=True)
                 return 1
         
         logger.info("MIMO dataset generation completed successfully")
