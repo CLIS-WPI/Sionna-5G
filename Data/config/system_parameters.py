@@ -66,7 +66,7 @@ class SystemParameters:
         self, 
         num_tx: int = 4,
         num_rx: int = 4,
-        total_samples: int = 1_000_000,
+        total_samples: int = 100_000,
         **kwargs
     ):
         """

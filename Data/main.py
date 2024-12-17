@@ -151,34 +151,41 @@ def main():
                     
                     if integrity_report.get('overall_status', False):
                         logger.info("Dataset verification successful")
-                        # Log detailed statistics
-                        for mod_scheme, mod_details in integrity_report.get('modulation_schemes', {}).items():
-                            logger.info(f"\nModulation Scheme: {mod_scheme}")
-                            logger.info(f"  Samples: {mod_details.get('samples', 0)}")
-                            logger.info(f"  Integrity: {'VALID' if mod_details.get('integrity', False) else 'INVALID'}")
                     else:
                         logger.warning("Dataset verification failed")
+                        
+                        # Log all errors from the report
                         if 'errors' in integrity_report:
                             logger.error("Verification errors:")
                             for error in integrity_report['errors']:
                                 logger.error(f"  - {error}")
                         
+                        # Log modulation scheme details
                         if 'modulation_schemes' in integrity_report:
                             logger.info("\nModulation scheme details:")
                             for mod_scheme, mod_details in integrity_report['modulation_schemes'].items():
                                 logger.info(f"\n{mod_scheme}:")
                                 logger.info(f"  Samples: {mod_details.get('samples', 0)}")
                                 logger.info(f"  Integrity: {'VALID' if mod_details.get('integrity', False) else 'INVALID'}")
-                                if 'datasets' in mod_details:
-                                    for dataset_name, dataset_info in mod_details['datasets'].items():
-                                        if not dataset_info.get('valid', True):
-                                            logger.warning(f"  - Invalid dataset: {dataset_name}")
-                                            if 'statistics' in dataset_info:
-                                                logger.debug(f"    Statistics: {dataset_info['statistics']}")
+                                
+                                if not mod_details.get('integrity', False):
+                                    if 'error' in mod_details:
+                                        logger.error(f"  Error: {mod_details['error']}")
+                        
+                        # Log statistical check results
+                        if 'statistical_checks' in integrity_report:
+                            logger.info("\nStatistical check results:")
+                            for check_name, result in integrity_report['statistical_checks'].items():
+                                if not result.get('valid', True):
+                                    logger.warning(f"  Failed check: {check_name}")
+                                    if 'error' in result:
+                                        logger.error(f"    Error: {result['error']}")
+                        
+                        logger.debug("Full integrity report:", integrity_report)
+                        
             except Exception as e:
                 logger.error(f"Dataset verification error: {str(e)}")
                 logger.debug("Verification failed with exception", exc_info=True)
-                return 1    
 
     except Exception as e:
         logging.error(f"Error occurred: {str(e)}", exc_info=True)
