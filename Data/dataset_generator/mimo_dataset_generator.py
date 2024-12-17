@@ -247,22 +247,19 @@ class MIMODatasetGenerator:
                         # Debug logging
                         self.logger.debug(f"Original h_perfect shape: {h_perfect.shape}")
                         
-                        # Handle rank-4 tensor if present
-                        if len(h_perfect.shape) == 4:
-                            h_perfect = h_perfect[:, 0, :, :]  # Take first slice of second dimension
-                            self.logger.debug(f"Reshaped h_perfect shape: {h_perfect.shape}")
-                        
                         # Ensure correct shape [batch_size, num_rx, num_tx]
-                        expected_shape = [batch_size, self.system_params.num_rx, self.system_params.num_tx]
-                        h_perfect = tf.ensure_shape(h_perfect, expected_shape)
+                        h_perfect = tf.reshape(h_perfect, 
+                                            [batch_size, self.system_params.num_rx, self.system_params.num_tx])
 
-                        # Apply path loss
-                        h_with_pl = self.path_loss_manager.apply_path_loss(h_perfect, distances)
+                        # Calculate path loss components separately
+                        path_loss_db = self.path_loss_manager.calculate_path_loss(
+                            distances[:batch_size], 'umi'
+                        )
+                        path_loss_linear = tf.pow(10.0, -path_loss_db / 20.0)
+                        path_loss_shaped = tf.reshape(path_loss_linear, [batch_size, 1, 1])
                         
-                        # Handle rank-4 tensor for h_with_pl if present
-                        if len(h_with_pl.shape) == 4:
-                            h_with_pl = h_with_pl[:, 0, :, :]
-                            self.logger.debug(f"Reshaped h_with_pl shape: {h_with_pl.shape}")
+                        # Apply path loss
+                        h_with_pl = h_perfect * tf.cast(path_loss_shaped, dtype=h_perfect.dtype)
                         
                         # Generate and process symbols
                         tx_symbols = self.channel_model.generate_qam_symbols(batch_size, mod_scheme)
@@ -270,10 +267,6 @@ class MIMODatasetGenerator:
                         
                         # Calculate received symbols
                         rx_symbols = tf.matmul(h_with_pl, tx_symbols)
-                        
-                        # Handle rank-4 tensor for rx_symbols if present
-                        if len(rx_symbols.shape) == 4:
-                            rx_symbols = rx_symbols[:, 0, :, :]
                         
                         # Calculate metrics
                         metrics = self.metrics_calculator.calculate_performance_metrics(
@@ -305,12 +298,11 @@ class MIMODatasetGenerator:
                         mod_group['throughput'][start_idx:end_idx] = enhanced_metrics['throughput']
                         
                         # Save path loss data
-                        f['path_loss_data']['fspl'][start_idx:end_idx] = (
-                            self.path_loss_manager.calculate_free_space_path_loss(distances).numpy()
-                        )
-                        f['path_loss_data']['scenario_pathloss'][start_idx:end_idx] = (
-                            self.path_loss_manager.calculate_path_loss(distances).numpy()
-                        )
+                        fspl = self.path_loss_manager.calculate_free_space_path_loss(distances[:batch_size])
+                        scenario_pl = self.path_loss_manager.calculate_path_loss(distances[:batch_size])
+                        
+                        f['path_loss_data']['fspl'][start_idx:end_idx] = fspl.numpy()
+                        f['path_loss_data']['scenario_pathloss'][start_idx:end_idx] = scenario_pl.numpy()
                         
                         mod_progress.update(batch_size)
                         total_progress.update(batch_size)

@@ -237,24 +237,24 @@ class PathLossManager:
             # Get batch size from channel response
             batch_size = tf.shape(channel_response)[0]
             
-            # Log shapes before processing
+            # Log input shapes
             self.logger.debug(f"Initial channel_response shape: {channel_response.shape}")
             self.logger.debug(f"Initial distance shape: {distance.shape}")
             
-            # Calculate path loss (1D output)
-            path_loss_db = self.calculate_path_loss(distance[:batch_size], scenario)
+            # Ensure distance tensor has correct shape
+            distance = tf.reshape(distance[:batch_size], [-1])
             
-            # Convert to linear scale (maintaining 1D shape)
+            # Calculate path loss for the batch
+            path_loss_db = self.calculate_path_loss(distance, scenario)
+            
+            # Convert to linear scale
             path_loss_linear = tf.pow(10.0, -path_loss_db / 20.0)
             
-            # Log intermediate shape
-            self.logger.debug(f"Path loss linear shape before reshape: {path_loss_linear.shape}")
+            # Explicitly reshape path loss to match batch size
+            path_loss_linear = tf.reshape(path_loss_linear, [-1])[:batch_size]
             
-            # First ensure path_loss_linear is the correct length
-            path_loss_linear = tf.ensure_shape(path_loss_linear, [batch_size])
-            
-            # Now reshape to broadcasting dimensions
-            path_loss_shaped = tf.reshape(path_loss_linear, [batch_size, 1, 1])
+            # Add dimensions for broadcasting
+            path_loss_shaped = tf.expand_dims(tf.expand_dims(path_loss_linear, axis=1), axis=2)
             
             # Apply path loss to channel response
             attenuated_channel = channel_response * tf.cast(
