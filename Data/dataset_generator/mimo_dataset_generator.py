@@ -301,11 +301,16 @@ class MIMODatasetGenerator:
                         
                         # Calculate and reshape path loss data
                         fspl = self.path_loss_manager.calculate_free_space_path_loss(distances)
-                        fspl = tf.reshape(fspl, [batch_size])
-                        
-                        scenario_pl = self.path_loss_manager.calculate_path_loss(distances)
-                        scenario_pl = tf.reshape(scenario_pl, [batch_size])
-                        
+                        scenario_pl = self.path_loss_manager.calculate_path_loss(distances, 'umi')  # Add scenario parameter
+
+                        # Debug logging
+                        self.logger.debug(f"Original scenario_pl shape: {scenario_pl.shape}")
+                        self.logger.debug(f"Batch size: {batch_size}")
+
+                        # Slice the tensors to match batch_size before reshaping
+                        fspl = tf.slice(fspl, [0], [batch_size])
+                        scenario_pl = tf.slice(scenario_pl, [0], [batch_size])
+
                         # Save path loss data with correct shapes
                         f['path_loss_data']['fspl'][start_idx:end_idx] = fspl.numpy()
                         f['path_loss_data']['scenario_pathloss'][start_idx:end_idx] = scenario_pl.numpy()
