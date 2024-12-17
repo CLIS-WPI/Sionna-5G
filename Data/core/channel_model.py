@@ -272,34 +272,41 @@ class ChannelModelManager:
         
     def generate_mimo_channel(
         self, 
-        batch_size: int
+        batch_size: int,
+        snr_db: tf.Tensor
     ) -> Dict[str, tf.Tensor]:
         """
         Generate comprehensive MIMO channel data
         
         Args:
             batch_size (int): Number of channel realizations
+            snr_db (tf.Tensor): Signal-to-Noise Ratio in dB
         
         Returns:
             Dict[str, tf.Tensor]: Dictionary of channel-related tensors
         """
-        # Generate random SNR values within system-defined range
-        snr_db = tf.random.uniform(
-            [batch_size], 
-            self.system_params.snr_range[0], 
-            self.system_params.snr_range[1]
-        )
-        
-        # Generate channel samples
-        perfect_channel, noisy_channel = self.generate_channel_samples(
-            batch_size, snr_db
-        )
-        
-        return {
-            'perfect_channel': perfect_channel,
-            'noisy_channel': noisy_channel,
-            'snr_db': snr_db
-        }
+        try:
+            # Generate channel samples - now correctly unpacking 3 values
+            perfect_channel, noisy_channel, eigenvalues = self.generate_channel_samples(
+                batch_size, snr_db
+            )
+            
+            # Calculate additional metrics
+            effective_snr = self.calculate_effective_snr(perfect_channel, snr_db)
+            spectral_eff = self.calculate_spectral_efficiency(perfect_channel, snr_db)
+            
+            return {
+                'perfect_channel': perfect_channel,
+                'noisy_channel': noisy_channel,
+                'eigenvalues': eigenvalues,
+                'snr_db': snr_db,
+                'effective_snr': effective_snr,
+                'spectral_efficiency': spectral_eff
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error in generate_mimo_channel: {str(e)}")
+            raise
     
     def get_channel_statistics(
         self, 

@@ -241,8 +241,12 @@ class MIMODatasetGenerator:
                             self.system_params.snr_range[1]
                         )
 
-                        # Generate channel response
-                        h_perfect, h_noisy = self.channel_model.generate_channel_samples(batch_size, snr_db)
+                        channel_data = self.channel_model.generate_mimo_channel(batch_size, snr_db)
+                        h_perfect = channel_data['perfect_channel']
+                        h_noisy = channel_data['noisy_channel']
+                        eigenvalues = channel_data['eigenvalues']
+                        effective_snr = channel_data['effective_snr']
+                        spectral_efficiency = channel_data['spectral_efficiency']
                         
                         # Debug logging
                         self.logger.debug(f"Original h_perfect shape: {h_perfect.shape}")
@@ -285,7 +289,7 @@ class MIMODatasetGenerator:
                         eigenvalues = metrics['eigenvalues']
                         
                         # Save data to HDF5
-                        mod_group['channel_response'][start_idx:end_idx] = h_with_pl.numpy()
+                        mod_group['channel_response'][start_idx:end_idx] = h_perfect.numpy()
                         mod_group['sinr'][start_idx:end_idx] = sinr.numpy()
                         mod_group['spectral_efficiency'][start_idx:end_idx] = spectral_efficiency.numpy()
                         mod_group['effective_snr'][start_idx:end_idx] = effective_snr.numpy()
