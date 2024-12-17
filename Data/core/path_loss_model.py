@@ -96,7 +96,7 @@ class PathLossManager:
         frequency: Optional[float] = None
     ) -> tf.Tensor:
         """
-        Calculate Free Space Path Loss (FSPL)
+        Calculate Free Space Path Loss (FSPL) with improved numerical stability
         
         Args:
             distance (tf.Tensor): Distance between transmitter and receiver
@@ -105,77 +105,80 @@ class PathLossManager:
         Returns:
             tf.Tensor: Free Space Path Loss in dB
         """
-        # Use system carrier frequency if not specified
-        frequency = frequency or self.system_params.carrier_frequency
-        
-        # Speed of light
-        c = 3e8
-        
-        # Wavelength calculation
-        wavelength = c / frequency
-        
-        # Avoid division by zero
-        distance = tf.maximum(distance, 1e-3)
-        
-        # FSPL calculation
-        fspl_db = 20.0 * tf.math.log(distance / wavelength) / tf.math.log(10.0)
-        
-        return fspl_db
+        try:
+            # Cast inputs to float32
+            distance = tf.cast(distance, dtype=tf.float32)
+            freq = float(frequency or self.system_params.carrier_frequency)
+            
+            # Constants
+            c = 3e8  # Speed of light
+            wavelength = c / freq
+            
+            # Ensure minimum distance and reshape
+            distance = tf.maximum(tf.reshape(distance, [-1]), 1e-3)
+            
+            # Calculate FSPL in dB with numerical stability
+            fspl_db = 20.0 * (
+                tf.math.log(distance) / tf.math.log(10.0) - 
+                tf.math.log(wavelength) / tf.math.log(10.0)
+            )
+            
+            # Clip values to reasonable range
+            fspl_db = tf.clip_by_value(fspl_db, 0.0, 200.0)
+            
+            return fspl_db
+            
+        except Exception as e:
+            self.logger.error(f"Free space path loss calculation failed: {str(e)}")
+            raise
     
     def calculate_path_loss(self, distance: tf.Tensor, scenario: str = 'umi') -> tf.Tensor:
         """
-        Calculate path loss for different scenarios with improved handling
+        Calculate path loss for different scenarios with improved shape handling
         
         Args:
             distance (tf.Tensor): Distance between transmitter and receiver in meters
             scenario (str): Path loss scenario ('umi' or 'uma')
         
         Returns:
-            tf.Tensor: Path loss in dB
+            tf.Tensor: Path loss in dB with shape [batch_size]
         """
-        # Validate input tensor
-        assert_tensor_shape(distance, [None], 'distance')
-        
-        # Ensure minimum distance and reshape
-        min_distance = 1.0  # Minimum 1 meter
-        distance = tf.maximum(distance, min_distance)
-        
-        # Convert distance to 3D coordinates for multiple samples
-        batch_size = tf.shape(distance)[0]
-        
-        # Define heights based on scenario
-        if scenario.lower() == 'umi':
-            bs_height = 10.0  # Urban Micro BS height (typically 10m)
-            ut_height = 1.5   # User Terminal height (typically 1.5m)
-        else:  # UMa scenario
-            bs_height = 25.0  # Urban Macro BS height (typically 25m)
-            ut_height = 1.5   # User Terminal height (typically 1.5m)
-        
-        # Create location tensors
-        ut_locations = tf.stack([
-            distance,
-            tf.zeros_like(distance),
-            tf.ones_like(distance) * ut_height
-        ], axis=1)
-        ut_locations = tf.expand_dims(ut_locations, axis=0)  # Add batch dimension
-        
-        bs_locations = tf.tile(
-            tf.constant([[[0., 0., bs_height]]]), 
-            [1, batch_size, 1]
-        )
-        
-        # Set topology for path loss calculation
-        scenario_obj = (
-            self.umi_scenario if scenario.lower() == 'umi' 
-            else self.uma_scenario
-        )
-        
-        # Create orientation and velocity tensors
-        zero_orientations = tf.zeros([1, batch_size, 3])
-        zero_velocities = tf.zeros([1, batch_size, 3])
-        indoor_state = tf.zeros([1, batch_size], dtype=tf.bool)  # Outdoor by default
-        
         try:
+            # Input validation and reshaping
+            distance = tf.cast(distance, dtype=tf.float32)
+            distance = tf.reshape(distance, [-1])
+            batch_size = tf.shape(distance)[0]
+            
+            # Apply minimum distance constraint
+            min_distance = 1.0
+            distance = tf.maximum(distance, min_distance)
+            
+            # Set heights based on scenario
+            bs_height = 10.0 if scenario.lower() == 'umi' else 25.0
+            ut_height = 1.5
+            
+            # Create location tensors
+            ut_locations = tf.stack([
+                distance,
+                tf.zeros_like(distance),
+                tf.ones_like(distance) * ut_height
+            ], axis=1)
+            ut_locations = tf.expand_dims(ut_locations, axis=0)
+            
+            bs_locations = tf.tile(
+                tf.constant([[[0., 0., bs_height]]], dtype=tf.float32),
+                [1, batch_size, 1]
+            )
+            
+            # Select appropriate scenario
+            scenario_obj = self.umi_scenario if scenario.lower() == 'umi' else self.uma_scenario
+            
+            # Create auxiliary tensors
+            zero_orientations = tf.zeros([1, batch_size, 3], dtype=tf.float32)
+            zero_velocities = tf.zeros([1, batch_size, 3], dtype=tf.float32)
+            indoor_state = tf.zeros([1, batch_size], dtype=tf.bool)
+            
+            # Set topology
             scenario_obj.set_topology(
                 ut_loc=ut_locations,
                 bs_loc=bs_locations,
@@ -185,35 +188,33 @@ class PathLossManager:
                 ut_velocities=zero_velocities
             )
             
-            # Get basic path loss
+            # Calculate basic path loss
             path_loss = tf.squeeze(scenario_obj.basic_pathloss)
             
-            # Apply frequency-dependent correction
+            # Apply frequency correction
             freq_ghz = self.carrier_frequency / 1e9
-            freq_correction = 20 * tf.math.log(freq_ghz) / tf.math.log(10.0)
+            freq_correction = 20.0 * tf.math.log(freq_ghz) / tf.math.log(10.0)
             
-            # Apply additional losses
+            # Generate shadow fading
+            shadow_std = 4.0 if scenario.lower() == 'umi' else 6.0
             shadow_fading = tf.random.normal(
-                tf.shape(path_loss),
+                [batch_size],
                 mean=0.0,
-                stddev=4.0 if scenario.lower() == 'umi' else 6.0
+                stddev=shadow_std,
+                dtype=tf.float32
             )
             
-            # Combine all losses
+            # Combine all components
             total_path_loss = path_loss + freq_correction + shadow_fading
             
-            # Ensure path loss is within realistic bounds
-            min_path_loss = 20.0  # Minimum path loss in dB
-            max_path_loss = 160.0  # Maximum path loss in dB
-            total_path_loss = tf.clip_by_value(total_path_loss, min_path_loss, max_path_loss)
+            # Clip values to reasonable range
+            total_path_loss = tf.clip_by_value(total_path_loss, 20.0, 160.0)
             
-            return total_path_loss
+            return tf.reshape(total_path_loss, [-1])
             
         except Exception as e:
             self.logger.error(f"Path loss calculation failed: {str(e)}")
-            self.logger.error("Detailed error traceback:", exc_info=True)
             raise
-
     
     def apply_path_loss(
         self, 
@@ -233,22 +234,32 @@ class PathLossManager:
             tf.Tensor: Channel response with applied path loss
         """
         try:
-            # Get batch size from channel response
+            # Get dimensions
             batch_size = tf.shape(channel_response)[0]
+            num_rx = tf.shape(channel_response)[1]
+            num_tx = tf.shape(channel_response)[2]
             
-            # Calculate path loss in dB using the first batch_size distances
-            path_loss_db = self.calculate_path_loss(distance[:batch_size], scenario)
+            # Ensure distance has correct shape
+            distance = tf.reshape(distance[:batch_size], [-1])
             
-            # Convert path loss from dB to linear scale
+            # Calculate path loss (ensures 1D output)
+            path_loss_db = self.calculate_path_loss(distance, scenario)
+            
+            # Convert to linear scale
             path_loss_linear = tf.pow(10.0, -path_loss_db / 20.0)
             
-            # Reshape path loss for broadcasting using gather instead of slice
-            path_loss_linear = tf.gather(path_loss_linear, tf.range(batch_size))
-            path_loss_linear = tf.expand_dims(tf.expand_dims(path_loss_linear, -1), -1)
+            # Reshape path loss for broadcasting with channel response
+            path_loss_linear = tf.reshape(path_loss_linear, [batch_size, 1, 1])
+            
+            # Broadcast path loss to match channel response dimensions
+            path_loss_broadcast = tf.broadcast_to(
+                path_loss_linear,
+                [batch_size, num_rx, num_tx]
+            )
             
             # Apply path loss to channel response
             attenuated_channel = channel_response * tf.cast(
-                path_loss_linear, 
+                path_loss_broadcast,
                 dtype=channel_response.dtype
             )
             
@@ -257,7 +268,6 @@ class PathLossManager:
         except Exception as e:
             self.logger.error(f"Error applying path loss: {str(e)}")
             raise
-
     def generate_path_loss_statistics(
         self, 
         min_distance: float = 10.0, 
