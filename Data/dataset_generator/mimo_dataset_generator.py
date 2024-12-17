@@ -191,130 +191,140 @@ class MIMODatasetGenerator:
             raise
     
     def generate_dataset(
-            self, 
-            num_samples: int, 
-            save_path: str = 'dataset/mimo_dataset.h5'
-        ):
-            """
-            Generate comprehensive MIMO dataset with enhanced shape validation
+        self, 
+        num_samples: int, 
+        save_path: str = 'dataset/mimo_dataset.h5'
+    ):
+        """
+        Generate comprehensive MIMO dataset with enhanced shape validation
+        
+        Args:
+            num_samples (int): Total number of samples to generate
+            save_path (str): Path to save HDF5 dataset
+        """
+        try:
+            self._prepare_output_directory(save_path)
             
-            Args:
-                num_samples (int): Total number of samples to generate
-                save_path (str): Path to save HDF5 dataset
-            """
-            try:
-                self._prepare_output_directory(save_path)
+            batch_size = min(4096, num_samples)
+            samples_per_mod = num_samples // len(self.system_params.modulation_schemes)
+            
+            if num_samples % len(self.system_params.modulation_schemes) != 0:
+                self.logger.warning(
+                    f"Total samples {num_samples} not exactly divisible by number of "
+                    f"modulation schemes {len(self.system_params.modulation_schemes)}. "
+                    f"Using {samples_per_mod} samples per modulation."
+                )
+            
+            with h5py.File(save_path, 'w') as f:
+                self._create_dataset_structure(f, num_samples)
                 
-                batch_size = min(4096, num_samples)
-                samples_per_mod = num_samples // len(self.system_params.modulation_schemes)
+                total_progress = tqdm(total=num_samples, desc="Total Dataset Generation", unit="samples")
                 
-                with h5py.File(save_path, 'w') as f:
-                    self._create_dataset_structure(f, num_samples)
+                for mod_scheme in self.system_params.modulation_schemes:
+                    mod_group = f['modulation_data'][mod_scheme]
+                    mod_progress = tqdm(
+                        total=samples_per_mod,
+                        desc=f"{mod_scheme} Generation",
+                        unit="samples",
+                        leave=False
+                    )
                     
-                    total_progress = tqdm(total=num_samples, desc="Total Dataset Generation", unit="samples")
-                    
-                    for mod_scheme in self.system_params.modulation_schemes:
-                        mod_group = f['modulation_data'][mod_scheme]
-                        mod_progress = tqdm(
-                            total=samples_per_mod,
-                            desc=f"{mod_scheme} Generation",
-                            unit="samples",
-                            leave=False
+                    for batch_idx in range(samples_per_mod // batch_size):
+                        start_idx = batch_idx * batch_size
+                        end_idx = start_idx + batch_size
+                        
+                        # Generate input data
+                        distances = tf.random.uniform([batch_size], 10.0, 500.0)
+                        snr_db = tf.random.uniform(
+                            [batch_size],
+                            self.system_params.snr_range[0],
+                            self.system_params.snr_range[1]
+                        )
+
+                        # Generate channel response
+                        h_perfect, h_noisy = self.channel_model.generate_channel_samples(batch_size, snr_db)
+                        
+                        # Debug logging
+                        self.logger.debug(f"Original h_perfect shape: {h_perfect.shape}")
+                        
+                        # Handle rank-4 tensor if present
+                        if len(h_perfect.shape) == 4:
+                            h_perfect = h_perfect[:, 0, :, :]  # Take first slice of second dimension
+                            self.logger.debug(f"Reshaped h_perfect shape: {h_perfect.shape}")
+                        
+                        # Ensure correct shape [batch_size, num_rx, num_tx]
+                        expected_shape = [batch_size, self.system_params.num_rx, self.system_params.num_tx]
+                        h_perfect = tf.ensure_shape(h_perfect, expected_shape)
+
+                        # Apply path loss
+                        h_with_pl = self.path_loss_manager.apply_path_loss(h_perfect, distances)
+                        
+                        # Handle rank-4 tensor for h_with_pl if present
+                        if len(h_with_pl.shape) == 4:
+                            h_with_pl = h_with_pl[:, 0, :, :]
+                            self.logger.debug(f"Reshaped h_with_pl shape: {h_with_pl.shape}")
+                        
+                        # Generate and process symbols
+                        tx_symbols = self.channel_model.generate_qam_symbols(batch_size, mod_scheme)
+                        tx_symbols = tf.reshape(tx_symbols, [batch_size, self.system_params.num_tx, 1])
+                        
+                        # Calculate received symbols
+                        rx_symbols = tf.matmul(h_with_pl, tx_symbols)
+                        
+                        # Handle rank-4 tensor for rx_symbols if present
+                        if len(rx_symbols.shape) == 4:
+                            rx_symbols = rx_symbols[:, 0, :, :]
+                        
+                        # Calculate metrics
+                        metrics = self.metrics_calculator.calculate_performance_metrics(
+                            h_with_pl,
+                            tx_symbols,
+                            rx_symbols,
+                            snr_db
                         )
                         
-                        for batch_idx in range(samples_per_mod // batch_size):
-                            start_idx = batch_idx * batch_size
-                            end_idx = start_idx + batch_size
-                            
-                            # Generate input data
-                            distances = tf.random.uniform([batch_size], 10.0, 500.0)
-                            snr_db = tf.random.uniform(
-                                [batch_size],
-                                self.system_params.snr_range[0],
-                                self.system_params.snr_range[1]
-                            )
-
-                            # Generate channel response
-                            h_perfect, h_noisy = self.channel_model.generate_channel_samples(batch_size, snr_db)
-                            
-                            # Debug logging
-                            self.logger.debug(f"Original h_perfect shape: {h_perfect.shape}")
-                            
-                            # Handle rank-4 tensor if present
-                            if len(h_perfect.shape) == 4:
-                                # Remove the extra dimension (squeeze) and ensure correct shape
-                                h_perfect = tf.squeeze(h_perfect, axis=1)  # Squeeze the second dimension
-                                self.logger.debug(f"After squeeze h_perfect shape: {h_perfect.shape}")
-                            
-                            # Ensure correct shape [batch_size, num_rx, num_tx]
-                            expected_shape = [batch_size, self.system_params.num_rx, self.system_params.num_tx]
-                            h_perfect = tf.ensure_shape(h_perfect, expected_shape)
-                            
-                            # Validate tensor shape
-                            validate_tensor_shapes({
-                                'channel_response': (h_perfect, expected_shape)
-                            })
-
-                            # Apply path loss
-                            h_with_pl = self.path_loss_manager.apply_path_loss(h_perfect, distances)
-                            
-                            # Generate and process symbols
-                            tx_symbols = self.channel_model.generate_qam_symbols(batch_size, mod_scheme)
-                            tx_symbols = tf.reshape(tx_symbols, [batch_size, self.system_params.num_tx, 1])
-                            
-                            # Calculate received symbols
-                            rx_symbols = tf.matmul(h_with_pl, tx_symbols)
-                            
-                            # Calculate metrics
-                            metrics = self.metrics_calculator.calculate_performance_metrics(
-                                h_with_pl,
-                                tx_symbols,
-                                rx_symbols,
-                                snr_db
-                            )
-                            
-                            # Process metrics
-                            effective_snr = tf.squeeze(metrics['effective_snr'])
-                            spectral_efficiency = tf.squeeze(metrics['spectral_efficiency'])
-                            sinr = tf.squeeze(metrics['sinr'])
-                            eigenvalues = metrics['eigenvalues']
-                            
-                            # Save data to HDF5
-                            mod_group['channel_response'][start_idx:end_idx] = h_with_pl.numpy()
-                            mod_group['sinr'][start_idx:end_idx] = sinr.numpy()
-                            mod_group['spectral_efficiency'][start_idx:end_idx] = spectral_efficiency.numpy()
-                            mod_group['effective_snr'][start_idx:end_idx] = effective_snr.numpy()
-                            mod_group['eigenvalues'][start_idx:end_idx] = eigenvalues.numpy()
-                            
-                            # Calculate and save enhanced metrics
-                            enhanced_metrics = self.metrics_calculator.calculate_enhanced_metrics(
-                                h_with_pl, tx_symbols, rx_symbols, snr_db
-                            )
-                            
-                            mod_group['ber'][start_idx:end_idx] = enhanced_metrics['ber']
-                            mod_group['throughput'][start_idx:end_idx] = enhanced_metrics['throughput']
-                            
-                            # Save path loss data
-                            f['path_loss_data']['fspl'][start_idx:end_idx] = (
-                                self.path_loss_manager.calculate_free_space_path_loss(distances).numpy()
-                            )
-                            f['path_loss_data']['scenario_pathloss'][start_idx:end_idx] = (
-                                self.path_loss_manager.calculate_path_loss(distances).numpy()
-                            )
-                            
-                            mod_progress.update(batch_size)
-                            total_progress.update(batch_size)
+                        # Process metrics
+                        effective_snr = tf.squeeze(metrics['effective_snr'])
+                        spectral_efficiency = tf.squeeze(metrics['spectral_efficiency'])
+                        sinr = tf.squeeze(metrics['sinr'])
+                        eigenvalues = metrics['eigenvalues']
                         
-                        mod_progress.close()
+                        # Save data to HDF5
+                        mod_group['channel_response'][start_idx:end_idx] = h_with_pl.numpy()
+                        mod_group['sinr'][start_idx:end_idx] = sinr.numpy()
+                        mod_group['spectral_efficiency'][start_idx:end_idx] = spectral_efficiency.numpy()
+                        mod_group['effective_snr'][start_idx:end_idx] = effective_snr.numpy()
+                        mod_group['eigenvalues'][start_idx:end_idx] = eigenvalues.numpy()
+                        
+                        # Calculate and save enhanced metrics
+                        enhanced_metrics = self.metrics_calculator.calculate_enhanced_metrics(
+                            h_with_pl, tx_symbols, rx_symbols, snr_db
+                        )
+                        
+                        mod_group['ber'][start_idx:end_idx] = enhanced_metrics['ber']
+                        mod_group['throughput'][start_idx:end_idx] = enhanced_metrics['throughput']
+                        
+                        # Save path loss data
+                        f['path_loss_data']['fspl'][start_idx:end_idx] = (
+                            self.path_loss_manager.calculate_free_space_path_loss(distances).numpy()
+                        )
+                        f['path_loss_data']['scenario_pathloss'][start_idx:end_idx] = (
+                            self.path_loss_manager.calculate_path_loss(distances).numpy()
+                        )
+                        
+                        mod_progress.update(batch_size)
+                        total_progress.update(batch_size)
                     
-                    total_progress.close()
+                    mod_progress.close()
                 
-                self.logger.info(f"Dataset successfully generated at {save_path}")
+                total_progress.close()
             
-            except Exception as e:
-                self.logger.error(f"Dataset generation failed: {str(e)}")
-                self.logger.error("Detailed error traceback:", exc_info=True)
-                raise
+            self.logger.info(f"Dataset successfully generated at {save_path}")
+        
+        except Exception as e:
+            self.logger.error(f"Dataset generation failed: {str(e)}")
+            self.logger.error("Detailed error traceback:", exc_info=True)
+            raise
     
     def _get_dataset_units(self, dataset_name: str) -> str:
         """Helper method to return appropriate units for each dataset type"""

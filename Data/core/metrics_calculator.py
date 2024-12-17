@@ -52,7 +52,8 @@ class MetricsCalculator:
             snr_db (tf.Tensor): Signal-to-Noise Ratio in dB
         
         Returns:
-            Dict[str, tf.Tensor]: Performance metrics
+            Dict[str, tf.Tensor]: Performance metrics including SINR, spectral efficiency,
+                                effective SNR, and eigenvalues
         """
         try:
             # Get batch size from input tensor
@@ -60,19 +61,20 @@ class MetricsCalculator:
             
             # Print debug information
             self.logger.debug(f"Input channel_response shape: {channel_response.shape}")
-            self.logger.debug(f"Batch size: {batch_size}")
+            self.logger.debug(f"Input rx_symbols shape: {rx_symbols.shape}")
             
-            # Handle potential rank-4 tensor
+            # Handle potential rank-4 tensor for channel_response
             if len(channel_response.shape) == 4:
-                # If shape is (batch_size, batch_size, num_rx, num_tx)
-                # We need to take only the first batch_size elements from the second dimension
-                channel_response = channel_response[:, :batch_size, :, :]
-                # Now reshape to (batch_size, num_rx, num_tx)
-                channel_response = tf.reshape(
-                    channel_response,
-                    [batch_size, self.system_params.num_rx, self.system_params.num_tx]
-                )
-            
+                print(f"Original channel_response shape: {channel_response.shape}")
+                channel_response = channel_response[:, 0, :, :]
+                print(f"Reshaped channel_response shape: {channel_response.shape}")
+                
+            # Handle potential rank-4 tensor for rx_symbols
+            if len(rx_symbols.shape) == 4:
+                print(f"Original rx_symbols shape: {rx_symbols.shape}")
+                rx_symbols = rx_symbols[:, 0, :, :]  # Take the first slice of second dimension
+                print(f"Reshaped rx_symbols shape: {rx_symbols.shape}")
+                
             # Validate tensor shapes
             assert_tensor_shape(
                 channel_response,
@@ -90,7 +92,6 @@ class MetricsCalculator:
                 'rx_symbols'
             )
             
-            # Rest of your existing code...
             # Calculate channel matrix properties
             H_conj_transpose = tf.linalg.adjoint(channel_response)
             HH = tf.matmul(H_conj_transpose, channel_response)
@@ -125,9 +126,9 @@ class MetricsCalculator:
             }
             
         except Exception as e:
-            print(f"Error in calculate_performance_metrics: {str(e)}")
-            raise
-    
+            self.logger.error(f"Error in calculate_performance_metrics: {str(e)}")
+            raise    
+        
     def calculate_enhanced_metrics(
         self, 
         channel_response: tf.Tensor, 
