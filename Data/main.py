@@ -12,6 +12,7 @@ from config.system_parameters import SystemParameters
 from dataset_generator.mimo_dataset_generator import MIMODatasetGenerator
 from utill.logging_config import configure_logging, LoggerManager
 from integrity.dataset_integrity_checker import MIMODatasetIntegrityChecker
+
 os.makedirs('logs', exist_ok=True)
 
 def parse_arguments():
@@ -99,22 +100,6 @@ def generate_output_path(base_path=None):
     default_path = f"dataset/mimo_dataset_{timestamp}.h5"
     return base_path or default_path
 
-# main.py
-# MIMO Dataset Generation Command-Line Interface
-# Provides flexible command-line configuration for dataset generation and verification
-# Manages system configuration, logging, and dataset generation workflow
-
-import sys
-import argparse
-import logging
-from datetime import datetime
-import os
-from config.system_parameters import SystemParameters
-from dataset_generator.mimo_dataset_generator import MIMODatasetGenerator
-from utill.logging_config import configure_logging, LoggerManager
-from integrity.dataset_integrity_checker import MIMODatasetIntegrityChecker  # Add this import
-os.makedirs('logs', exist_ok=True)
-
 def main():
     """
     Main entry point for MIMO dataset generation
@@ -158,7 +143,6 @@ def main():
         )
         
         # Verify dataset if requested
-        # In main.py, modify the verification part:
         if args.verify:
             logger.info("Verifying generated dataset...")
             try:
@@ -172,32 +156,35 @@ def main():
                             logger.info(f"\nModulation Scheme: {mod_scheme}")
                             logger.info(f"  Samples: {mod_details.get('samples', 0)}")
                             logger.info(f"  Integrity: {'VALID' if mod_details.get('integrity', False) else 'INVALID'}")
-                            
-                            # Log dataset details if available
-                            for dataset_name, dataset_info in mod_details.get('datasets', {}).items():
-                                if dataset_info.get('valid', False):
-                                    logger.debug(f"    {dataset_name}: Valid")
-                                else:
-                                    logger.warning(f"    {dataset_name}: Invalid")
-                                    
                     else:
                         logger.warning("Dataset verification failed")
-                        if 'error' in integrity_report:
-                            logger.error(f"Verification error: {integrity_report['error']}")
-                        logger.debug(f"Full integrity report: {integrity_report}")
+                        if 'errors' in integrity_report:
+                            logger.error("Verification errors:")
+                            for error in integrity_report['errors']:
+                                logger.error(f"  - {error}")
                         
+                        if 'modulation_schemes' in integrity_report:
+                            logger.info("\nModulation scheme details:")
+                            for mod_scheme, mod_details in integrity_report['modulation_schemes'].items():
+                                logger.info(f"\n{mod_scheme}:")
+                                logger.info(f"  Samples: {mod_details.get('samples', 0)}")
+                                logger.info(f"  Integrity: {'VALID' if mod_details.get('integrity', False) else 'INVALID'}")
+                                if 'datasets' in mod_details:
+                                    for dataset_name, dataset_info in mod_details['datasets'].items():
+                                        if not dataset_info.get('valid', True):
+                                            logger.warning(f"  - Invalid dataset: {dataset_name}")
+                                            if 'statistics' in dataset_info:
+                                                logger.debug(f"    Statistics: {dataset_info['statistics']}")
             except Exception as e:
                 logger.error(f"Dataset verification error: {str(e)}")
                 logger.debug("Verification failed with exception", exc_info=True)
-                return 1
-        
-        logger.info("MIMO dataset generation completed successfully")
-        return 0
-    
+                return 1    
+
     except Exception as e:
-        logging.error(f"Critical error during dataset generation: {e}")
-        logging.exception("Detailed error traceback:")
+        logging.error(f"Error occurred: {str(e)}", exc_info=True)
         return 1
+    
+    return 0
 
 if __name__ == "__main__":
     sys.exit(main())
