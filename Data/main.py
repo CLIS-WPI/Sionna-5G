@@ -100,21 +100,21 @@ def generate_output_path(base_path=None):
     default_path = f"dataset/mimo_dataset_{timestamp}.h5"
     return base_path or default_path
 
+# In main.py, modify the main() function:
+
 def main():
     """
     Main entry point for MIMO dataset generation
-    
-    Returns:
-        int: Exit status (0 for success, 1 for failure)
     """
     try:
         # Parse command-line arguments
         args = parse_arguments()
         
-        # Configure logging
+        # Configure logging with more detailed format
         logger = configure_logging(
-            log_level=args.log_level, 
-            log_file=f'logs/mimo_dataset_generation_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
+            log_level=args.log_level,
+            log_file=f'logs/mimo_dataset_generation_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log',
+            log_format='%(asctime)s - %(name)s - %(levelname)s - %(message)s - [%(filename)s:%(lineno)d]'
         )
         
         # Configure system parameters
@@ -122,76 +122,80 @@ def main():
         
         # Generate output path
         output_path = generate_output_path(args.output)
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
         
-        # Create dataset generator
+        # Log configuration details
+        logger.info("=== Configuration Details ===")
+        logger.info(f"Total samples: {system_params.total_samples}")
+        logger.info(f"TX Antennas: {system_params.num_tx}")
+        logger.info(f"RX Antennas: {system_params.num_rx}")
+        logger.info(f"Output path: {output_path}")
+        logger.info(f"Verification enabled: {args.verify}")
+        
+        # Create and configure dataset generator
+        logger.debug("Initializing dataset generator...")
         generator = MIMODatasetGenerator(
-            system_params=system_params, 
+            system_params=system_params,
             logger=logger
         )
         
-        # Log start of dataset generation
-        logger.info(f"Starting MIMO dataset generation")
-        logger.info(f"Total samples: {system_params.total_samples}")
-        logger.info(f"Output path: {output_path}")
-        logger.info(f"TX Antennas: {system_params.num_tx}")
-        logger.info(f"RX Antennas: {system_params.num_rx}")
-        
-        # Generate dataset
-        generator.generate_dataset(
-            num_samples=system_params.total_samples, 
-            save_path=output_path
-        )
+        # Generate dataset with progress monitoring
+        logger.info("Starting dataset generation...")
+        try:
+            generator.generate_dataset(
+                num_samples=system_params.total_samples,
+                save_path=output_path
+            )
+            logger.info("Dataset generation completed")
+            
+            # Verify file exists and has content
+            if os.path.exists(output_path):
+                file_size = os.path.getsize(output_path)
+                logger.info(f"Generated file size: {file_size} bytes")
+                if file_size == 0:
+                    raise ValueError("Generated dataset file is empty")
+            else:
+                raise FileNotFoundError("Dataset file was not created")
+            
+        except Exception as e:
+            logger.error(f"Dataset generation failed: {str(e)}", exc_info=True)
+            return 1
         
         # Verify dataset if requested
         if args.verify:
-            logger.info("Verifying generated dataset...")
+            logger.info("Starting dataset verification...")
             try:
                 with MIMODatasetIntegrityChecker(output_path) as checker:
+                    # Debug log the dataset structure
+                    with h5py.File(output_path, 'r') as f:
+                        logger.debug(f"Dataset structure: {list(f.keys())}")
+                        if 'modulation_data' in f:
+                            logger.debug(f"Modulation schemes: {list(f['modulation_data'].keys())}")
+                    
                     integrity_report = checker.check_dataset_integrity()
                     
                     if integrity_report.get('overall_status', False):
                         logger.info("Dataset verification successful")
                     else:
                         logger.warning("Dataset verification failed")
-                        
-                        # Log all errors from the report
                         if 'errors' in integrity_report:
-                            logger.error("Verification errors:")
                             for error in integrity_report['errors']:
-                                logger.error(f"  - {error}")
+                                logger.error(f"Verification error: {error}")
                         
-                        # Log modulation scheme details
-                        if 'modulation_schemes' in integrity_report:
-                            logger.info("\nModulation scheme details:")
-                            for mod_scheme, mod_details in integrity_report['modulation_schemes'].items():
-                                logger.info(f"\n{mod_scheme}:")
-                                logger.info(f"  Samples: {mod_details.get('samples', 0)}")
-                                logger.info(f"  Integrity: {'VALID' if mod_details.get('integrity', False) else 'INVALID'}")
-                                
-                                if not mod_details.get('integrity', False):
-                                    if 'error' in mod_details:
-                                        logger.error(f"  Error: {mod_details['error']}")
-                        
-                        # Log statistical check results
-                        if 'statistical_checks' in integrity_report:
-                            logger.info("\nStatistical check results:")
-                            for check_name, result in integrity_report['statistical_checks'].items():
-                                if not result.get('valid', True):
-                                    logger.warning(f"  Failed check: {check_name}")
-                                    if 'error' in result:
-                                        logger.error(f"    Error: {result['error']}")
-                        
-                        logger.debug("Full integrity report:", integrity_report)
+                        # Log detailed verification results
+                        logger.debug(f"Full integrity report: {integrity_report}")
+                        return 1
                         
             except Exception as e:
-                logger.error(f"Dataset verification error: {str(e)}")
-                logger.debug("Verification failed with exception", exc_info=True)
-
+                logger.error(f"Verification error: {str(e)}", exc_info=True)
+                return 1
+        
+        logger.info("Process completed successfully")
+        return 0
+        
     except Exception as e:
-        logging.error(f"Error occurred: {str(e)}", exc_info=True)
+        logger.error(f"Critical error: {str(e)}", exc_info=True)
         return 1
-    
-    return 0
 
 if __name__ == "__main__":
     sys.exit(main())

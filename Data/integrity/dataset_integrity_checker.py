@@ -8,7 +8,7 @@ import numpy as np
 import tensorflow as tf
 from typing import Dict, Any, Optional, Tuple, List
 from datetime import datetime
-
+from logging import Logger
 class MIMODatasetIntegrityChecker:
     """
     Advanced dataset integrity verification for MIMO communication datasets
@@ -307,6 +307,43 @@ def verify_dataset_integrity(dataset_path: str) -> Dict[str, Any]:
         return checker.check_dataset_integrity()
 
 
+def verify_dataset(self) -> bool:
+    """
+    Verify dataset integrity
+    """
+    try:
+        logger = logging.getLogger()
+        
+        # Check if dataset is opened
+        if self.dataset is None:
+            logger.error("Dataset file is not opened")
+            return False
+            
+        # Log dataset structure
+        logger.debug(f"Dataset groups: {list(self.dataset.keys())}")
+        
+        # Check modulation data
+        if 'modulation_data' not in self.dataset:
+            logger.error("Missing modulation_data group in dataset")
+            return False
+            
+        # Check each modulation scheme
+        for scheme in self.modulation_schemes:
+            if scheme not in self.dataset['modulation_data']:
+                logger.error(f"Missing {scheme} data in modulation_data group")
+                return False
+            
+            # Log data shape and content summary
+            data = self.dataset['modulation_data'][scheme]
+            logger.debug(f"{scheme} data shape: {data.shape}")
+            logger.debug(f"{scheme} data statistics: min={np.min(data)}, max={np.max(data)}")
+            
+        return True
+        
+    except Exception as e:
+        logger.error(f"Dataset verification failed with error: {str(e)}", exc_info=True)
+        return False
+    
 def main():
     """
     Example usage and demonstration of dataset integrity checking
