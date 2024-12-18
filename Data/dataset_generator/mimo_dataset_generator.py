@@ -471,7 +471,7 @@ class MIMODatasetGenerator:
 # Example usage
 def main():
     generator = MIMODatasetGenerator()
-    generator.generate_dataset(num_samples=100_000)
+    generator.generate_dataset(num_samples=10_000)
     generator.verify_dataset('dataset/mimo_dataset.h5')
 
 if __name__ == "__main__":
