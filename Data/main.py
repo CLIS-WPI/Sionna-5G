@@ -12,6 +12,7 @@ from config.system_parameters import SystemParameters
 from dataset_generator.mimo_dataset_generator import MIMODatasetGenerator
 from utill.logging_config import configure_logging, LoggerManager
 from integrity.dataset_integrity_checker import MIMODatasetIntegrityChecker
+import h5py
 
 os.makedirs('logs', exist_ok=True)
 
@@ -100,8 +101,6 @@ def generate_output_path(base_path=None):
     default_path = f"dataset/mimo_dataset_{timestamp}.h5"
     return base_path or default_path
 
-# In main.py, modify the main() function:
-
 def main():
     """
     Main entry point for MIMO dataset generation
@@ -110,7 +109,7 @@ def main():
         # Parse command-line arguments
         args = parse_arguments()
         
-        # Configure logging with more detailed format
+        # Configure logging with detailed format
         logger = configure_logging(
             log_level=args.log_level,
             log_file=f'logs/mimo_dataset_generation_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log',
@@ -139,7 +138,7 @@ def main():
             logger=logger
         )
         
-        # Generate dataset with progress monitoring
+        # Generate dataset
         logger.info("Starting dataset generation...")
         try:
             generator.generate_dataset(
@@ -148,7 +147,7 @@ def main():
             )
             logger.info("Dataset generation completed")
             
-            # Verify file exists and has content
+            # Check if the file exists and has content
             if os.path.exists(output_path):
                 file_size = os.path.getsize(output_path)
                 logger.info(f"Generated file size: {file_size} bytes")
@@ -156,45 +155,70 @@ def main():
                     raise ValueError("Generated dataset file is empty")
             else:
                 raise FileNotFoundError("Dataset file was not created")
-            
         except Exception as e:
             logger.error(f"Dataset generation failed: {str(e)}", exc_info=True)
             return 1
-        
-        # Verify dataset if requested
+
+        # Verification section
         if args.verify:
             logger.info("Starting dataset verification...")
             try:
-                with MIMODatasetIntegrityChecker(output_path) as checker:
-                    # Debug log the dataset structure
-                    with h5py.File(output_path, 'r') as f:
-                        logger.debug(f"Dataset structure: {list(f.keys())}")
-                        if 'modulation_data' in f:
-                            logger.debug(f"Modulation schemes: {list(f['modulation_data'].keys())}")
+                # Check if file exists and is not empty
+                if not os.path.exists(output_path):
+                    logger.error("Dataset file does not exist")
+                    return 1
                     
+                file_size = os.path.getsize(output_path)
+                if file_size == 0:
+                    logger.error("Dataset file is empty")
+                    return 1
+                    
+                logger.info(f"Dataset file size: {file_size} bytes")
+                
+                with MIMODatasetIntegrityChecker(output_path) as checker:
+                    # Log dataset structure
+                    try:
+                        with h5py.File(output_path, 'r') as f:
+                            logger.debug("=== Dataset Structure ===")
+                            logger.debug(f"Root groups: {list(f.keys())}")
+                            
+                            if 'modulation_data' in f:
+                                mod_schemes = list(f['modulation_data'].keys())
+                                logger.debug(f"Modulation schemes: {mod_schemes}")
+                                
+                                for scheme in mod_schemes:
+                                    scheme_group = f['modulation_data'][scheme]
+                                    logger.debug(f"\nModulation scheme: {scheme}")
+                                    logger.debug(f"Available datasets: {list(scheme_group.keys())}")
+                                    
+                                    for dataset_name in ['channel_response', 'sinr', 'spectral_efficiency']:
+                                        if dataset_name in scheme_group:
+                                            shape = scheme_group[dataset_name].shape
+                                            logger.debug(f"  {dataset_name} shape: {shape}")
+                    except Exception as e:
+                        logger.error(f"Error examining dataset structure: {str(e)}")
+                        return 1
+                    
+                    # Perform integrity checks
+                    logger.info("\nPerforming integrity checks...")
                     integrity_report = checker.check_dataset_integrity()
                     
                     if integrity_report.get('overall_status', False):
-                        logger.info("Dataset verification successful")
+                        logger.info("✅ Dataset verification successful")
                     else:
-                        logger.warning("Dataset verification failed")
+                        logger.warning("❌ Dataset verification failed")
                         if 'errors' in integrity_report:
                             for error in integrity_report['errors']:
-                                logger.error(f"Verification error: {error}")
-                        
-                        # Log detailed verification results
-                        logger.debug(f"Full integrity report: {integrity_report}")
+                                logger.error(f"  • {error}")
                         return 1
-                        
             except Exception as e:
-                logger.error(f"Verification error: {str(e)}", exc_info=True)
+                logger.error(f"Verification process failed: {str(e)}")
                 return 1
         
-        logger.info("Process completed successfully")
         return 0
-        
+
     except Exception as e:
-        logger.error(f"Critical error: {str(e)}", exc_info=True)
+        logger.error(f"Critical error during execution: {str(e)}", exc_info=True)
         return 1
 
 if __name__ == "__main__":
