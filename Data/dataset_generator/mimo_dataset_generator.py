@@ -16,6 +16,7 @@ from utill.logging_config import LoggerManager
 from utill.tensor_shape_validator import validate_tensor_shapes  
 from datetime import datetime
 from integrity.dataset_integrity_checker import MIMODatasetIntegrityChecker
+
 class MIMODatasetGenerator:
     """
     Comprehensive MIMO dataset generation framework
@@ -56,7 +57,6 @@ class MIMODatasetGenerator:
             'sinr': {'min': -30.0, 'max': 50.0}  # Wider SINR range
         }
 
-    # In MIMODatasetGenerator._validate_batch_data
     def _validate_batch_data(self, batch_data: dict) -> tuple[bool, list[str]]:
         """
         Validate batch data against defined thresholds with preprocessing
@@ -90,9 +90,6 @@ class MIMODatasetGenerator:
     def _prepare_output_directory(self, save_path: str):
         """
         Prepare output directory for dataset
-        
-        Args:
-            save_path (str): Path to save dataset
         """
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         self.logger.info(f"Prepared output directory: {os.path.dirname(save_path)}")
@@ -100,14 +97,6 @@ class MIMODatasetGenerator:
     def _create_dataset_structure(self, hdf5_file, num_samples: int):
         """
         Create HDF5 dataset structure with comprehensive validation and documentation
-        
-        Args:
-            hdf5_file: HDF5 file object to create datasets in
-            num_samples (int): Total number of samples to generate
-            
-        Raises:
-            ValueError: If num_samples is not positive or not divisible by number of modulation schemes
-            RuntimeError: If HDF5 group creation fails
         """
         try:
             # Validate input parameters
@@ -162,7 +151,6 @@ class MIMODatasetGenerator:
                 mod_group = modulation_data.create_group(mod_scheme)
                 mod_group.attrs['description'] = f'Data for {mod_scheme} modulation'
                 
-                # Channel and metrics datasets with proper dtypes
                 datasets = {
                     'channel_response': {
                         'shape': (samples_per_mod, self.system_params.num_rx, self.system_params.num_tx),
@@ -204,11 +192,10 @@ class MIMODatasetGenerator:
                         name,
                         shape=config['shape'],
                         dtype=config['dtype'],
-                        chunks=True,  # Enable chunking for better I/O performance
-                        compression='gzip',  # Enable compression
-                        compression_opts=4  # Compression level
+                        chunks=True,
+                        compression='gzip',
+                        compression_opts=4
                     )
-                    # Add description
                     dataset.attrs['description'] = dataset_descriptions[name]
                     dataset.attrs['units'] = self._get_dataset_units(name)
 
@@ -229,7 +216,7 @@ class MIMODatasetGenerator:
         except Exception as e:
             self.logger.error(f"Failed to create dataset structure: {str(e)}")
             raise
-    
+
     def generate_dataset(
         self, 
         num_samples: int, 
@@ -237,10 +224,6 @@ class MIMODatasetGenerator:
     ):
         """
         Generate comprehensive MIMO dataset with enhanced shape validation
-        
-        Args:
-            num_samples (int): Total number of samples to generate
-            save_path (str): Path to save HDF5 dataset
         """
         try:
             self._prepare_output_directory(save_path)
@@ -273,7 +256,7 @@ class MIMODatasetGenerator:
                         start_idx = batch_idx * batch_size
                         end_idx = start_idx + batch_size
                         
-                        # Generate input data with explicit batch size control
+                        # Generate input data
                         distances = tf.random.uniform([batch_size], 10.0, 500.0)
                         snr_db = tf.random.uniform(
                             [batch_size],
@@ -281,45 +264,41 @@ class MIMODatasetGenerator:
                             self.system_params.snr_range[1]
                         )
 
+                        # Generate channel data
                         channel_data = self.channel_model.generate_mimo_channel(batch_size, snr_db)
                         h_perfect = channel_data['perfect_channel']
                         h_noisy = channel_data['noisy_channel']
-                        eigenvalues = channel_data['eigenvalues']
-                        effective_snr = channel_data['effective_snr']
-                        spectral_efficiency = channel_data['spectral_efficiency']
-                        
-                        # Debug logging
-                        self.logger.debug(f"Original h_perfect shape: {h_perfect.shape}")
                         
                         # Ensure correct shape [batch_size, num_rx, num_tx]
                         h_perfect = tf.reshape(h_perfect, 
                                             [batch_size, self.system_params.num_rx, self.system_params.num_tx])
 
-                        # Calculate path loss components separately
+                        # Calculate and apply path loss
                         path_loss_db = self.path_loss_manager.calculate_path_loss(
                             distances[:batch_size], 'umi'
                         )
-                        # Ensure path loss has correct shape before converting to linear
                         path_loss_db = tf.reshape(path_loss_db[:batch_size], [batch_size])
                         path_loss_linear = tf.pow(10.0, -path_loss_db / 20.0)
                         path_loss_shaped = tf.reshape(path_loss_linear, [batch_size, 1, 1])
-
-                        # Apply path loss
                         h_with_pl = h_perfect * tf.cast(path_loss_shaped, dtype=h_perfect.dtype)
                         
                         # Generate and process symbols
                         tx_symbols = self.channel_model.generate_qam_symbols(batch_size, mod_scheme)
                         tx_symbols = tf.reshape(tx_symbols, [batch_size, self.system_params.num_tx, 1])
-                        
-                        # Calculate received symbols
                         rx_symbols = tf.matmul(h_with_pl, tx_symbols)
                         
-                        # Calculate metrics
+                        # Calculate all metrics first
                         metrics = self.metrics_calculator.calculate_performance_metrics(
                             h_with_pl,
                             tx_symbols,
                             rx_symbols,
                             snr_db
+                        )
+                        
+                        # Calculate enhanced metrics
+                        self.metrics_calculator.set_current_modulation(mod_scheme)
+                        enhanced_metrics = self.metrics_calculator.calculate_enhanced_metrics(
+                            h_with_pl, tx_symbols, rx_symbols, snr_db
                         )
                         
                         # Process metrics with explicit shape control
@@ -328,12 +307,42 @@ class MIMODatasetGenerator:
                         sinr = tf.reshape(tf.squeeze(metrics['sinr']), [batch_size])
                         eigenvalues = metrics['eigenvalues']
                         
-                        # Save data to HDF5
+                        # Create batch data after all metrics are calculated
+                        batch_data = {
+                            'eigenvalues': eigenvalues,
+                            'effective_snr': effective_snr,
+                            'spectral_efficiency': spectral_efficiency,
+                            'sinr': sinr,
+                            'ber': enhanced_metrics['ber']
+                        }
+
+                        # Single validation block
+                        MAX_RETRIES = 3
+                        retry_count = 0
+                        while retry_count < MAX_RETRIES:
+                            is_valid, validation_errors = self._validate_batch_data(batch_data)
+                            if is_valid:
+                                break
+                            
+                            retry_count += 1
+                            self.logger.warning(f"Invalid batch at index {batch_idx} (attempt {retry_count}/{MAX_RETRIES}):")
+                            for error in validation_errors:
+                                self.logger.warning(f"  - {error}")
+
+                        if retry_count == MAX_RETRIES:
+                            self.logger.error(f"Failed to generate valid batch after {MAX_RETRIES} attempts")
+                            continue
+
+                        # Save data to HDF5 only after successful validation
                         mod_group['channel_response'][start_idx:end_idx] = h_perfect.numpy()
                         mod_group['sinr'][start_idx:end_idx] = sinr.numpy()
                         mod_group['spectral_efficiency'][start_idx:end_idx] = spectral_efficiency.numpy()
                         mod_group['effective_snr'][start_idx:end_idx] = effective_snr.numpy()
                         mod_group['eigenvalues'][start_idx:end_idx] = eigenvalues.numpy()
+                        mod_group['ber'][start_idx:end_idx] = enhanced_metrics['ber']
+                        mod_group['throughput'][start_idx:end_idx] = enhanced_metrics['throughput']
+
+                        # Calculate and save path loss data
                         
                         # Calculate and save enhanced metrics
                         self.metrics_calculator.set_current_modulation(mod_scheme)
