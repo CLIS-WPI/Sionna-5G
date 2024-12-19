@@ -81,7 +81,7 @@ class MIMODatasetGenerator:
                         
                 except Exception as mem_error:
                     self.logger.warning(f"Could not get GPU memory info: {mem_error}")
-                    self.batch_size = 50000  # Default to conservative batch size
+                    self.batch_size = 5000  # Default to conservative batch size
                     
                 self.logger.info(f"Using GPU with batch size {self.batch_size}")
                 
@@ -480,12 +480,6 @@ class MIMODatasetGenerator:
     def verify_dataset(self, save_path: str) -> bool:
         """
         Verify dataset integrity using MIMODatasetIntegrityChecker
-        
-        Args:
-            save_path: Path to the HDF5 dataset
-            
-        Returns:
-            bool: True if verification passes, False otherwise
         """
         try:
             self.integrity_checker = MIMODatasetIntegrityChecker(save_path)
@@ -493,22 +487,27 @@ class MIMODatasetGenerator:
             
             if integrity_report['overall_status']:
                 self.logger.info("Dataset verification successful")
-                
-                # Log detailed statistics
-                for mod_scheme, mod_details in integrity_report['modulation_schemes'].items():
-                    self.logger.info(f"\n{mod_scheme} Statistics:")
-                    self.logger.info(f"  Samples: {mod_details['samples']}")
-                    self.logger.info(f"  Integrity: {'✅ VALID' if mod_details['integrity'] else '❌ INVALID'}")
-                    
-                    for dataset_name, dataset_info in mod_details['datasets'].items():
-                        self.logger.info(f"  {dataset_name}:")
-                        self.logger.info(f"    Shape: {dataset_info['shape']}")
-                        self.logger.info(f"    Statistics: {dataset_info['statistics']}")
-                
                 return True
             else:
                 self.logger.warning("Dataset verification failed")
-                self.logger.debug(f"Integrity report: {integrity_report}")
+                # Add detailed error logging
+                if 'errors' in integrity_report:
+                    for error in integrity_report['errors']:
+                        self.logger.warning(f"Verification error: {error}")
+                
+                # Log statistics for debugging
+                if 'modulation_schemes' in integrity_report:
+                    for mod_scheme, stats in integrity_report['modulation_schemes'].items():
+                        self.logger.warning(f"\nModulation scheme {mod_scheme}:")
+                        self.logger.warning(f"Samples: {stats.get('samples', 'N/A')}")
+                        self.logger.warning(f"Status: {stats.get('integrity', False)}")
+                        
+                        if 'datasets' in stats:
+                            for dataset_name, dataset_info in stats['datasets'].items():
+                                self.logger.warning(f"\n{dataset_name}:")
+                                self.logger.warning(f"Shape: {dataset_info.get('shape', 'N/A')}")
+                                self.logger.warning(f"Statistics: {dataset_info.get('statistics', 'N/A')}")
+                
                 return False
                 
         except Exception as e:

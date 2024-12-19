@@ -42,7 +42,7 @@ class SystemParameters:
     random_seed: int = 42  # Seed for reproducible results
     
     # Dataset Generation Parameters
-    total_samples: int = 1_000_000
+    total_samples: int = 900_000
     samples_per_modulation: int = None
 
     def __post_init__(self):
@@ -66,7 +66,7 @@ class SystemParameters:
         self, 
         num_tx: int = 4,
         num_rx: int = 4,
-        total_samples: int = 1_000_000,
+        total_samples: int = 900_000,
         **kwargs
     ):
         """
