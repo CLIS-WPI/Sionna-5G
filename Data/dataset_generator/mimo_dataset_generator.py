@@ -73,7 +73,7 @@ class MIMODatasetGenerator:
                     
                     # Adjust batch size based on available memory
                     if total_memory > 8.0:  # More than 8GB available
-                        self.batch_size = 100000
+                        self.batch_size = 500000
                     elif total_memory > 4.0:  # More than 4GB available
                         self.batch_size = 50000
                     else:  # Limited memory
