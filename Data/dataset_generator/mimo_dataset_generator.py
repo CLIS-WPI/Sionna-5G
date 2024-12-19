@@ -73,11 +73,11 @@ class MIMODatasetGenerator:
                     
                     # Adjust batch size based on available memory
                     if total_memory > 8.0:  # More than 8GB available
-                        self.batch_size = 500000
+                        self.batch_size = 64000
                     elif total_memory > 4.0:  # More than 4GB available
-                        self.batch_size = 50000
+                        self.batch_size = 32000
                     else:  # Limited memory
-                        self.batch_size = 25000
+                        self.batch_size = 19000
                         
                 except Exception as mem_error:
                     self.logger.warning(f"Could not get GPU memory info: {mem_error}")
@@ -95,22 +95,22 @@ class MIMODatasetGenerator:
                     except:
                         pass
                 
-                self.memory_callback = memory_monitoring_callback
+                self.memory_callback = self.memory_monitoring_callback
                 
             else:
-                self.batch_size = 500000  # Default CPU batch size
+                self.batch_size = 50000  # Default CPU batch size
                 self.logger.info(f"Using CPU with batch size {self.batch_size}")
                 self.memory_callback = None
                 
         except tf.errors.ResourceExhaustedError as oom_error:
             self.logger.warning(f"GPU memory exhausted: {oom_error}")
-            self.batch_size = self.batch_size // 2 if hasattr(self, 'batch_size') else 5000
+            self.batch_size = self.batch_size // 2 if hasattr(self, 'batch_size') else 64000
             self.logger.info(f"Reduced batch size to {self.batch_size} due to memory constraints")
             self.memory_callback = None
             
         except Exception as e:
             self.logger.warning(f"Error configuring GPU: {e}. Defaulting to CPU processing")
-            self.batch_size = 500000
+            self.batch_size = 50000
             self.memory_callback = None
 
     def _validate_batch_data(self, batch_data: dict) -> tuple[bool, list[str]]:
@@ -522,6 +522,46 @@ class MIMODatasetGenerator:
         except Exception as e:
             self.logger.error(f"Dataset verification error: {str(e)}")
             return False
+        
+    def _manage_memory(self):
+        """Memory management helper"""
+        if tf.config.list_physical_devices('GPU'):
+            tf.keras.backend.clear_session()
+        import gc
+        gc.collect()
+
+    def _check_memory_requirements(self, batch_size: int) -> bool:
+        """
+        Check if system has enough memory for the requested batch size
+        """
+        try:
+            # Estimate memory requirement (rough calculation)
+            sample_size = self.system_params.num_tx * self.system_params.num_rx * 8  # 8 bytes per complex64
+            total_size = batch_size * sample_size * 3  # Factor of 3 for various tensors
+            
+            # Get available system memory
+            import psutil
+            available_memory = psutil.virtual_memory().available
+            
+            return total_size < available_memory * 0.7  # Keep 30% memory buffer for 64GB system
+        except:
+            return True  # Default to True if unable to check
+        
+
+    def memory_monitoring_callback(self):
+        """Memory monitoring callback method"""
+        try:
+            memory_info = tf.config.experimental.get_memory_info('GPU:0')
+            current_memory = memory_info['current'] / 1e9
+            total_memory = memory_info['peak'] / 1e9  # Use peak memory as total available
+            
+            if current_memory > 0.9 * total_memory:  # If using more than 90% memory
+                new_batch_size = max(64000, self.batch_size // 2)  # Minimum 64000 for 64GB RAM
+                self.logger.warning(f"High memory usage detected. Reducing batch size to {new_batch_size}")
+                self.batch_size = new_batch_size
+        except Exception as e:
+            self.logger.debug(f"Memory monitoring error: {e}")
+            pass
 
 # Example usage
 def main():
