@@ -97,8 +97,9 @@ class MIMODatasetGenerator:
                 
                 self.memory_callback = self.memory_monitoring_callback
                 
+            
             else:
-                self.batch_size = 50000  # Default CPU batch size
+                self.batch_size = 5000  # Reduced CPU batch size
                 self.logger.info(f"Using CPU with batch size {self.batch_size}")
                 self.memory_callback = None
                 
@@ -161,8 +162,8 @@ class MIMODatasetGenerator:
             
             if len(self.system_params.modulation_schemes) == 0:
                 raise ValueError("No modulation schemes specified")
-                
-            # Calculate samples per modulation scheme
+
+                # Calculate samples per modulation scheme
             samples_per_mod = num_samples // len(self.system_params.modulation_schemes)
             if samples_per_mod * len(self.system_params.modulation_schemes) != num_samples:
                 self.logger.warning(
@@ -279,11 +280,15 @@ class MIMODatasetGenerator:
         save_path: str = 'dataset/mimo_dataset.h5'
     ):
         """
-        Generate comprehensive MIMO dataset with enhanced shape validation
+        Generate comprehensive MIMO dataset with enhanced shape validation and memory management
         """
         try:
             self._prepare_output_directory(save_path)
-            
+
+            # Initial batch size safety check
+            self.batch_size = self._check_batch_size_safety(self.batch_size)
+            self.logger.info(f"Initial batch size adjusted for memory safety: {self.batch_size}")
+
             samples_per_mod = num_samples // len(self.system_params.modulation_schemes)
             
             if num_samples % len(self.system_params.modulation_schemes) != 0:
@@ -307,152 +312,140 @@ class MIMODatasetGenerator:
                         leave=False
                     )
                     
-                    for batch_idx in range(samples_per_mod // self.batch_size):
-                        start_idx = batch_idx * self.batch_size
-                        end_idx = start_idx + self.batch_size
-                        
-                        # Generate input data
-                        distances = tf.random.uniform([self.batch_size], 10.0, 500.0)
-                        snr_db = tf.random.uniform(
-                            [self.batch_size],
-                            self.system_params.snr_range[0],
-                            self.system_params.snr_range[1]
-                        )
-
-                        # Generate channel data
-                        channel_data = self.channel_model.generate_mimo_channel(self.batch_size, snr_db)
-                        h_perfect = channel_data['perfect_channel']
-                        h_noisy = channel_data['noisy_channel']
-                        
-                        # Ensure correct shape [batch_size, num_rx, num_tx]
-                        h_perfect = tf.reshape(h_perfect, 
-                                            [self.batch_size, self.system_params.num_rx, self.system_params.num_tx])
-
-                        # Calculate and apply path loss
-                        path_loss_db = self.path_loss_manager.calculate_path_loss(
-                            distances[:self.batch_size], 'umi'
-                        )
-                        path_loss_db = tf.reshape(path_loss_db[:self.batch_size], [self.batch_size])
-                        path_loss_linear = tf.pow(10.0, -path_loss_db / 20.0)
-                        path_loss_shaped = tf.reshape(path_loss_linear, [self.batch_size, 1, 1])
-                        h_with_pl = h_perfect * tf.cast(path_loss_shaped, dtype=h_perfect.dtype)
-                        
-                        # Generate and process symbols
-                        tx_symbols = self.channel_model.generate_qam_symbols(self.batch_size, mod_scheme)
-                        tx_symbols = tf.reshape(tx_symbols, [self.batch_size, self.system_params.num_tx, 1])
-                        rx_symbols = tf.matmul(h_with_pl, tx_symbols)
-                        
-                        # Calculate all metrics first
-                        metrics = self.metrics_calculator.calculate_performance_metrics(
-                            h_with_pl,
-                            tx_symbols,
-                            rx_symbols,
-                            snr_db
-                        )
-                        
-                        # Calculate enhanced metrics
-                        self.metrics_calculator.set_current_modulation(mod_scheme)
-                        enhanced_metrics = self.metrics_calculator.calculate_enhanced_metrics(
-                            h_with_pl, tx_symbols, rx_symbols, snr_db
-                        )
-                        
-                        # Process metrics with explicit shape control
-                        effective_snr = tf.reshape(tf.squeeze(metrics['effective_snr']), [self.batch_size])
-                        spectral_efficiency = tf.reshape(tf.squeeze(metrics['spectral_efficiency']), [self.batch_size])
-                        sinr = tf.reshape(tf.squeeze(metrics['sinr']), [self.batch_size])
-                        eigenvalues = metrics['eigenvalues']
-                        
-                        # Create batch data after all metrics are calculated
-                        batch_data = {
-                            'eigenvalues': eigenvalues,
-                            'effective_snr': effective_snr,
-                            'spectral_efficiency': spectral_efficiency,
-                            'sinr': sinr,
-                            'ber': enhanced_metrics['ber']
-                        }
-
-                        # Single validation block
-                        MAX_RETRIES = 3
-                        retry_count = 0
-                        while retry_count < MAX_RETRIES:
-                            is_valid, validation_errors = self._validate_batch_data(batch_data)
-                            if is_valid:
-                                break
+                    batch_idx = 0
+                    while batch_idx < samples_per_mod // self.batch_size:
+                        try:
+                            start_idx = batch_idx * self.batch_size
+                            end_idx = start_idx + self.batch_size
                             
-                            retry_count += 1
-                            self.logger.warning(f"Invalid batch at index {batch_idx} (attempt {retry_count}/{MAX_RETRIES}):")
-                            for error in validation_errors:
-                                self.logger.warning(f"  - {error}")
+                            # Generate input data
+                            distances = tf.random.uniform([self.batch_size], 10.0, 500.0)
+                            snr_db = tf.random.uniform(
+                                [self.batch_size],
+                                self.system_params.snr_range[0],
+                                self.system_params.snr_range[1]
+                            )
 
-                        if retry_count == MAX_RETRIES:
-                            self.logger.error(f"Failed to generate valid batch after {MAX_RETRIES} attempts")
+                            # Generate channel data with error handling
+                            try:
+                                channel_data = self.channel_model.generate_mimo_channel(self.batch_size, snr_db)
+                                h_perfect = channel_data['perfect_channel']
+                                h_noisy = channel_data['noisy_channel']
+                            except tf.errors.ResourceExhaustedError:
+                                self.batch_size = max(1000, self.batch_size // 2)
+                                self.logger.warning(f"OOM error in channel generation, reducing batch size to {self.batch_size}")
+                                self._manage_memory()
+                                continue
+
+                            # Ensure correct shape [batch_size, num_rx, num_tx]
+                            h_perfect = tf.reshape(h_perfect, 
+                                                [self.batch_size, self.system_params.num_rx, self.system_params.num_tx])
+
+                            # Calculate and apply path loss
+                            path_loss_db = self.path_loss_manager.calculate_path_loss(
+                                distances[:self.batch_size], 'umi'
+                            )
+                            path_loss_db = tf.reshape(path_loss_db[:self.batch_size], [self.batch_size])
+                            path_loss_linear = tf.pow(10.0, -path_loss_db / 20.0)
+                            path_loss_shaped = tf.reshape(path_loss_linear, [self.batch_size, 1, 1])
+                            h_with_pl = h_perfect * tf.cast(path_loss_shaped, dtype=h_perfect.dtype)
+                            
+                            # Generate and process symbols
+                            tx_symbols = self.channel_model.generate_qam_symbols(self.batch_size, mod_scheme)
+                            tx_symbols = tf.reshape(tx_symbols, [self.batch_size, self.system_params.num_tx, 1])
+                            rx_symbols = tf.matmul(h_with_pl, tx_symbols)
+                            
+                            # Calculate all metrics first
+                            metrics = self.metrics_calculator.calculate_performance_metrics(
+                                h_with_pl,
+                                tx_symbols,
+                                rx_symbols,
+                                snr_db
+                            )
+                            
+                            # Calculate enhanced metrics
+                            self.metrics_calculator.set_current_modulation(mod_scheme)
+                            enhanced_metrics = self.metrics_calculator.calculate_enhanced_metrics(
+                                h_with_pl, tx_symbols, rx_symbols, snr_db
+                            )
+                            
+                            # Process metrics with explicit shape control
+                            effective_snr = tf.reshape(tf.squeeze(metrics['effective_snr']), [self.batch_size])
+                            spectral_efficiency = tf.reshape(tf.squeeze(metrics['spectral_efficiency']), [self.batch_size])
+                            sinr = tf.reshape(tf.squeeze(metrics['sinr']), [self.batch_size])
+                            eigenvalues = metrics['eigenvalues']
+                            
+                            # Create batch data after all metrics are calculated
+                            batch_data = {
+                                'eigenvalues': eigenvalues,
+                                'effective_snr': effective_snr,
+                                'spectral_efficiency': spectral_efficiency,
+                                'sinr': sinr,
+                                'ber': enhanced_metrics['ber']
+                            }
+
+                            # Validate batch data
+                            MAX_RETRIES = 3
+                            retry_count = 0
+                            while retry_count < MAX_RETRIES:
+                                is_valid, validation_errors = self._validate_batch_data(batch_data)
+                                if is_valid:
+                                    break
+                                
+                                retry_count += 1
+                                self.logger.warning(f"Invalid batch at index {batch_idx} (attempt {retry_count}/{MAX_RETRIES}):")
+                                for error in validation_errors:
+                                    self.logger.warning(f"  - {error}")
+
+                            if retry_count == MAX_RETRIES:
+                                self.logger.error(f"Failed to generate valid batch after {MAX_RETRIES} attempts")
+                                continue
+
+                            # Calculate path loss data
+                            fspl = self.path_loss_manager.calculate_free_space_path_loss(distances)
+                            scenario_pl = self.path_loss_manager.calculate_path_loss(distances, 'umi')
+                            
+                            # Slice the tensors to match batch_size
+                            fspl = tf.slice(fspl, [0], [self.batch_size])
+                            scenario_pl = tf.slice(scenario_pl, [0], [self.batch_size])
+
+                            # Save all data to HDF5
+                            mod_group['channel_response'][start_idx:end_idx] = h_perfect.numpy()
+                            mod_group['sinr'][start_idx:end_idx] = sinr.numpy()
+                            mod_group['spectral_efficiency'][start_idx:end_idx] = spectral_efficiency.numpy()
+                            mod_group['effective_snr'][start_idx:end_idx] = effective_snr.numpy()
+                            mod_group['eigenvalues'][start_idx:end_idx] = eigenvalues.numpy()
+                            mod_group['ber'][start_idx:end_idx] = enhanced_metrics['ber']
+                            mod_group['throughput'][start_idx:end_idx] = enhanced_metrics['throughput']
+                            
+                            # Save path loss data
+                            f['path_loss_data']['fspl'][start_idx:end_idx] = fspl.numpy()
+                            f['path_loss_data']['scenario_pathloss'][start_idx:end_idx] = scenario_pl.numpy()
+                            
+                            # Update progress
+                            mod_progress.update(self.batch_size)
+                            total_progress.update(self.batch_size)
+                            
+                            # Memory management
+                            self._manage_memory()
+                            
+                            # Increment batch index
+                            batch_idx += 1
+                            
+                        except tf.errors.ResourceExhaustedError as oom_error:
+                            self.batch_size = max(1000, self.batch_size // 2)
+                            self.logger.warning(f"OOM error detected, reducing batch size to {self.batch_size}")
+                            self._manage_memory()
                             continue
-
-                        # Save data to HDF5 only after successful validation
-                        mod_group['channel_response'][start_idx:end_idx] = h_perfect.numpy()
-                        mod_group['sinr'][start_idx:end_idx] = sinr.numpy()
-                        mod_group['spectral_efficiency'][start_idx:end_idx] = spectral_efficiency.numpy()
-                        mod_group['effective_snr'][start_idx:end_idx] = effective_snr.numpy()
-                        mod_group['eigenvalues'][start_idx:end_idx] = eigenvalues.numpy()
-                        mod_group['ber'][start_idx:end_idx] = enhanced_metrics['ber']
-                        mod_group['throughput'][start_idx:end_idx] = enhanced_metrics['throughput']
-
-                        # Calculate and save path loss data
-                        
-                        # Calculate and save enhanced metrics
-                        self.metrics_calculator.set_current_modulation(mod_scheme)
-                        enhanced_metrics = self.metrics_calculator.calculate_enhanced_metrics(
-                        h_with_pl, tx_symbols, rx_symbols, snr_db
-                        )
-                        
-                        mod_group['ber'][start_idx:end_idx] = enhanced_metrics['ber']
-                        mod_group['throughput'][start_idx:end_idx] = enhanced_metrics['throughput']
-                        
-                        # Calculate and reshape path loss data
-                        fspl = self.path_loss_manager.calculate_free_space_path_loss(distances)
-                        scenario_pl = self.path_loss_manager.calculate_path_loss(distances, 'umi')  # Add scenario parameter
-
-                        # Debug logging
-                        self.logger.debug(f"Original scenario_pl shape: {scenario_pl.shape}")
-                        self.logger.debug(f"Batch size: {self.batch_size}")
-
-                        # Slice the tensors to match batch_size before reshaping
-                        fspl = tf.slice(fspl, [0], [self.batch_size])
-                        scenario_pl = tf.slice(scenario_pl, [0], [self.batch_size])
-
-                        # Validate batch data
-                        batch_data = {
-                            'eigenvalues': eigenvalues,
-                            'effective_snr': effective_snr,
-                            'spectral_efficiency': spectral_efficiency,
-                            'sinr': sinr,
-                            'ber': enhanced_metrics['ber']
-                        }
-
-                        MAX_RETRIES = 3
-                        retry_count = 0
-                        while retry_count < MAX_RETRIES:
-                            is_valid, validation_errors = self._validate_batch_data(batch_data)
-                            if is_valid:
-                                break
                             
-                            retry_count += 1
-                            self.logger.warning(f"Invalid batch at index {batch_idx} (attempt {retry_count}/{MAX_RETRIES}):")
-                            for error in validation_errors:
-                                self.logger.warning(f"  - {error}")
-                            
-
-                        if retry_count == MAX_RETRIES:
-                            self.logger.error(f"Failed to generate valid batch after {MAX_RETRIES} attempts")
-                            continue
-
-                        # If validation passes, proceed with saving to HDF5...
-                        # Save path loss data with correct shapes
-                        f['path_loss_data']['fspl'][start_idx:end_idx] = fspl.numpy()
-                        f['path_loss_data']['scenario_pathloss'][start_idx:end_idx] = scenario_pl.numpy()
-                        
-                        mod_progress.update(self.batch_size)
-                        total_progress.update(self.batch_size)
+                        except Exception as batch_error:
+                            self.logger.error(f"Error processing batch {batch_idx}: {str(batch_error)}")
+                            if isinstance(batch_error, tf.errors.ResourceExhaustedError):
+                                self.batch_size = max(1000, self.batch_size // 2)
+                                self.logger.warning(f"Reducing batch size to {self.batch_size} due to memory constraints")
+                                continue
+                            else:
+                                raise
                     
                     mod_progress.close()
                 
@@ -463,8 +456,7 @@ class MIMODatasetGenerator:
                 self.logger.info(f"Dataset successfully generated and verified at {save_path}")
             else:
                 self.logger.warning("Dataset generated but failed verification")
-            self.logger.info(f"Dataset successfully generated at {save_path}")
-        
+            
         except Exception as e:
             self.logger.error(f"Dataset generation failed: {str(e)}")
             self.logger.error("Detailed error traceback:", exc_info=True)
@@ -562,7 +554,23 @@ class MIMODatasetGenerator:
         except Exception as e:
             self.logger.debug(f"Memory monitoring error: {e}")
             pass
-
+    
+    def _check_batch_size_safety(self, batch_size: int) -> int:
+        """
+        Check and adjust batch size based on available memory
+        """
+        try:
+            import psutil
+            available_memory = psutil.virtual_memory().available
+            # Calculate approximate memory requirement per sample
+            sample_size = (self.system_params.num_tx * 
+                        self.system_params.num_rx * 
+                        8 * 4)  # 8 bytes per complex64, factor of 4 for safety
+            max_safe_batch = int(available_memory * 0.5 / sample_size)  # Use 50% of available memory
+            return min(batch_size, max_safe_batch)
+        except:
+            return min(batch_size, 5000)  # Conservative default
+        
 # Example usage
 def main():
     generator = MIMODatasetGenerator()
