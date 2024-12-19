@@ -98,7 +98,7 @@ class MIMODatasetGenerator:
                 self.memory_callback = memory_monitoring_callback
                 
             else:
-                self.batch_size = 10000  # Default CPU batch size
+                self.batch_size = 500000  # Default CPU batch size
                 self.logger.info(f"Using CPU with batch size {self.batch_size}")
                 self.memory_callback = None
                 
@@ -110,7 +110,7 @@ class MIMODatasetGenerator:
             
         except Exception as e:
             self.logger.warning(f"Error configuring GPU: {e}. Defaulting to CPU processing")
-            self.batch_size = 10000
+            self.batch_size = 500000
             self.memory_callback = None
 
     def _validate_batch_data(self, batch_data: dict) -> tuple[bool, list[str]]:
