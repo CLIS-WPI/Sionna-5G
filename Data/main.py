@@ -13,9 +13,37 @@ from dataset_generator.mimo_dataset_generator import MIMODatasetGenerator
 from utill.logging_config import configure_logging, LoggerManager
 from integrity.dataset_integrity_checker import MIMODatasetIntegrityChecker
 import h5py
+import tensorflow as tf
 
 os.makedirs('logs', exist_ok=True)
-
+def configure_device():
+    """Configure and detect available processing device"""
+    try:
+        # Check for GPU availability
+        gpus = tf.config.list_physical_devices('GPU')
+        if gpus:
+            try:
+                # Configure all available GPUs
+                for gpu in gpus:
+                    tf.config.experimental.set_memory_growth(gpu, True)
+                print(f"Found {len(gpus)} GPU(s). Using GPU for processing.")
+                # For multiple GPUs, you might want to use tf.distribute.MirroredStrategy
+                if len(gpus) > 1:
+                    strategy = tf.distribute.MirroredStrategy()
+                    print(f"Using {len(gpus)} GPUs with MirroredStrategy")
+                    return strategy
+                return True
+            except RuntimeError as e:
+                print(f"GPU configuration error: {e}")
+                print("Falling back to CPU")
+                return False
+        else:
+            print("No GPU found. Using CPU for processing")
+            return False
+    except Exception as e:
+        print(f"Error during device configuration: {e}")
+        return False
+    
 def parse_arguments():
     """
     Parse command-line arguments for dataset generation
@@ -30,10 +58,18 @@ def parse_arguments():
     parser.add_argument(
         '--samples', 
         type=int, 
-        default=12_000, 
+        default=1_000_000, 
         help="Number of samples to generate (default: 1,000,000)"
     )
+
+    parser.add_argument(
+        '--batch-size',
+        type=int,
+        default=None,
+        help="Batch size for processing (default: auto-configured based on available memory)"
+    )
     
+        
     parser.add_argument(
         '--output', 
         type=str, 
@@ -130,7 +166,25 @@ def main():
         logger.info(f"RX Antennas: {system_params.num_rx}")
         logger.info(f"Output path: {output_path}")
         logger.info(f"Verification enabled: {args.verify}")
+
+        # Configure device before creating generator
+        device_config = configure_device()
+        logger.info("Device configuration completed")
+        if isinstance(device_config, tf.distribute.Strategy):
+            logger.info("Using distributed strategy with multiple GPUs")
+        elif device_config:
+            logger.info("Using single GPU")
+        else:
+            logger.info("Using CPU")
         
+        # Add GPU memory info if available
+        if tf.config.list_physical_devices('GPU'):
+            try:
+                memory_info = tf.config.experimental.get_memory_info('GPU:0')
+                logger.info(f"GPU memory usage: {memory_info['current'] / 1e9:.2f} GB")
+            except:
+                logger.info("GPU memory information not available")
+
         # Create and configure dataset generator
         logger.debug("Initializing dataset generator...")
         generator = MIMODatasetGenerator(

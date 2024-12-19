@@ -57,6 +57,62 @@ class MIMODatasetGenerator:
             'sinr': {'min': -30.0, 'max': 50.0}  # Wider SINR range
         }
 
+        # Set maximum batch size for GPU processing with memory monitoring
+        try:
+            gpus = tf.config.list_physical_devices('GPU')
+            if gpus:
+                # Configure GPU for maximum memory usage
+                for gpu in gpus:
+                    tf.config.experimental.set_memory_growth(gpu, True)
+                    
+                # Get initial GPU memory info
+                try:
+                    memory_info = tf.config.experimental.get_memory_info('GPU:0')
+                    total_memory = memory_info['current'] / 1e9  # Convert to GB
+                    self.logger.info(f"Initial GPU memory usage: {total_memory:.2f} GB")
+                    
+                    # Adjust batch size based on available memory
+                    if total_memory > 8.0:  # More than 8GB available
+                        self.batch_size = 100000
+                    elif total_memory > 4.0:  # More than 4GB available
+                        self.batch_size = 50000
+                    else:  # Limited memory
+                        self.batch_size = 25000
+                        
+                except Exception as mem_error:
+                    self.logger.warning(f"Could not get GPU memory info: {mem_error}")
+                    self.batch_size = 50000  # Default to conservative batch size
+                    
+                self.logger.info(f"Using GPU with batch size {self.batch_size}")
+                
+                # Set up memory monitoring callback
+                def memory_monitoring_callback():
+                    try:
+                        current_memory = tf.config.experimental.get_memory_info('GPU:0')['current'] / 1e9
+                        if current_memory > 0.9 * total_memory:  # If using more than 90% memory
+                            self.batch_size = max(1000, self.batch_size // 2)
+                            self.logger.warning(f"High memory usage detected. Reducing batch size to {self.batch_size}")
+                    except:
+                        pass
+                
+                self.memory_callback = memory_monitoring_callback
+                
+            else:
+                self.batch_size = 10000  # Default CPU batch size
+                self.logger.info(f"Using CPU with batch size {self.batch_size}")
+                self.memory_callback = None
+                
+        except tf.errors.ResourceExhaustedError as oom_error:
+            self.logger.warning(f"GPU memory exhausted: {oom_error}")
+            self.batch_size = self.batch_size // 2 if hasattr(self, 'batch_size') else 5000
+            self.logger.info(f"Reduced batch size to {self.batch_size} due to memory constraints")
+            self.memory_callback = None
+            
+        except Exception as e:
+            self.logger.warning(f"Error configuring GPU: {e}. Defaulting to CPU processing")
+            self.batch_size = 10000
+            self.memory_callback = None
+
     def _validate_batch_data(self, batch_data: dict) -> tuple[bool, list[str]]:
         """
         Validate batch data against defined thresholds with preprocessing
@@ -228,7 +284,6 @@ class MIMODatasetGenerator:
         try:
             self._prepare_output_directory(save_path)
             
-            batch_size = min(4096, num_samples)
             samples_per_mod = num_samples // len(self.system_params.modulation_schemes)
             
             if num_samples % len(self.system_params.modulation_schemes) != 0:
@@ -252,39 +307,39 @@ class MIMODatasetGenerator:
                         leave=False
                     )
                     
-                    for batch_idx in range(samples_per_mod // batch_size):
-                        start_idx = batch_idx * batch_size
-                        end_idx = start_idx + batch_size
+                    for batch_idx in range(samples_per_mod // self.batch_size):
+                        start_idx = batch_idx * self.batch_size
+                        end_idx = start_idx + self.batch_size
                         
                         # Generate input data
-                        distances = tf.random.uniform([batch_size], 10.0, 500.0)
+                        distances = tf.random.uniform([self.batch_size], 10.0, 500.0)
                         snr_db = tf.random.uniform(
-                            [batch_size],
+                            [self.batch_size],
                             self.system_params.snr_range[0],
                             self.system_params.snr_range[1]
                         )
 
                         # Generate channel data
-                        channel_data = self.channel_model.generate_mimo_channel(batch_size, snr_db)
+                        channel_data = self.channel_model.generate_mimo_channel(self.batch_size, snr_db)
                         h_perfect = channel_data['perfect_channel']
                         h_noisy = channel_data['noisy_channel']
                         
                         # Ensure correct shape [batch_size, num_rx, num_tx]
                         h_perfect = tf.reshape(h_perfect, 
-                                            [batch_size, self.system_params.num_rx, self.system_params.num_tx])
+                                            [self.batch_size, self.system_params.num_rx, self.system_params.num_tx])
 
                         # Calculate and apply path loss
                         path_loss_db = self.path_loss_manager.calculate_path_loss(
-                            distances[:batch_size], 'umi'
+                            distances[:self.batch_size], 'umi'
                         )
-                        path_loss_db = tf.reshape(path_loss_db[:batch_size], [batch_size])
+                        path_loss_db = tf.reshape(path_loss_db[:self.batch_size], [self.batch_size])
                         path_loss_linear = tf.pow(10.0, -path_loss_db / 20.0)
-                        path_loss_shaped = tf.reshape(path_loss_linear, [batch_size, 1, 1])
+                        path_loss_shaped = tf.reshape(path_loss_linear, [self.batch_size, 1, 1])
                         h_with_pl = h_perfect * tf.cast(path_loss_shaped, dtype=h_perfect.dtype)
                         
                         # Generate and process symbols
-                        tx_symbols = self.channel_model.generate_qam_symbols(batch_size, mod_scheme)
-                        tx_symbols = tf.reshape(tx_symbols, [batch_size, self.system_params.num_tx, 1])
+                        tx_symbols = self.channel_model.generate_qam_symbols(self.batch_size, mod_scheme)
+                        tx_symbols = tf.reshape(tx_symbols, [self.batch_size, self.system_params.num_tx, 1])
                         rx_symbols = tf.matmul(h_with_pl, tx_symbols)
                         
                         # Calculate all metrics first
@@ -302,9 +357,9 @@ class MIMODatasetGenerator:
                         )
                         
                         # Process metrics with explicit shape control
-                        effective_snr = tf.reshape(tf.squeeze(metrics['effective_snr']), [batch_size])
-                        spectral_efficiency = tf.reshape(tf.squeeze(metrics['spectral_efficiency']), [batch_size])
-                        sinr = tf.reshape(tf.squeeze(metrics['sinr']), [batch_size])
+                        effective_snr = tf.reshape(tf.squeeze(metrics['effective_snr']), [self.batch_size])
+                        spectral_efficiency = tf.reshape(tf.squeeze(metrics['spectral_efficiency']), [self.batch_size])
+                        sinr = tf.reshape(tf.squeeze(metrics['sinr']), [self.batch_size])
                         eigenvalues = metrics['eigenvalues']
                         
                         # Create batch data after all metrics are calculated
@@ -359,11 +414,11 @@ class MIMODatasetGenerator:
 
                         # Debug logging
                         self.logger.debug(f"Original scenario_pl shape: {scenario_pl.shape}")
-                        self.logger.debug(f"Batch size: {batch_size}")
+                        self.logger.debug(f"Batch size: {self.batch_size}")
 
                         # Slice the tensors to match batch_size before reshaping
-                        fspl = tf.slice(fspl, [0], [batch_size])
-                        scenario_pl = tf.slice(scenario_pl, [0], [batch_size])
+                        fspl = tf.slice(fspl, [0], [self.batch_size])
+                        scenario_pl = tf.slice(scenario_pl, [0], [self.batch_size])
 
                         # Validate batch data
                         batch_data = {
@@ -396,8 +451,8 @@ class MIMODatasetGenerator:
                         f['path_loss_data']['fspl'][start_idx:end_idx] = fspl.numpy()
                         f['path_loss_data']['scenario_pathloss'][start_idx:end_idx] = scenario_pl.numpy()
                         
-                        mod_progress.update(batch_size)
-                        total_progress.update(batch_size)
+                        mod_progress.update(self.batch_size)
+                        total_progress.update(self.batch_size)
                     
                     mod_progress.close()
                 
@@ -471,7 +526,7 @@ class MIMODatasetGenerator:
 # Example usage
 def main():
     generator = MIMODatasetGenerator()
-    generator.generate_dataset(num_samples=10_000)
+    generator.generate_dataset(num_samples=12_000_000)
     generator.verify_dataset('dataset/mimo_dataset.h5')
 
 if __name__ == "__main__":
