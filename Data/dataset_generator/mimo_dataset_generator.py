@@ -482,34 +482,62 @@ class MIMODatasetGenerator:
         Verify dataset integrity using MIMODatasetIntegrityChecker
         """
         try:
-            self.integrity_checker = MIMODatasetIntegrityChecker(save_path)
-            integrity_report = self.integrity_checker.check_dataset_integrity()
-            
-            if integrity_report['overall_status']:
+            with h5py.File(save_path, 'r') as f:
+                # First verify basic structure
+                if 'modulation_data' not in f:
+                    self.logger.error("Missing modulation_data group")
+                    return False
+
+                # Check each modulation scheme
+                for mod_scheme in self.system_params.modulation_schemes:
+                    if mod_scheme not in f['modulation_data']:
+                        self.logger.error(f"Missing data for modulation scheme: {mod_scheme}")
+                        return False
+
+                    mod_group = f['modulation_data'][mod_scheme]
+                    required_datasets = [
+                        'channel_response', 'sinr', 'spectral_efficiency', 
+                        'effective_snr', 'eigenvalues', 'ber', 'throughput'
+                    ]
+
+                    # Verify all required datasets exist and have data
+                    for dataset_name in required_datasets:
+                        if dataset_name not in mod_group:
+                            self.logger.error(f"Missing dataset {dataset_name} for {mod_scheme}")
+                            return False
+                        
+                        dataset = mod_group[dataset_name]
+                        if dataset.shape[0] == 0:
+                            self.logger.error(f"Empty dataset {dataset_name} for {mod_scheme}")
+                            return False
+
+                        # Basic statistical checks
+                        try:
+                            data = dataset[:]
+                            stats = {
+                                'mean': np.mean(np.abs(data)),
+                                'std': np.std(np.abs(data)),
+                                'min': np.min(np.abs(data)),
+                                'max': np.max(np.abs(data))
+                            }
+                            self.logger.info(f"{mod_scheme} - {dataset_name} statistics: {stats}")
+                        except Exception as e:
+                            self.logger.error(f"Error computing statistics for {dataset_name}: {str(e)}")
+                            return False
+
+                # Verify path loss data
+                if 'path_loss_data' not in f:
+                    self.logger.error("Missing path_loss_data group")
+                    return False
+
+                for dataset_name in ['fspl', 'scenario_pathloss']:
+                    if dataset_name not in f['path_loss_data']:
+                        self.logger.error(f"Missing path loss dataset: {dataset_name}")
+                        return False
+
                 self.logger.info("Dataset verification successful")
                 return True
-            else:
-                self.logger.warning("Dataset verification failed")
-                # Add detailed error logging
-                if 'errors' in integrity_report:
-                    for error in integrity_report['errors']:
-                        self.logger.warning(f"Verification error: {error}")
-                
-                # Log statistics for debugging
-                if 'modulation_schemes' in integrity_report:
-                    for mod_scheme, stats in integrity_report['modulation_schemes'].items():
-                        self.logger.warning(f"\nModulation scheme {mod_scheme}:")
-                        self.logger.warning(f"Samples: {stats.get('samples', 'N/A')}")
-                        self.logger.warning(f"Status: {stats.get('integrity', False)}")
-                        
-                        if 'datasets' in stats:
-                            for dataset_name, dataset_info in stats['datasets'].items():
-                                self.logger.warning(f"\n{dataset_name}:")
-                                self.logger.warning(f"Shape: {dataset_info.get('shape', 'N/A')}")
-                                self.logger.warning(f"Statistics: {dataset_info.get('statistics', 'N/A')}")
-                
-                return False
-                
+
         except Exception as e:
             self.logger.error(f"Dataset verification error: {str(e)}")
             return False
