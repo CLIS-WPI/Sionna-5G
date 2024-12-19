@@ -96,42 +96,50 @@ class PathLossManager:
         frequency: Optional[float] = None
     ) -> tf.Tensor:
         """
-        Calculate Free Space Path Loss (FSPL) with improved numerical stability
-        
+        Calculate Free Space Path Loss (FSPL) with improved numerical stability and constraints.
+
         Args:
-            distance (tf.Tensor): Distance between transmitter and receiver
-            frequency (Optional[float]): Carrier frequency (defaults to system frequency)
+            distance (tf.Tensor): Distance between transmitter and receiver (meters).
+            frequency (Optional[float]): Carrier frequency in Hz (defaults to system frequency).
         
         Returns:
-            tf.Tensor: Free Space Path Loss in dB
+            tf.Tensor: Free Space Path Loss (FSPL) in dB.
         """
         try:
-            # Cast inputs to float32
-            distance = tf.cast(distance, dtype=tf.float32)
-            freq = float(frequency or self.system_params.carrier_frequency)
-            
             # Constants
             c = 3e8  # Speed of light
-            wavelength = c / freq
-            
-            # Ensure minimum distance and reshape
-            distance = tf.maximum(tf.reshape(distance, [-1]), 1e-3)
-            
-            # Calculate FSPL in dB with numerical stability
-            fspl_db = 20.0 * (
-                tf.math.log(distance) / tf.math.log(10.0) - 
-                tf.math.log(wavelength) / tf.math.log(10.0)
-            )
-            
-            # Clip values to reasonable range
-            fspl_db = tf.clip_by_value(fspl_db, 0.0, 200.0)
-            
+            min_distance = 1.0  # Minimum realistic distance (meters)
+            max_distance = 1e6  # Maximum realistic distance (meters)
+            frequency = tf.cast(frequency or self.system_params.carrier_frequency, tf.float32)
+
+            # Ensure valid distance values
+            distance = tf.clip_by_value(tf.cast(distance, tf.float32), min_distance, max_distance)
+
+            # Calculate wavelength
+            wavelength = c / frequency
+
+            # FSPL Calculation
+            fspl_db = 20.0 * (tf.math.log(distance) / tf.math.log(10.0)) + \
+                    20.0 * (tf.math.log(frequency) / tf.math.log(10.0)) - \
+                    20.0 * (tf.math.log(wavelength) / tf.math.log(10.0))
+
+            # Clip FSPL values to enforce realistic range
+            fspl_db = tf.clip_by_value(fspl_db, 20.0, 200.0)
+
+            # Debugging logs
+            self.logger.debug(f"FSPL calculation - Min: {tf.reduce_min(fspl_db).numpy():.2f}, "
+                            f"Max: {tf.reduce_max(fspl_db).numpy():.2f}, "
+                            f"Mean: {tf.reduce_mean(fspl_db).numpy():.2f}")
             return fspl_db
-            
+
         except Exception as e:
-            self.logger.error(f"Free space path loss calculation failed: {str(e)}")
+            self.logger.error(f"FSPL calculation failed: {str(e)}")
             raise
-    
+
+        except Exception as e:
+                self.logger.error(f"Free space path loss calculation failed: {str(e)}")
+                raise
+
     def calculate_path_loss(self, distance: tf.Tensor, scenario: str = 'umi') -> tf.Tensor:
         """
         Calculate path loss for different scenarios with improved shape handling

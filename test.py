@@ -119,17 +119,20 @@ class MIMODatasetValidator:
         return results
 
     def validate_path_loss(self, group: h5py.Group) -> Dict[str, Any]:
-        """Validate path loss measurements"""
+        """Validate path loss measurements."""
         results = {}
         for path_feature in group:
             full_key = f"path_loss_data/{path_feature}"
             if full_key in self.expected_ranges:
                 data = np.array(group[path_feature])
-                results[path_feature] = self.check_statistics(
+                stats = self.check_statistics(
                     data,
                     full_key,
                     expected_range=self.expected_ranges[full_key]["range"]
                 )
+                if full_key == "path_loss_data/fspl" and np.min(data) < 20.0:
+                    print(f"Warning: FSPL contains values below 20 dB.")
+                results[path_feature] = stats
         return results
 
     def validate_dataset(self) -> Dict[str, Any]:
@@ -217,7 +220,7 @@ def print_validation_results(results: Dict[str, Any]):
 
 def main():
     # Example usage
-    file_path = "dataset/mimo_dataset_20241217_183131.h5"
+    file_path = "dataset/mimo_dataset_20241219_174119.h5"
     validator = MIMODatasetValidator(file_path)
     
     try:
