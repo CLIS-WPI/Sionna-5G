@@ -167,7 +167,7 @@ class MIMODatasetGenerator:
             if len(self.system_params.modulation_schemes) == 0:
                 raise ValueError("No modulation schemes specified")
 
-                # Calculate samples per modulation scheme
+            # Calculate samples per modulation scheme
             samples_per_mod = num_samples // len(self.system_params.modulation_schemes)
             if samples_per_mod * len(self.system_params.modulation_schemes) != num_samples:
                 self.logger.warning(
@@ -179,9 +179,6 @@ class MIMODatasetGenerator:
             # Create main groups with descriptions
             modulation_data = hdf5_file.create_group('modulation_data')
             modulation_data.attrs['description'] = 'Contains data for different modulation schemes'
-            
-            path_loss_data = hdf5_file.create_group('path_loss_data')
-            path_loss_data.attrs['description'] = 'Path loss measurements and calculations'
             
             config_data = hdf5_file.create_group('configuration')
             config_data.attrs['description'] = 'System configuration parameters'
@@ -209,22 +206,28 @@ class MIMODatasetGenerator:
 
             # Create datasets for each modulation scheme
             for mod_scheme in self.system_params.modulation_schemes:
+                # Create modulation-specific group
                 mod_group = modulation_data.create_group(mod_scheme)
                 mod_group.attrs['description'] = f'Data for {mod_scheme} modulation'
                 
-            # Add path loss group for this modulation scheme
-            path_loss_group = mod_group.create_group('path_loss_data')
-            for name in ['fspl', 'scenario_pathloss']:
-                dataset = path_loss_group.create_dataset(
-                    name,
-                    shape=(samples_per_mod,),  # using samples_per_mod
-                    dtype=np.float32,
-                    chunks=True,
-                    compression='gzip'
-                )
-                dataset.attrs['description'] = f'{name.upper()} measurements'
-                dataset.attrs['units'] = 'dB'
+                # Create modulation-specific path loss group
+                path_loss_group = mod_group.create_group('path_loss_data')
+                path_loss_group.attrs['description'] = f'Path loss data for {mod_scheme} modulation'
                 
+                # Create path loss datasets for this modulation
+                for name in ['fspl', 'scenario_pathloss']:
+                    dataset = path_loss_group.create_dataset(
+                        name,
+                        shape=(samples_per_mod,),
+                        dtype=np.float32,
+                        chunks=True,
+                        compression='gzip',
+                        compression_opts=4
+                    )
+                    dataset.attrs['description'] = f'{name.upper()} measurements for {mod_scheme}'
+                    dataset.attrs['units'] = 'dB'
+
+                # Define other datasets for this modulation
                 datasets = {
                     'channel_response': {
                         'shape': (samples_per_mod, self.system_params.num_rx, self.system_params.num_tx),
@@ -272,7 +275,6 @@ class MIMODatasetGenerator:
                     )
                     dataset.attrs['description'] = dataset_descriptions[name]
                     dataset.attrs['units'] = self._get_dataset_units(name)
-
 
             self.logger.info("Dataset structure created successfully")
             
