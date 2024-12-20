@@ -208,6 +208,19 @@ class MIMODatasetGenerator:
                 mod_group = modulation_data.create_group(mod_scheme)
                 mod_group.attrs['description'] = f'Data for {mod_scheme} modulation'
                 
+            # Add path loss group for this modulation scheme
+            path_loss_group = mod_group.create_group('path_loss_data')
+            for name in ['fspl', 'scenario_pathloss']:
+                dataset = path_loss_group.create_dataset(
+                    name,
+                    shape=(samples_per_mod,),  # using samples_per_mod
+                    dtype=np.float32,
+                    chunks=True,
+                    compression='gzip'
+                )
+                dataset.attrs['description'] = f'{name.upper()} measurements'
+                dataset.attrs['units'] = 'dB'
+                
                 datasets = {
                     'channel_response': {
                         'shape': (samples_per_mod, self.system_params.num_rx, self.system_params.num_tx),
@@ -257,16 +270,16 @@ class MIMODatasetGenerator:
                     dataset.attrs['units'] = self._get_dataset_units(name)
 
             # Create path loss datasets
-            for name in ['fspl', 'scenario_pathloss']:
-                dataset = path_loss_data.create_dataset(
-                    name,
-                    shape=(num_samples,),
-                    dtype=np.float32,
-                    chunks=True,
-                    compression='gzip'
-                )
-                dataset.attrs['description'] = f'{name.upper()} measurements'
-                dataset.attrs['units'] = 'dB'
+            #for name in ['fspl', 'scenario_pathloss']:
+                #dataset = path_loss_data.create_dataset(
+                    #name,
+                    #shape=(num_samples,),
+                    #dtype=np.float32,
+                    #chunks=True,
+                    #compression='gzip'
+                #)
+                #dataset.attrs['description'] = f'{name.upper()} measurements'
+                #dataset.attrs['units'] = 'dB'
 
             self.logger.info("Dataset structure created successfully")
             
@@ -485,8 +498,8 @@ class MIMODatasetGenerator:
                             mod_group['throughput'][start_idx:end_idx] = enhanced_metrics['throughput']
                             
                             # Save path loss data
-                            f['path_loss_data']['fspl'][start_idx:end_idx] = fspl.numpy()
-                            f['path_loss_data']['scenario_pathloss'][start_idx:end_idx] = scenario_pl.numpy()
+                            mod_group['path_loss_data']['fspl'][start_idx:end_idx] = fspl.numpy()
+                            mod_group['path_loss_data']['scenario_pathloss'][start_idx:end_idx] = scenario_pl.numpy()
                             
                             prev_values = f['path_loss_data']['fspl'][start_idx:end_idx]
                             self.logger.info(
