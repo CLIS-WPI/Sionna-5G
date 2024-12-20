@@ -97,6 +97,21 @@ class MIMODatasetIntegrityChecker:
                 integrity_report['errors'].append(f"Configuration validation error: {str(e)}")
                 integrity_report['overall_status'] = False
 
+            try:
+                # Verify path loss data
+                for dataset_name in ['fspl', 'scenario_pathloss']:
+                    path_loss_data = f['path_loss_data'][dataset_name][:]
+                    is_valid, pl_errors = self._verify_path_loss_values(path_loss_data)
+                    
+                    if not is_valid:
+                        integrity_report['overall_status'] = False
+                        integrity_report['errors'].extend([
+                            f"Path loss validation failed for {dataset_name}:"
+                        ] + pl_errors)
+            except Exception as e:
+                integrity_report['errors'].append(f"Error checking path loss data: {str(e)}")
+                integrity_report['overall_status'] = False
+
             # Check modulation-specific integrity
             total_samples = 0
             for mod_scheme in self.modulation_schemes:
@@ -167,6 +182,56 @@ class MIMODatasetIntegrityChecker:
 
         return True
 
+    def _verify_path_loss_values(self, path_loss_data: tf.Tensor) -> Tuple[bool, List[str]]:
+        """
+        Verify path loss values are physically meaningful
+        
+        Args:
+            path_loss_data (tf.Tensor): Path loss values to verify
+            
+        Returns:
+            Tuple[bool, List[str]]: (is_valid, list of error messages)
+        """
+        errors = []
+        min_valid_pl = 20.0
+        max_valid_pl = 160.0
+        
+        try:
+            # Convert to tensor if not already
+            path_loss_data = tf.convert_to_tensor(path_loss_data)
+            
+            # Check for invalid values with detailed reporting
+            too_low = tf.math.less(path_loss_data, min_valid_pl)
+            too_high = tf.math.greater(path_loss_data, max_valid_pl)
+            not_finite = tf.math.logical_not(tf.math.is_finite(path_loss_data))
+            
+            num_too_low = tf.reduce_sum(tf.cast(too_low, tf.int32))
+            num_too_high = tf.reduce_sum(tf.cast(too_high, tf.int32))
+            num_not_finite = tf.reduce_sum(tf.cast(not_finite, tf.int32))
+            
+            if num_too_low > 0:
+                invalid_low = tf.boolean_mask(path_loss_data, too_low)
+                errors.append(
+                    f"Found {num_too_low} values below minimum ({min_valid_pl} dB). "
+                    f"Minimum found: {tf.reduce_min(invalid_low):.2f} dB"
+                )
+                
+            if num_too_high > 0:
+                invalid_high = tf.boolean_mask(path_loss_data, too_high)
+                errors.append(
+                    f"Found {num_too_high} values above maximum ({max_valid_pl} dB). "
+                    f"Maximum found: {tf.reduce_max(invalid_high):.2f} dB"
+                )
+                
+            if num_not_finite > 0:
+                errors.append(f"Found {num_not_finite} non-finite values")
+                
+            return len(errors) == 0, errors
+            
+        except Exception as e:
+            errors.append(f"Error verifying path loss values: {str(e)}")
+            return False, errors
+    
     def _validate_configuration(self) -> Dict[str, Any]:
         """
         Validate dataset configuration parameters

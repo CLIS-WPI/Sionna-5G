@@ -119,20 +119,76 @@ class MIMODatasetValidator:
         return results
 
     def validate_path_loss(self, group: h5py.Group) -> Dict[str, Any]:
-        """Validate path loss measurements."""
+        """
+        Validate path loss measurements with detailed statistics and invalid value counting.
+        
+        Args:
+            group (h5py.Group): HDF5 group containing path loss data
+            
+        Returns:
+            Dict[str, Any]: Validation results and statistics
+        """
         results = {}
         for path_feature in group:
             full_key = f"path_loss_data/{path_feature}"
             if full_key in self.expected_ranges:
                 data = np.array(group[path_feature])
+                
+                # Count invalid values
+                total_values = data.size
+                zero_values = np.sum(data == 0.0)
+                low_values = np.sum((data > 0.0) & (data < 20.0))
+                high_values = np.sum(data > 160.0)
+                valid_values = np.sum((data >= 20.0) & (data <= 160.0))
+                
+                # Calculate percentages
+                zero_percent = (zero_values/total_values*100)
+                low_percent = (low_values/total_values*100)
+                high_percent = (high_values/total_values*100)
+                valid_percent = (valid_values/total_values*100)
+                
+                # Print detailed validation info
+                print(f"\n{path_feature} Path Loss Validation:")
+                print(f"Total samples: {total_values}")
+                print(f"Valid values (20-160 dB): {valid_values} ({valid_percent:.2f}%)")
+                print(f"Invalid values breakdown:")
+                print(f"  - Zero values: {zero_values} ({zero_percent:.2f}%)")
+                print(f"  - Below 20dB: {low_values} ({low_percent:.2f}%)")
+                print(f"  - Above 160dB: {high_values} ({high_percent:.2f}%)")
+                
+                # Get basic statistics
                 stats = self.check_statistics(
                     data,
                     full_key,
                     expected_range=self.expected_ranges[full_key]["range"]
                 )
-                if full_key == "path_loss_data/fspl" and np.min(data) < 20.0:
-                    print(f"Warning: FSPL contains values below 20 dB.")
-                results[path_feature] = stats
+                
+                # Add validation statistics to results
+                results[path_feature] = {
+                    **stats,  # Include original statistics
+                    'validation_stats': {
+                        'total_samples': int(total_values),
+                        'valid_samples': int(valid_values),
+                        'valid_percentage': float(valid_percent),
+                        'invalid_counts': {
+                            'zero_values': int(zero_values),
+                            'below_20db': int(low_values),
+                            'above_160db': int(high_values)
+                        },
+                        'invalid_percentages': {
+                            'zero_values': float(zero_percent),
+                            'below_20db': float(low_percent),
+                            'above_160db': float(high_percent)
+                        }
+                    }
+                }
+                
+                # Add warning messages
+                if zero_values > 0 or low_values > 0:
+                    print(f"Warning: {path_feature} contains {zero_values + low_values} values below minimum threshold (20 dB)")
+                if high_values > 0:
+                    print(f"Warning: {path_feature} contains {high_values} values above maximum threshold (160 dB)")
+                    
         return results
 
     def validate_dataset(self) -> Dict[str, Any]:
@@ -220,7 +276,7 @@ def print_validation_results(results: Dict[str, Any]):
 
 def main():
     # Example usage
-    file_path = "dataset/mimo_dataset_20241219_174119.h5"
+    file_path = "dataset/mimo_dataset_20241219_200158.h5"
     validator = MIMODatasetValidator(file_path)
     
     try:

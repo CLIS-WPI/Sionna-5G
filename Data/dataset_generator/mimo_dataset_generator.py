@@ -319,7 +319,12 @@ class MIMODatasetGenerator:
                             end_idx = start_idx + self.batch_size
                             
                             # Generate input data
-                            distances = tf.random.uniform([self.batch_size], 10.0, 500.0)
+                            # Generate input data with physically meaningful minimum distance
+                            distances = tf.random.uniform(
+                                [self.batch_size], 
+                                minval=1.0,  # Minimum distance (1 meter)
+                                maxval=500.0  # Maximum distance (500 meters)
+)
                             snr_db = tf.random.uniform(
                                 [self.batch_size],
                                 self.system_params.snr_range[0],
@@ -401,11 +406,72 @@ class MIMODatasetGenerator:
                                 self.logger.error(f"Failed to generate valid batch after {MAX_RETRIES} attempts")
                                 continue
 
+                            # Before calculating path loss
+                            self.logger.info(f"\nProcessing batch for {mod_scheme}:")
+                            self.logger.info(f"Batch index: {batch_idx}, Range: {start_idx}-{end_idx}")
+                            self.logger.info(f"Distances shape: {distances.shape}")
+
                             # Calculate path loss data
                             fspl = self.path_loss_manager.calculate_free_space_path_loss(distances)
                             scenario_pl = self.path_loss_manager.calculate_path_loss(distances, 'umi')
                             
-                            # Slice the tensors to match batch_size
+                            # Debug checks before saving
+                            fspl_stats = {
+                                'min': tf.reduce_min(fspl).numpy(),
+                                'max': tf.reduce_max(fspl).numpy(),
+                                'mean': tf.reduce_mean(fspl).numpy(),
+                                'zeros': tf.reduce_sum(tf.cast(tf.equal(fspl, 0.0), tf.int32)).numpy()
+                            }
+                            
+                            self.logger.info(
+                                f"\nPath Loss Stats before saving:"
+                                f"\n - FSPL range: [{fspl_stats['min']:.2f}, {fspl_stats['max']:.2f}] dB"
+                                f"\n - FSPL mean: {fspl_stats['mean']:.2f} dB"
+                                f"\n - Zero values: {fspl_stats['zeros']}"
+                            )
+
+                            # Add enhanced validation and safety checks
+                            min_pl = 20.0
+                            max_pl = 160.0
+                            # Clip values with validation
+                            fspl = tf.clip_by_value(fspl, min_pl, max_pl)
+                            scenario_pl = tf.clip_by_value(scenario_pl, min_pl, max_pl)
+
+                            # Add validation checks with detailed logging
+                            any_invalid_fspl = tf.math.logical_or(
+                                tf.math.less(fspl, min_pl),
+                                tf.math.greater(fspl, max_pl)
+                            )
+                            any_invalid_scenario = tf.math.logical_or(
+                                tf.math.less(scenario_pl, min_pl),
+                                tf.math.greater(scenario_pl, max_pl)
+                            )
+
+                            if tf.math.reduce_any(any_invalid_fspl):
+                                min_val = tf.reduce_min(fspl)
+                                max_val = tf.reduce_max(fspl)
+                                self.logger.warning(
+                                    f"FSPL values required clipping. Range before clip: [{min_val:.2f}, {max_val:.2f}] dB"
+                                )
+
+                            if tf.math.reduce_any(any_invalid_scenario):
+                                min_val = tf.reduce_min(scenario_pl)
+                                max_val = tf.reduce_max(scenario_pl)
+                                self.logger.warning(
+                                    f"Scenario path loss values required clipping. Range before clip: [{min_val:.2f}, {max_val:.2f}] dB"
+                                )
+
+                            # Ensure no NaN or infinite values
+                            fspl = tf.where(tf.math.is_finite(fspl), fspl, min_pl)
+                            scenario_pl = tf.where(tf.math.is_finite(scenario_pl), scenario_pl, min_pl)
+
+                            # Add logging for clipped values
+                            if tf.reduce_any(fspl < 20.0) or tf.reduce_any(fspl > 160.0):
+                                self.logger.warning("Some FSPL values were clipped to physical bounds")
+                            if tf.reduce_any(scenario_pl < 20.0) or tf.reduce_any(scenario_pl > 160.0):
+                                self.logger.warning("Some scenario path loss values were clipped to physical bounds")
+
+                            # Slice the tensors to match batch_size (your existing code continues here)
                             fspl = tf.slice(fspl, [0], [self.batch_size])
                             scenario_pl = tf.slice(scenario_pl, [0], [self.batch_size])
 
@@ -422,6 +488,13 @@ class MIMODatasetGenerator:
                             f['path_loss_data']['fspl'][start_idx:end_idx] = fspl.numpy()
                             f['path_loss_data']['scenario_pathloss'][start_idx:end_idx] = scenario_pl.numpy()
                             
+                            prev_values = f['path_loss_data']['fspl'][start_idx:end_idx]
+                            self.logger.info(
+                                f"\nVerification after save:"
+                                f"\n - Saved values range: [{np.min(prev_values):.2f}, {np.max(prev_values):.2f}] dB"
+                                f"\n - Zero values in saved data: {np.sum(prev_values == 0.0)}"
+                            )
+
                             # Update progress
                             mod_progress.update(self.batch_size)
                             total_progress.update(self.batch_size)

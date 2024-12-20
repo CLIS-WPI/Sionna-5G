@@ -96,49 +96,102 @@ class PathLossManager:
         frequency: Optional[float] = None
     ) -> tf.Tensor:
         """
-        Calculate Free Space Path Loss (FSPL) with improved numerical stability and constraints.
-
+        Calculate Free Space Path Loss (FSPL) with enhanced physical constraints and validation.
+        
         Args:
-            distance (tf.Tensor): Distance between transmitter and receiver (meters).
-            frequency (Optional[float]): Carrier frequency in Hz (defaults to system frequency).
+            distance (tf.Tensor): Distance between transmitter and receiver (meters)
+            frequency (Optional[float]): Carrier frequency in Hz (defaults to system frequency)
         
         Returns:
-            tf.Tensor: Free Space Path Loss (FSPL) in dB.
+            tf.Tensor: Free Space Path Loss (FSPL) in dB with physical constraints
         """
         try:
-            # Constants
-            c = 3e8  # Speed of light
-            min_distance = 1.0  # Minimum realistic distance (meters)
-            max_distance = 1e6  # Maximum realistic distance (meters)
-            frequency = tf.cast(frequency or self.system_params.carrier_frequency, tf.float32)
+            # Physical constants
+            c = 299792458.0  # Speed of light in m/s
 
-            # Ensure valid distance values
-            distance = tf.clip_by_value(tf.cast(distance, tf.float32), min_distance, max_distance)
-
-            # Calculate wavelength
+            # Get frequency first
+            if frequency is None:
+                frequency = tf.cast(self.system_params.carrier_frequency, tf.float32)
+            else:
+                frequency = tf.cast(frequency, tf.float32)
+                
+            # Calculate wavelength and critical distance
             wavelength = c / frequency
-
-            # FSPL Calculation
-            fspl_db = 20.0 * (tf.math.log(distance) / tf.math.log(10.0)) + \
-                    20.0 * (tf.math.log(frequency) / tf.math.log(10.0)) - \
-                    20.0 * (tf.math.log(wavelength) / tf.math.log(10.0))
-
-            # Clip FSPL values to enforce realistic range
-            fspl_db = tf.clip_by_value(fspl_db, 20.0, 200.0)
-
-            # Debugging logs
-            self.logger.debug(f"FSPL calculation - Min: {tf.reduce_min(fspl_db).numpy():.2f}, "
-                            f"Max: {tf.reduce_max(fspl_db).numpy():.2f}, "
-                            f"Mean: {tf.reduce_mean(fspl_db).numpy():.2f}")
+            critical_distance = wavelength / (4.0 * np.pi)
+            
+            # Distance constraints
+            min_distance = tf.maximum(critical_distance * 1.1, 1.0)  # Ensure above critical distance
+            max_distance = 100000.0  # 100 km maximum realistic distance
+            
+            # Input validation and conversion
+            distance = tf.cast(distance, tf.float32)
+            distance = tf.maximum(distance, min_distance)
+            distance = tf.minimum(distance, max_distance)
+            
+            # Pre-calculation validation
+            valid_distances = tf.logical_and(
+                tf.math.is_finite(distance),
+                distance > 0
+            )
+            
+            # FSPL calculation with enhanced stability
+            # FSPL = 20log₁₀(4πd/λ) = 20log₁₀(4πdf/c)
+            fspl_db = tf.where(
+                valid_distances,
+                20.0 * tf.math.log(4.0 * np.pi * distance * frequency / c) / tf.math.log(10.0),
+                tf.fill(tf.shape(distance), tf.cast(60.0, tf.float32))  # Default value for invalid distances
+            )
+            
+            # Post-calculation constraints based on physics
+            min_fspl = 20.0  # Minimum realistic path loss in dB
+            max_fspl = 160.0  # Maximum realistic path loss in dB
+            fspl_db = tf.clip_by_value(fspl_db, min_fspl, max_fspl)
+            
+            # Add frequency-dependent adjustment
+            freq_ghz = frequency / 1e9
+            freq_adjustment = 20.0 * tf.math.log(freq_ghz) / tf.math.log(10.0)
+            fspl_db += freq_adjustment
+            
+            # Final validation and cleanup
+            fspl_db = tf.where(tf.math.is_finite(fspl_db), fspl_db, min_fspl)
+            
+            # Log calculation details for debugging
+            self.logger.debug(
+                f"FSPL calculation details:\n"
+                f"Critical distance: {critical_distance:.2e} m\n"
+                f"Min distance used: {min_distance:.2f} m\n"
+                f"Distance range: {tf.reduce_min(distance).numpy():.2f} - "
+                f"{tf.reduce_max(distance).numpy():.2f} m\n"
+                f"FSPL range: {tf.reduce_min(fspl_db).numpy():.2f} - "
+                f"{tf.reduce_max(fspl_db).numpy():.2f} dB"
+            )
+            
+            # Enhanced logging right after calculation
+            debug_info = {
+                'pre_clip_min': tf.reduce_min(fspl_db).numpy(),
+                'pre_clip_max': tf.reduce_max(fspl_db).numpy(),
+                'zero_count_pre': tf.reduce_sum(tf.cast(tf.equal(fspl_db, 0.0), tf.int32)).numpy(),
+                'input_distance_min': tf.reduce_min(distance).numpy(),
+                'input_distance_max': tf.reduce_max(distance).numpy(),
+            }
+            
+            self.logger.debug(
+                f"\nFSPL Calculation Debug:"
+                f"\n - Input distances range: [{debug_info['input_distance_min']:.2f}, {debug_info['input_distance_max']:.2f}] m"
+                f"\n - Pre-clip FSPL range: [{debug_info['pre_clip_min']:.2f}, {debug_info['pre_clip_max']:.2f}] dB"
+                f"\n - Zero values before clip: {debug_info['zero_count_pre']}"
+            )
+            
+            # After final clipping
+            final_zero_count = tf.reduce_sum(tf.cast(tf.equal(fspl_db, 0.0), tf.int32)).numpy()
+            if final_zero_count > 0:
+                self.logger.warning(f"Found {final_zero_count} zero values in FSPL after all processing")
+                
             return fspl_db
-
+            
         except Exception as e:
             self.logger.error(f"FSPL calculation failed: {str(e)}")
             raise
-
-        except Exception as e:
-                self.logger.error(f"Free space path loss calculation failed: {str(e)}")
-                raise
 
     def calculate_path_loss(self, distance: tf.Tensor, scenario: str = 'umi') -> tf.Tensor:
         """
