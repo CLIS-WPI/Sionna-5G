@@ -134,8 +134,16 @@ def generate_output_path(base_path=None):
         str: Unique output path
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    default_path = f"dataset/mimo_dataset_{timestamp}.h5"
-    return base_path or default_path
+    if base_path:
+            return base_path
+            
+    counter = 0
+    while True:
+            suffix = f"_{counter}" if counter > 0 else ""
+            path = f"dataset/mimo_dataset_{timestamp}{suffix}.h5"
+            if not os.path.exists(path):
+                return path
+            counter += 1
 
 def main():
     """

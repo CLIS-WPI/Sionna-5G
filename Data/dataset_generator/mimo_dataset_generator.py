@@ -148,8 +148,12 @@ class MIMODatasetGenerator:
         """
         Prepare output directory for dataset
         """
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        self.logger.info(f"Prepared output directory: {os.path.dirname(save_path)}")
+        directory = os.path.dirname(save_path)
+        if not os.path.exists(directory):
+            os.makedirs(directory, exist_ok=True)
+            self.logger.info(f"Created output directory: {directory}")
+        else:
+            self.logger.info(f"Using existing output directory: {directory}")
     
     def _create_dataset_structure(self, hdf5_file, num_samples: int):
         """
@@ -269,17 +273,6 @@ class MIMODatasetGenerator:
                     dataset.attrs['description'] = dataset_descriptions[name]
                     dataset.attrs['units'] = self._get_dataset_units(name)
 
-            # Create path loss datasets
-            #for name in ['fspl', 'scenario_pathloss']:
-                #dataset = path_loss_data.create_dataset(
-                    #name,
-                    #shape=(num_samples,),
-                    #dtype=np.float32,
-                    #chunks=True,
-                    #compression='gzip'
-                #)
-                #dataset.attrs['description'] = f'{name.upper()} measurements'
-                #dataset.attrs['units'] = 'dB'
 
             self.logger.info("Dataset structure created successfully")
             
@@ -287,16 +280,21 @@ class MIMODatasetGenerator:
             self.logger.error(f"Failed to create dataset structure: {str(e)}")
             raise
 
-    def generate_dataset(
-        self, 
-        num_samples: int, 
-        save_path: str = 'dataset/mimo_dataset.h5'
-    ):
+    def generate_dataset(self, num_samples: int, save_path: str = 'dataset/mimo_dataset.h5'):
         """
         Generate comprehensive MIMO dataset with enhanced shape validation and memory management
         """
         try:
             self._prepare_output_directory(save_path)
+
+            # Check and remove existing file
+            if os.path.exists(save_path):
+                try:
+                    os.remove(save_path)
+                    self.logger.info(f"Removed existing dataset file: {save_path}")
+                except OSError as e:
+                    self.logger.error(f"Error removing existing file: {e}")
+                    raise
 
             # Initial batch size safety check
             self.batch_size = self._check_batch_size_safety(self.batch_size)
@@ -311,7 +309,9 @@ class MIMODatasetGenerator:
                     f"Using {samples_per_mod} samples per modulation."
                 )
             
+            # Open file in write mode after ensuring it doesn't exist
             with h5py.File(save_path, 'w') as f:
+                # Rest of your existing code remains the same...
                 self._create_dataset_structure(f, num_samples)
                 
                 total_progress = tqdm(total=num_samples, desc="Total Dataset Generation", unit="samples")
