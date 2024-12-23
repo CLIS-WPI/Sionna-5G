@@ -506,12 +506,12 @@ class MIMODatasetGenerator:
                             # Add verification logging
                             self.logger.info(
                                 f"\nVerification after save:"
-                                f"\n - Saved values range: [{np.min(mod_group['path_loss_data']['fspl'][start_idx:end_idx]):.2f}, "
-                                f"{np.max(mod_group['path_loss_data']['fspl'][start_idx:end_idx]):.2f}] dB"
-                                f"\n - Zero values in saved data: {np.sum(mod_group['path_loss_data']['fspl'][start_idx:end_idx] == 0.0)}"
+                                f"\n - Saved values range: [{np.min(f['path_loss_data']['fspl'][start_idx:end_idx]):.2f}, "
+                                f"{np.max(f['path_loss_data']['fspl'][start_idx:end_idx]):.2f}] dB"
+                                f"\n - Zero values in saved data: {np.sum(f['path_loss_data']['fspl'][start_idx:end_idx] == 0.0)}"
                             )
 
-                            prev_values = mod_group['path_loss_data']['fspl'][start_idx:end_idx]
+                            prev_values = f['path_loss_data']['fspl'][start_idx:end_idx]
                             self.logger.info(
                                 f"\nVerification after save:"
                                 f"\n - Saved values range: [{np.min(prev_values):.2f}, {np.max(prev_values):.2f}] dB"
