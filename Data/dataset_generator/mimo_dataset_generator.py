@@ -313,8 +313,10 @@ class MIMODatasetGenerator:
             
             # Open file in write mode after ensuring it doesn't exist
             with h5py.File(save_path, 'w') as f:
-                # Rest of your existing code remains the same...
                 self._create_dataset_structure(f, num_samples)
+                
+                # Initialize path loss offset counter
+                path_loss_offset = 0  
                 
                 total_progress = tqdm(total=num_samples, desc="Total Dataset Generation", unit="samples")
                 
@@ -506,7 +508,7 @@ class MIMODatasetGenerator:
                             # Save path loss data with global indexing
                             f['path_loss_data']['fspl'][pl_start_idx:pl_end_idx] = fspl.numpy()
                             f['path_loss_data']['scenario_pathloss'][pl_start_idx:pl_end_idx] = scenario_pl.numpy()
-                            
+
                             # Add verification logging
                             self.logger.info(
                                 f"\nVerification after save:"
@@ -546,6 +548,9 @@ class MIMODatasetGenerator:
                                 continue
                             else:
                                 raise
+                    
+                    # Update path loss offset for next modulation scheme
+                    path_loss_offset += samples_per_mod  
                     
                     mod_progress.close()
                 
