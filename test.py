@@ -89,22 +89,26 @@ class MIMODatasetValidator:
 
         return stats
 
-    def validate_path_loss(self, mod_group: h5py.Group, mod_scheme: str) -> Dict[str, Any]:
-        """Validate path loss measurements for a specific modulation scheme"""
+    def validate_path_loss(self, h5_file: h5py.File) -> Dict[str, Any]:
+        """Validate path loss measurements at root level"""
         results = {}
         
-        if 'path_loss_data' not in mod_group:
-            print(f"Warning: No path loss data found for {mod_scheme}")
+        if 'path_loss_data' not in h5_file:
+            print("Warning: No path loss data found at root level")
             return results
             
-        path_loss_group = mod_group['path_loss_data']
+        path_loss_group = h5_file['path_loss_data']
         
         for path_feature in ['fspl', 'scenario_pathloss']:
             if path_feature not in path_loss_group:
-                print(f"Warning: {path_feature} not found in {mod_scheme} path loss data")
+                print(f"Warning: {path_feature} not found in root path loss data")
                 continue
                 
             data = np.array(path_loss_group[path_feature])
+            
+            # Add validation for NaN and infinite values
+            nan_values = np.sum(np.isnan(data))
+            inf_values = np.sum(np.isinf(data))
             
             total_values = data.size
             zero_values = np.sum(data == 0.0)
@@ -117,17 +121,19 @@ class MIMODatasetValidator:
             high_percent = (high_values/total_values*100)
             valid_percent = (valid_values/total_values*100)
             
-            print(f"\n{mod_scheme} - {path_feature} Path Loss Validation:")
+            print(f"\nRoot Level - {path_feature} Path Loss Validation:")
             print(f"Total samples: {total_values}")
             print(f"Valid values (20-160 dB): {valid_values} ({valid_percent:.2f}%)")
             print(f"Invalid values breakdown:")
             print(f"  - Zero values: {zero_values} ({zero_percent:.2f}%)")
             print(f"  - Below 20dB: {low_values} ({low_percent:.2f}%)")
             print(f"  - Above 160dB: {high_values} ({high_percent:.2f}%)")
+            print(f"  - NaN values: {nan_values}")
+            print(f"  - Infinite values: {inf_values}")
             
             stats = self.check_statistics(
                 data,
-                f"{mod_scheme}/{path_feature}",
+                f"root/{path_feature}",
                 expected_range=(20, 160)
             )
             
@@ -140,7 +146,9 @@ class MIMODatasetValidator:
                     'invalid_counts': {
                         'zero_values': int(zero_values),
                         'below_20db': int(low_values),
-                        'above_160db': int(high_values)
+                        'above_160db': int(high_values),
+                        'nan_values': int(nan_values),
+                        'inf_values': int(inf_values)
                     },
                     'invalid_percentages': {
                         'zero_values': float(zero_percent),
@@ -154,8 +162,11 @@ class MIMODatasetValidator:
                 print(f"Warning: {path_feature} contains {zero_values + low_values} values below minimum threshold (20 dB)")
             if high_values > 0:
                 print(f"Warning: {path_feature} contains {high_values} values above maximum threshold (160 dB)")
+            if nan_values > 0 or inf_values > 0:
+                print(f"Warning: {path_feature} contains {nan_values} NaN values and {inf_values} infinite values")
                 
         return results
+            
 
     def validate_modulation_data(self, group: h5py.Group) -> Dict[str, Any]:
         """Validate data for each modulation scheme"""
@@ -166,7 +177,7 @@ class MIMODatasetValidator:
             
             # Validate regular features
             for feature in group[mod_scheme]:
-                if feature != 'path_loss_data' and feature in self.expected_ranges:
+                if feature in self.expected_ranges:
                     data = np.array(group[mod_scheme][feature])
                     mod_results[feature] = self.check_statistics(
                         data,
@@ -175,8 +186,6 @@ class MIMODatasetValidator:
                         expected_shape=self.expected_ranges[feature].get("shape")
                     )
             
-            # Validate path loss data
-            mod_results['path_loss_data'] = self.validate_path_loss(group[mod_scheme], mod_scheme)
             results[mod_scheme] = mod_results
         return results
 
@@ -190,7 +199,8 @@ class MIMODatasetValidator:
             "validation_time": datetime.now().isoformat(),
             "structure": {},
             "modulation_data": {},
-            "configuration": {}
+            "configuration": {},
+            "path_loss_data": {}  # Add this line
         }
 
         try:
@@ -206,6 +216,9 @@ class MIMODatasetValidator:
                     validation_results["modulation_data"] = self.validate_modulation_data(f["modulation_data"])
                 else:
                     validation_results["errors"] = validation_results.get("errors", []) + ["Missing modulation_data group"]
+
+                # Add path loss validation
+                validation_results["path_loss_data"] = self.validate_path_loss(f)
 
                 total_size = sum(
                     dataset.size * dataset.dtype.itemsize 
@@ -233,7 +246,21 @@ def print_validation_results(results: Dict[str, Any]):
     for key, value in results['configuration'].items():
         print(f"  {key}: {value}")
 
+    # Add path loss data section
+    if 'path_loss_data' in results and results['path_loss_data']:
+        print("\nPath Loss Data:")
+        for feature, stats in results['path_loss_data'].items():
+            print(f"  {feature}:")
+            if 'validation_stats' in stats:
+                vs = stats['validation_stats']
+                print(f"    Valid samples: {vs['valid_samples']} ({vs['valid_percentage']:.2f}%)")
+                print(f"    Invalid counts:")
+                print(f"      Zero values: {vs['invalid_counts']['zero_values']}")
+                print(f"      Below 20dB: {vs['invalid_counts']['below_20db']}")
+                print(f"      Above 160dB: {vs['invalid_counts']['above_160db']}")
+
     print("\nModulation Schemes:")
+    
     for mod_scheme, mod_data in results['modulation_data'].items():
         print(f"\n{mod_scheme}:")
         for feature, stats in mod_data.items():
