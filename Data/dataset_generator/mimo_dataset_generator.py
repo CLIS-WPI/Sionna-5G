@@ -183,6 +183,23 @@ class MIMODatasetGenerator:
             config_data = hdf5_file.create_group('configuration')
             config_data.attrs['description'] = 'System configuration parameters'
             
+            # Create path loss data group at root level
+            path_loss_data = hdf5_file.create_group('path_loss_data')
+            path_loss_data.attrs['description'] = 'Path loss measurements and calculations'
+            
+            # Create path loss datasets at root level
+            for name in ['fspl', 'scenario_pathloss']:
+                dataset = path_loss_data.create_dataset(
+                    name,
+                    shape=(num_samples,),
+                    dtype=np.float32,
+                    chunks=True,
+                    compression='gzip',
+                    compression_opts=4
+                )
+                dataset.attrs['description'] = f'{name.upper()} measurements'
+                dataset.attrs['units'] = 'dB'
+
             # Add metadata
             config_data.attrs.update({
                 'creation_date': datetime.now().isoformat(),
@@ -209,23 +226,6 @@ class MIMODatasetGenerator:
                 # Create modulation-specific group
                 mod_group = modulation_data.create_group(mod_scheme)
                 mod_group.attrs['description'] = f'Data for {mod_scheme} modulation'
-                
-                # Create modulation-specific path loss group
-                path_loss_group = mod_group.create_group('path_loss_data')
-                path_loss_group.attrs['description'] = f'Path loss data for {mod_scheme} modulation'
-                
-                # Create path loss datasets for this modulation
-                for name in ['fspl', 'scenario_pathloss']:
-                    dataset = path_loss_group.create_dataset(
-                        name,
-                        shape=(samples_per_mod,),
-                        dtype=np.float32,
-                        chunks=True,
-                        compression='gzip',
-                        compression_opts=4
-                    )
-                    dataset.attrs['description'] = f'{name.upper()} measurements for {mod_scheme}'
-                    dataset.attrs['units'] = 'dB'
 
                 # Define other datasets for this modulation
                 datasets = {
@@ -277,7 +277,7 @@ class MIMODatasetGenerator:
                     dataset.attrs['units'] = self._get_dataset_units(name)
 
             self.logger.info("Dataset structure created successfully")
-            
+                
         except Exception as e:
             self.logger.error(f"Failed to create dataset structure: {str(e)}")
             raise
