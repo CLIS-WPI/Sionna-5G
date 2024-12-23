@@ -499,9 +499,13 @@ class MIMODatasetGenerator:
                             mod_group['ber'][start_idx:end_idx] = enhanced_metrics['ber']
                             mod_group['throughput'][start_idx:end_idx] = enhanced_metrics['throughput']
                             
-                            # Save path loss data to root-level group
-                            f['path_loss_data']['fspl'][start_idx:end_idx] = fspl.numpy()
-                            f['path_loss_data']['scenario_pathloss'][start_idx:end_idx] = scenario_pl.numpy()
+                            # Calculate global indices for path loss data
+                            pl_start_idx = path_loss_offset + start_idx
+                            pl_end_idx = path_loss_offset + end_idx
+
+                            # Save path loss data with global indexing
+                            f['path_loss_data']['fspl'][pl_start_idx:pl_end_idx] = fspl.numpy()
+                            f['path_loss_data']['scenario_pathloss'][pl_start_idx:pl_end_idx] = scenario_pl.numpy()
                             
                             # Add verification logging
                             self.logger.info(

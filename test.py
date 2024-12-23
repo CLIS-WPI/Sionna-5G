@@ -281,7 +281,7 @@ def print_validation_results(results: Dict[str, Any]):
                     print(f"    Std: {stats['numeric_stats']['std']:.4f}")
 
 def main():
-    file_path = "dataset/mimo_dataset_20241223_170412.h5"
+    file_path = "dataset/mimo_dataset_20241223_174336.h5"
     validator = MIMODatasetValidator(file_path)
     
     try:
