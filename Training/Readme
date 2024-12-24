@@ -1,0 +1,42 @@
+# Purpose of Training and Expected Results
+
+The purpose of this training is to develop a Reinforcement Learning (RL)-based model using the Soft Actor-Critic (SAC) algorithm to optimize beamforming decisions in a Multiple-Input Multiple-Output (MIMO) communication system. The model is trained to learn optimal beamforming strategies from a pre-generated dataset that includes channel states, actions (beamforming configurations), and corresponding rewards (e.g., spectral efficiency, throughput, and signal-to-interference-plus-noise ratio, or SINR). The ultimate goal is to maximize the efficiency and reliability of wireless communication in a static MIMO environment by dynamically selecting the best beamforming parameters.
+
+## Key Performance Indicators (KPIs)
+To evaluate the performance of the RL model, the following KPIs are introduced:
+
+1. **Spectral Efficiency (bits/s/Hz)**:
+   - Measures how efficiently the system utilizes the available bandwidth.
+   - Higher spectral efficiency indicates better resource utilization.
+
+2. **Throughput (Mbps)**:
+   - Represents the actual data transfer rate achieved by the system.
+   - The model should aim to maximize throughput across different channel conditions.
+
+3. **Signal-to-Interference-Plus-Noise Ratio (SINR) (dB)**:
+   - Reflects the quality of the communication signal relative to interference and noise.
+   - Higher SINR values indicate better signal quality.
+
+4. **Average Reward**:
+   - Tracks the mean reward received by the RL agent per training episode.
+   - This serves as a direct measure of the agent's ability to meet the optimization goals defined in the reward structure.
+
+5. **Policy Entropy**:
+   - Monitors the exploration behavior of the agent.
+   - Higher entropy ensures that the agent explores diverse strategies during training, which can lead to more robust performance.
+
+6. **Validation Average Reward**:
+   - Measures the agent's generalization ability on unseen validation data.
+   - This KPI ensures that the model does not overfit the training data and performs well on new scenarios.
+
+## Expected Results
+By the end of training, the RL agent is expected to:
+1. Learn a policy that selects optimal beamforming actions for various channel states, maximizing the defined rewards.
+2. Demonstrate improved communication performance (e.g., higher throughput and spectral efficiency) compared to traditional beamforming techniques like fixed or random beamforming.
+3. Achieve convergence in key metrics such as average reward, demonstrating stability and reliability in its decision-making.
+4. Generalize well to unseen validation data, maintaining performance across varying scenarios.
+
+## Additional Features
+The training incorporates validation steps to ensure that the model generalizes beyond the training dataset. Key metrics, including validation rewards, are logged periodically, allowing for continuous monitoring of performance. The training process is designed to handle large datasets and efficiently utilize computational resources, ensuring scalability for more complex scenarios. 
+
+This training serves as a foundation for deploying RL-based optimization strategies in wireless communication systems, offering a practical solution for enhancing network performance in real-world scenarios.
