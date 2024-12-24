@@ -12,7 +12,6 @@ import logging
 import os
 import tensorflow as tf
 # Configure GPU and memory growth
-from gpu_config import configure_gpu
 def configure_gpu():
     try:
         gpus = tf.config.list_physical_devices('GPU')
@@ -247,7 +246,9 @@ def get_optimal_batch_size(available_memory: float) -> int:
 
 # Main function (Modified to include validation set)
 def main():
+    print("Starting main function...")
     # Configure logging
+    print("Configuring logging...")
     os.makedirs("logs", exist_ok=True)
     logging.basicConfig(
         filename="logs/log.txt",
@@ -269,7 +270,9 @@ def main():
     random.seed(42)
 
     try:
+        print("Trying to load dataset...")
         dataset_folder = os.path.expanduser("~/Desktop/milad-5G/dataset/Sionna-5G/Data/dataset")
+        print(f"Looking for dataset in: {dataset_folder}")
         try:
             latest_dataset = max(
                 [os.path.join(dataset_folder, f) for f in os.listdir(dataset_folder) if f.endswith('.h5')],
@@ -279,15 +282,59 @@ def main():
         except ValueError:
             raise FileNotFoundError(f"No .h5 files found in the dataset folder: {dataset_folder}")
 
+        print("Examining dataset structure...")
         with h5py.File(latest_dataset, "r") as f:
+            # Reshape channel_response, effective_snr, and eigenvalues
+            channel_response = f['modulation_data/16QAM/channel_response'][:]
+            channel_response = channel_response.reshape(channel_response.shape[0], -1)  # Flatten last dimensions
+            
+            effective_snr = f['modulation_data/16QAM/effective_snr'][:].reshape(-1, 1)  # Ensure 2D with one column
+            
+            eigenvalues = f['modulation_data/16QAM/eigenvalues'][:]
+            eigenvalues = eigenvalues.reshape(eigenvalues.shape[0], -1)  # Flatten last dimensions
+
+            # Create states
+            states = np.column_stack([channel_response, effective_snr, eigenvalues])
+            print("Final states shape:", states.shape)
+
+            # Create actions
+            actions = np.column_stack([
+                f['modulation_data/16QAM/spectral_efficiency'][:],
+                f['modulation_data/16QAM/throughput'][:]
+            ])
+            actions = actions.reshape(actions.shape[0], -1)  # Ensure 2D
+
+            # Create rewards
+            rewards = f['modulation_data/16QAM/spectral_efficiency'][:].reshape(-1, 1)  # Ensure 2D
+
+            # Create next states
+            next_states = np.roll(states, -1, axis=0)
+            next_states[-1] = states[-1]  # Handle the last state
+
+            # Create done flags
+            dones = np.zeros((len(states), 1))  # Ensure 2D
+            dones[-1] = 1  # Mark the last state as done
+
+            # Get path loss data (fspl)
+            fspl = f['path_loss_data/fspl'][:].reshape(-1, 1)  # Ensure 2D
+
+            # Build raw_dataset dictionary
             raw_dataset = {
-                'states': f["states"][:],
-                'actions': f["actions"][:],
-                'rewards': f["rewards"][:],
-                'next_states': f["next_states"][:],
-                'dones': f["dones"][:],
-                'fspl': f["fspl"][:]
+                'states': states,
+                'actions': actions,
+                'rewards': rewards,
+                'next_states': next_states,
+                'dones': dones,
+                'fspl': fspl
             }
+
+        # Debugging Outputs
+        print("States shape:", raw_dataset['states'].shape)
+        print("Actions shape:", raw_dataset['actions'].shape)
+        print("Rewards shape:", raw_dataset['rewards'].shape)
+        print("Next states shape:", raw_dataset['next_states'].shape)
+        print("Dones shape:", raw_dataset['dones'].shape)
+        print("FSPL shape:", raw_dataset['fspl'].shape)
 
         filtered_dataset = filter_invalid_samples(raw_dataset)
 
@@ -387,3 +434,6 @@ def main():
     except Exception as e:
         logging.error(f"Error in main execution: {str(e)}")
 
+if __name__ == "__main__":
+    print("Script starting...")
+    main()
