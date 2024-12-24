@@ -234,6 +234,17 @@ def main():
     
     try:
         # Load and filter dataset
+        dataset_folder = "dataset"  # Path to the folder containing datasets
+        try:
+            latest_dataset = max(
+                [os.path.join(dataset_folder, f) for f in os.listdir(dataset_folder) if f.endswith('.h5')],
+                key=os.path.getctime
+            )
+            print(f"Loading dataset: {latest_dataset}")
+        except ValueError:
+            raise FileNotFoundError(f"No .h5 files found in the dataset folder: {dataset_folder}")
+
+        # Load and filter dataset
         with h5py.File(latest_dataset, "r") as f:
             raw_dataset = {
                 'states': f["states"][:],
