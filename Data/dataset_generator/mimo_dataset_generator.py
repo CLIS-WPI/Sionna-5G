@@ -502,22 +502,60 @@ class MIMODatasetGenerator:
                             scenario_pl = tf.slice(scenario_pl, [0], [self.batch_size])
 
                             # Save all data to HDF5
-                            mod_group['channel_response'][start_idx:end_idx] = h_perfect.numpy()
-                            mod_group['sinr'][start_idx:end_idx] = sinr.numpy()
-                            mod_group['spectral_efficiency'][start_idx:end_idx] = spectral_efficiency.numpy()
-                            mod_group['effective_snr'][start_idx:end_idx] = effective_snr.numpy()
-                            mod_group['eigenvalues'][start_idx:end_idx] = eigenvalues.numpy()
-                            mod_group['ber'][start_idx:end_idx] = enhanced_metrics['ber']
-                            mod_group['throughput'][start_idx:end_idx] = enhanced_metrics['throughput']
+                            # Then modify the saving section to use the validated components:
+                            mod_group['channel_response'][start_idx:end_idx] = components_to_validate['channel_response'].numpy()
+                            mod_group['sinr'][start_idx:end_idx] = components_to_validate['sinr'].numpy()
+                            mod_group['spectral_efficiency'][start_idx:end_idx] = components_to_validate['spectral_efficiency'].numpy()
+                            mod_group['effective_snr'][start_idx:end_idx] = components_to_validate['effective_snr'].numpy()
+                            mod_group['eigenvalues'][start_idx:end_idx] = components_to_validate['eigenvalues'].numpy()
+                            mod_group['ber'][start_idx:end_idx] = components_to_validate['ber']
+                            mod_group['throughput'][start_idx:end_idx] = components_to_validate['throughput']
                             
                             # Calculate global indices for path loss data
                             pl_start_idx = path_loss_offset + start_idx
                             pl_end_idx = path_loss_offset + end_idx
 
                             # Save path loss data with global indexing
-                            f['path_loss_data']['fspl'][pl_start_idx:pl_end_idx] = fspl.numpy()
-                            f['path_loss_data']['scenario_pathloss'][pl_start_idx:pl_end_idx] = scenario_pl.numpy()
+                            components_to_validate = {
+                                'channel_response': h_perfect,
+                                'sinr': sinr,
+                                'spectral_efficiency': spectral_efficiency,
+                                'effective_snr': effective_snr,
+                                'eigenvalues': eigenvalues,
+                                'fspl': fspl,
+                                'scenario_pathloss': scenario_pl,
+                                'ber': enhanced_metrics['ber'],
+                                'throughput': enhanced_metrics['throughput']
+                            }
 
+                            if not self._validate_dataset_sizes(components_to_validate):
+                                self.logger.warning("Component size mismatch detected, attempting to fix...")
+                                # Adjust sizes to match batch_size
+                                for name, data in components_to_validate.items():
+                                    if hasattr(data, 'shape') and data.shape[0] != self.batch_size:
+                                        if isinstance(data, tf.Tensor):
+                                            components_to_validate[name] = tf.slice(data, [0], [self.batch_size])
+                                        elif isinstance(data, np.ndarray):
+                                            components_to_validate[name] = data[:self.batch_size]
+
+                                # Validate again after fixing
+                                if not self._validate_dataset_sizes(components_to_validate):
+                                    self.logger.error("Failed to fix component size mismatch")
+                                    raise ValueError("Dataset components have inconsistent sizes")
+
+                            # Then modify the saving section to use the validated components:
+                            mod_group['channel_response'][start_idx:end_idx] = components_to_validate['channel_response'].numpy()
+                            mod_group['sinr'][start_idx:end_idx] = components_to_validate['sinr'].numpy()
+                            mod_group['spectral_efficiency'][start_idx:end_idx] = components_to_validate['spectral_efficiency'].numpy()
+                            mod_group['effective_snr'][start_idx:end_idx] = components_to_validate['effective_snr'].numpy()
+                            mod_group['eigenvalues'][start_idx:end_idx] = components_to_validate['eigenvalues'].numpy()
+                            mod_group['ber'][start_idx:end_idx] = components_to_validate['ber']
+                            mod_group['throughput'][start_idx:end_idx] = components_to_validate['throughput']
+
+                            # Save path loss data with validated components
+                            f['path_loss_data']['fspl'][pl_start_idx:pl_end_idx] = components_to_validate['fspl'].numpy()
+                            f['path_loss_data']['scenario_pathloss'][pl_start_idx:pl_end_idx] = components_to_validate['scenario_pathloss'].numpy()
+                            
                             # Add verification logging
                             self.logger.info(
                                 f"\nVerification after save:"
@@ -711,7 +749,21 @@ class MIMODatasetGenerator:
             return min(batch_size, max_safe_batch)
         except:
             return min(batch_size, 5000)  # Conservative default
-        
+    
+    def _validate_dataset_sizes(self, components: dict) -> bool:
+        """
+        Validates that all dataset components have the same size.
+        """
+        base_size = None
+        for name, data in components.items():
+            size = data.shape[0]
+            if base_size is None:
+                base_size = size
+            elif size != base_size:
+                self.logger.error(f"Size mismatch: {name} has size {size}, expected {base_size}")
+                return False
+        return True    
+    
 # Example usage
 def main():
     generator = MIMODatasetGenerator()
