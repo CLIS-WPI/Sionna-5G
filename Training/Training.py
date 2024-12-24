@@ -25,35 +25,40 @@ def configure_gpu():
     
 def filter_invalid_samples(dataset):
     """
-    Filters out invalid samples from the dataset where fspl is below 20 dB.
-
-    Args:
-        dataset (dict): A dictionary containing the dataset with keys:
-            - 'states': Channel states (numpy array).
-            - 'actions': Actions (numpy array).
-            - 'rewards': Rewards (numpy array).
-            - 'next_states': Next states (numpy array).
-            - 'dones': Done flags (numpy array).
-            - 'fspl': Free space path loss values (numpy array).
-
-    Returns:
-        dict: A filtered dataset with invalid samples removed.
+    Enhanced filtering with comprehensive validation.
     """
     fspl = dataset['fspl']
-    valid_indices = np.where(fspl >= 20)[0]
+    
+    # Multiple validation conditions
+    valid_indices = np.where(
+        (fspl >= 20.0) &  # Minimum valid path loss
+        (fspl <= 160.0) &  # Maximum valid path loss
+        (fspl != 0.0) &    # Exclude zero values
+        np.isfinite(fspl)  # Exclude inf/nan values
+    )[0]
 
-    # Filter each component of the dataset based on valid indices
+    # Print detailed statistics
+    total_samples = len(fspl)
+    zero_samples = np.sum(fspl == 0.0)
+    below_min = np.sum((fspl > 0.0) & (fspl < 20.0))
+    above_max = np.sum(fspl > 160.0)
+    invalid_values = np.sum(~np.isfinite(fspl))
+
+    print(f"\nDataset Filtering Statistics:")
+    print(f"Total samples: {total_samples}")
+    print(f"Zero values: {zero_samples} ({zero_samples/total_samples*100:.2f}%)")
+    print(f"Below 20 dB: {below_min} ({below_min/total_samples*100:.2f}%)")
+    print(f"Above 160 dB: {above_max} ({above_max/total_samples*100:.2f}%)")
+    print(f"Invalid values: {invalid_values} ({invalid_values/total_samples*100:.2f}%)")
+    print(f"Valid samples: {len(valid_indices)} ({len(valid_indices)/total_samples*100:.2f}%)")
+
+    # Filter dataset
     filtered_dataset = {
-        'states': dataset['states'][valid_indices],
-        'actions': dataset['actions'][valid_indices],
-        'rewards': dataset['rewards'][valid_indices],
-        'next_states': dataset['next_states'][valid_indices],
-        'dones': dataset['dones'][valid_indices],
-        'fspl': dataset['fspl'][valid_indices]
+        key: dataset[key][valid_indices] for key in dataset.keys()
     }
 
-    print(f"Filtered dataset: {len(valid_indices)} valid samples retained out of {len(fspl)} total samples.")
     return filtered_dataset
+
 
 # Replay Buffer Class with enhanced memory management
 class ReplayBuffer:
@@ -228,16 +233,7 @@ def main():
     random.seed(42)
     
     try:
-        # Find the latest dataset
-        dataset_folder = "dataset"
-        latest_dataset = max(
-            [os.path.join(dataset_folder, f) for f in os.listdir(dataset_folder) 
-            if f.endswith('.h5')],
-            key=os.path.getctime
-        )
-        print(f"Loading dataset: {latest_dataset}")
-        
-        # Load dataset
+        # Load and filter dataset
         with h5py.File(latest_dataset, "r") as f:
             raw_dataset = {
                 'states': f["states"][:],
@@ -245,12 +241,16 @@ def main():
                 'rewards': f["rewards"][:],
                 'next_states': f["next_states"][:],
                 'dones': f["dones"][:],
-                'fspl': f["fspl"][:]  # Assuming the fspl data is stored in the dataset
+                'fspl': f["fspl"][:]  # Assuming fspl is included in the dataset
             }
-
-        # Filter invalid samples
+        
+        # Filter with enhanced statistics
         filtered_dataset = filter_invalid_samples(raw_dataset)
         
+        # Add validation check
+        if len(filtered_dataset['states']) < 1000:  # Minimum required samples
+            raise ValueError("Too many samples filtered out. Check dataset quality.")
+
         # Initialize replay buffer
         replay_buffer = ReplayBuffer(max_size=20_000_000)
 
@@ -263,7 +263,8 @@ def main():
                 filtered_dataset['next_states'][i], 
                 filtered_dataset['dones'][i]
             )
-        
+
+
         # Initialize SAC agent
         state_dim = filtered_dataset['states'].shape[1]
         action_dim = filtered_dataset['actions'].shape[1]
