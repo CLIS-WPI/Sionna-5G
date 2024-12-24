@@ -147,6 +147,18 @@ class PathLossManager:
             max_fspl = 160.0  # Maximum realistic path loss in dB
             fspl_db = tf.clip_by_value(fspl_db, min_fspl, max_fspl)
             
+            # Add validation check
+            zero_values = tf.reduce_sum(tf.cast(tf.equal(fspl_db, 0.0), tf.int32))
+            if zero_values > 0:
+                self.logger.warning(f"Found {zero_values} zero values in FSPL calculation") 
+            
+            # Add shape validation
+            if not tf.reduce_all(tf.math.is_finite(fspl_db)):
+                self.logger.error("Non-finite values detected in FSPL calculation")
+                fspl_db = tf.where(tf.math.is_finite(fspl_db), fspl_db, min_fspl)
+            
+            return fspl_db
+        
             # Add frequency-dependent adjustment
             freq_ghz = frequency / 1e9
             freq_adjustment = 20.0 * tf.math.log(freq_ghz) / tf.math.log(10.0)
@@ -271,6 +283,15 @@ class PathLossManager:
             # Clip values to reasonable range
             total_path_loss = tf.clip_by_value(total_path_loss, 20.0, 160.0)
             
+            # Add validation
+            if not tf.reduce_all(tf.math.is_finite(total_path_loss)):
+                self.logger.error("Non-finite values detected in path loss calculation")
+                total_path_loss = tf.where(
+                    tf.math.is_finite(total_path_loss),
+                    total_path_loss,
+                    60.0  # Default value for invalid calculations
+                )
+
             return tf.reshape(total_path_loss, [-1])
             
         except Exception as e:
