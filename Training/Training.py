@@ -22,6 +22,38 @@ def configure_gpu():
     except Exception as e:
         print(f"Error configuring GPU: {str(e)}")
         return None
+    
+def filter_invalid_samples(dataset):
+    """
+    Filters out invalid samples from the dataset where fspl is below 20 dB.
+
+    Args:
+        dataset (dict): A dictionary containing the dataset with keys:
+            - 'states': Channel states (numpy array).
+            - 'actions': Actions (numpy array).
+            - 'rewards': Rewards (numpy array).
+            - 'next_states': Next states (numpy array).
+            - 'dones': Done flags (numpy array).
+            - 'fspl': Free space path loss values (numpy array).
+
+    Returns:
+        dict: A filtered dataset with invalid samples removed.
+    """
+    fspl = dataset['fspl']
+    valid_indices = np.where(fspl >= 20)[0]
+
+    # Filter each component of the dataset based on valid indices
+    filtered_dataset = {
+        'states': dataset['states'][valid_indices],
+        'actions': dataset['actions'][valid_indices],
+        'rewards': dataset['rewards'][valid_indices],
+        'next_states': dataset['next_states'][valid_indices],
+        'dones': dataset['dones'][valid_indices],
+        'fspl': dataset['fspl'][valid_indices]
+    }
+
+    print(f"Filtered dataset: {len(valid_indices)} valid samples retained out of {len(fspl)} total samples.")
+    return filtered_dataset
 
 # Replay Buffer Class with enhanced memory management
 class ReplayBuffer:
@@ -205,25 +237,36 @@ def main():
         )
         print(f"Loading dataset: {latest_dataset}")
         
-        # Initialize replay buffer
-        replay_buffer = ReplayBuffer(max_size=20_000_000)
-        
         # Load dataset
         with h5py.File(latest_dataset, "r") as f:
-            states = f["states"][:]
-            actions = f["actions"][:]
-            rewards = f["rewards"][:]
-            next_states = f["next_states"][:]
-            dones = f["dones"][:]
-            
-            # Add data to replay buffer
-            for i in range(len(states)):
-                replay_buffer.add(states[i], actions[i], rewards[i], 
-                                next_states[i], dones[i])
+            raw_dataset = {
+                'states': f["states"][:],
+                'actions': f["actions"][:],
+                'rewards': f["rewards"][:],
+                'next_states': f["next_states"][:],
+                'dones': f["dones"][:],
+                'fspl': f["fspl"][:]  # Assuming the fspl data is stored in the dataset
+            }
+
+        # Filter invalid samples
+        filtered_dataset = filter_invalid_samples(raw_dataset)
+        
+        # Initialize replay buffer
+        replay_buffer = ReplayBuffer(max_size=20_000_000)
+
+        # Add filtered data to replay buffer
+        for i in range(len(filtered_dataset['states'])):
+            replay_buffer.add(
+                filtered_dataset['states'][i], 
+                filtered_dataset['actions'][i], 
+                filtered_dataset['rewards'][i], 
+                filtered_dataset['next_states'][i], 
+                filtered_dataset['dones'][i]
+            )
         
         # Initialize SAC agent
-        state_dim = states.shape[1]
-        action_dim = actions.shape[1]
+        state_dim = filtered_dataset['states'].shape[1]
+        action_dim = filtered_dataset['actions'].shape[1]
         agent = SACAgent(state_dim, action_dim, replay_buffer)
         
         # Get optimal batch size based on available GPU memory
