@@ -157,8 +157,6 @@ class PathLossManager:
                 self.logger.error("Non-finite values detected in FSPL calculation")
                 fspl_db = tf.where(tf.math.is_finite(fspl_db), fspl_db, min_fspl)
             
-            return fspl_db
-        
             # Add frequency-dependent adjustment
             freq_ghz = frequency / 1e9
             freq_adjustment = 20.0 * tf.math.log(freq_ghz) / tf.math.log(10.0)
