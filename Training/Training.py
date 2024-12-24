@@ -10,8 +10,9 @@ from tqdm import trange
 import time
 import logging
 import os
-
+import tensorflow as tf
 # Configure GPU and memory growth
+from gpu_config import configure_gpu
 def configure_gpu():
     try:
         gpus = tf.config.list_physical_devices('GPU')
