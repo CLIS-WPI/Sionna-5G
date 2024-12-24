@@ -23,7 +23,7 @@ class SystemParameters:
     subcarrier_spacing: float = 30e3  # 30 kHz
     
     # Channel Parameters
-    num_paths: int = 10
+    num_paths: int = 20 # before number of paths was :10
     snr_range: Tuple[float, float] = (-20.0, 30.0)  # Using float values for precision
     noise_floor: float = -174  # dBm/Hz
     
@@ -42,9 +42,9 @@ class SystemParameters:
     random_seed: int = 42  # Seed for reproducible results
     
     # Dataset Generation Parameters
-    total_samples: int = 900_000
+    total_samples: int = 20_000_000 #900_000
     samples_per_modulation: int = None
-
+    replay_buffer_size: int = 20_000_000  # Add replay buffer size (this is for gpu server runing)
     def __post_init__(self):
         """
         Post-initialization validation and calculations
@@ -66,7 +66,7 @@ class SystemParameters:
         self, 
         num_tx: int = 4,
         num_rx: int = 4,
-        total_samples: int = 900_000,
+        total_samples: int = 20_000_000,#900_000,
         **kwargs
     ):
         """

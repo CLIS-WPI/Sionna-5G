@@ -71,14 +71,23 @@ class MIMODatasetGenerator:
                     total_memory = memory_info['current'] / 1e9  # Convert to GB
                     self.logger.info(f"Initial GPU memory usage: {total_memory:.2f} GB")
                     
+                    # Adjust batch size based on available memory (old version)
+                    #if total_memory > 8.0:  # More than 8GB available
+                        #self.batch_size = 64000
+                    #elif total_memory > 4.0:  # More than 4GB available
+                        #self.batch_size = 32000
+                    #else:  # Limited memory
+                        #self.batch_size = 19000
                     # Adjust batch size based on available memory
-                    if total_memory > 8.0:  # More than 8GB available
-                        self.batch_size = 64000
-                    elif total_memory > 4.0:  # More than 4GB available
-                        self.batch_size = 32000
+                    if total_memory > 64.0:  # More than 8GB available
+                        self.batch_size = 256_000
+                    elif total_memory > 16.0:  # More than 4GB available
+                        self.batch_size = 128_000
                     else:  # Limited memory
-                        self.batch_size = 19000
-                        
+                        self.batch_size = 64_000
+
+
+
                 except Exception as mem_error:
                     self.logger.warning(f"Could not get GPU memory info: {mem_error}")
                     self.batch_size = 5000  # Default to conservative batch size
