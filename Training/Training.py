@@ -162,10 +162,22 @@ if __name__ == "__main__":
 
     # Training loop
     batch_size = 256_000
+    os.makedirs("models", exist_ok=True)  # Ensure model saving directory exists
     for episode in range(1_000_000):
         agent.train(batch_size)
 
         if episode % 1000 == 0:
             print(f"Episode {episode}: Training in progress...")
 
-    print("Training completed.")
+        # Save models every 10,000 episodes
+        if episode % 10_000 == 0:
+            agent.actor.save(f"models/actor_{episode}.h5")
+            agent.critic1.save(f"models/critic1_{episode}.h5")
+            agent.critic2.save(f"models/critic2_{episode}.h5")
+            print(f"Saved models at episode {episode}")
+
+    # Save final models after training is complete
+    agent.actor.save("models/actor_final.h5")
+    agent.critic1.save("models/critic1_final.h5")
+    agent.critic2.save("models/critic2_final.h5")
+    print("Training completed. Final models saved.")
