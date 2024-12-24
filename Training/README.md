@@ -59,7 +59,7 @@ At the conclusion of the training process, the RL agent is expected to:
    - Validation performance is checked periodically (every 5000 episodes) to ensure generalization.
 
 4. **Scalability**:
-   - Designed to handle large-scale datasets and leverage **GPU acceleration** for efficient training.
+   - Designed to handle large-scale datasets and leverage **GPU acceleration (2* h100)** for efficient training.
    - Mixed precision is enabled for better performance on supported GPUs.
 
 5. **Model Saving**:
