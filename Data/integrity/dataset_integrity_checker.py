@@ -374,6 +374,7 @@ def verify_dataset_integrity(dataset_path: str) -> Dict[str, Any]:
 
 
 def verify_dataset(self) -> bool:
+    import logging
     """
     Verify dataset integrity
     """
