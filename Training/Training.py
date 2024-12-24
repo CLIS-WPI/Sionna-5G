@@ -6,6 +6,10 @@ from collections import deque
 import random
 import datetime
 from typing import Tuple, Optional, Dict
+from tqdm import trange
+import time
+import logging
+import os
 
 # Configure GPU and memory growth
 def configure_gpu():
@@ -242,6 +246,22 @@ def get_optimal_batch_size(available_memory: float) -> int:
 
 # Main function (Modified to include validation set)
 def main():
+    # Configure logging
+    os.makedirs("logs", exist_ok=True)
+    logging.basicConfig(
+        filename="logs/log.txt",
+        filemode="a",
+        format="%(asctime)s - %(message)s",
+        level=logging.INFO
+    )
+
+    # Log to console as well
+    console = logging.StreamHandler()
+    console.setLevel(logging.INFO)
+    formatter = logging.Formatter("%(asctime)s - %(message)s")
+    console.setFormatter(formatter)
+    logging.getLogger().addHandler(console)
+
     gpus = configure_gpu()
     tf.random.set_seed(42)
     np.random.seed(42)
@@ -254,7 +274,7 @@ def main():
                 [os.path.join(dataset_folder, f) for f in os.listdir(dataset_folder) if f.endswith('.h5')],
                 key=os.path.getctime
             )
-            print(f"Loading dataset: {latest_dataset}")
+            logging.info(f"Loading dataset: {latest_dataset}")
         except ValueError:
             raise FileNotFoundError(f"No .h5 files found in the dataset folder: {dataset_folder}")
 
@@ -309,17 +329,29 @@ def main():
 
         os.makedirs("checkpoints/models", exist_ok=True)
 
-        for episode in range(1_000_000):
+        # Import time and start tracking
+        from tqdm import trange
+        import time
+
+        start_time = time.time()
+
+        for episode in trange(1_000_000, desc="Training Progress", unit="episode"):
             try:
                 losses = agent.train(batch_size)
 
                 if episode % 1000 == 0:
-                    print(f"Episode {episode}: Training in progress...")
+                    elapsed_time = time.time() - start_time
+                    avg_time_per_episode = elapsed_time / (episode + 1)
+                    remaining_time = avg_time_per_episode * (1_000_000 - episode - 1)
+
+                    logging.info(f"Episode {episode}: Avg Time/Episode: {avg_time_per_episode:.2f}s, "
+                                f"Estimated Remaining Time: {remaining_time / 3600:.2f}h")
+
                     if losses:
                         actor_loss, critic1_loss, critic2_loss, avg_reward, policy_entropy = losses
-                        print(f"Actor Loss: {actor_loss:.4f}, Critic1 Loss: {critic1_loss:.4f}, "
-                            f"Critic2 Loss: {critic2_loss:.4f}, Avg Reward: {avg_reward:.4f}, "
-                            f"Policy Entropy: {policy_entropy:.4f}")
+                        logging.info(f"Actor Loss: {actor_loss:.4f}, Critic1 Loss: {critic1_loss:.4f}, "
+                                    f"Critic2 Loss: {critic2_loss:.4f}, Avg Reward: {avg_reward:.4f}, "
+                                    f"Policy Entropy: {policy_entropy:.4f}")
 
                 if episode % 5000 == 0:
                     val_reward = agent.validate((
@@ -329,30 +361,28 @@ def main():
                         tf.convert_to_tensor(validation_data['next_states'], dtype=tf.float32),
                         tf.convert_to_tensor(validation_data['dones'], dtype=tf.float32)
                     ))
-                    print(f"Episode {episode}: Validation Avg Reward: {val_reward:.4f}")
+                    logging.info(f"Episode {episode}: Validation Avg Reward: {val_reward:.4f}")
 
                 if episode % 10_000 == 0:
                     agent.actor.save(f"checkpoints/models/actor_{episode}.h5")
                     agent.critic1.save(f"checkpoints/models/critic1_{episode}.h5")
                     agent.critic2.save(f"checkpoints/models/critic2_{episode}.h5")
-                    print(f"Saved models at episode {episode}")
+                    logging.info(f"Saved models at episode {episode}")
 
             except tf.errors.ResourceExhaustedError:
                 batch_size = max(1000, batch_size // 2)
-                print(f"Reducing batch size to {batch_size} due to memory constraints")
+                logging.info(f"Reducing batch size to {batch_size} due to memory constraints")
                 continue
 
             except Exception as e:
-                print(f"Error during training: {str(e)}")
+                logging.error(f"Error during training: {str(e)}")
                 continue
 
         agent.actor.save("checkpoints/models/actor_final.h5")
         agent.critic1.save("checkpoints/models/critic1_final.h5")
         agent.critic2.save("checkpoints/models/critic2_final.h5")
-        print("Training completed. Final models saved.")
+        logging.info("Training completed. Final models saved.")
 
     except Exception as e:
-        print(f"Error in main execution: {str(e)}")
+        logging.error(f"Error in main execution: {str(e)}")
 
-if __name__ == "__main__":
-    main()

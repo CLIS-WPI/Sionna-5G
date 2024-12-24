@@ -59,7 +59,7 @@ At the conclusion of the training process, the RL agent is expected to:
    - Validation performance is checked periodically (every 5000 episodes) to ensure generalization.
 
 4. **Scalability**:
-   - Designed to handle large-scale datasets and leverage **GPU acceleration (2* h100)** for efficient training.
+   - Designed to handle large-scale datasets and leverage **GPU acceleration (2* H100 GPU)** for efficient training.
    - Mixed precision is enabled for better performance on supported GPUs.
 
 5. **Model Saving**:
@@ -67,4 +67,4 @@ At the conclusion of the training process, the RL agent is expected to:
 
 ## Why This Project Matters
 
-This project provides a robust framework for integrating **Reinforcement Learning** into wireless communication systems. By optimizing beamforming decisions, the trained model offers a practical solution to improve network performance, reliability, and resource utilization in real-world wireless communication scenarios.
+This project provides a robust framework for integrating **Reinforcement Learning** into 5G ireless communication systems. By optimizing beamforming decisions, the trained model offers a practical solution to improve network performance, reliability, and resource utilization in real-world wireless communication scenarios.
