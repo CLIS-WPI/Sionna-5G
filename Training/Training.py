@@ -184,21 +184,38 @@ class SACAgent:
         critic1_grads = tape.gradient(critic1_loss, self.critic1.trainable_variables)
         critic2_grads = tape.gradient(critic2_loss, self.critic2.trainable_variables)
         
-        self.actor_optimizer.apply_gradients(
-            zip(actor_grads, self.actor.trainable_variables))
-        self.critic1_optimizer.apply_gradients(
-            zip(critic1_grads, self.critic1.trainable_variables))
-        self.critic2_optimizer.apply_gradients(
-            zip(critic2_grads, self.critic2.trainable_variables))
+        self.actor_optimizer.apply_gradients(zip(actor_grads, self.actor.trainable_variables))
+        self.critic1_optimizer.apply_gradients(zip(critic1_grads, self.critic1.trainable_variables))
+        self.critic2_optimizer.apply_gradients(zip(critic2_grads, self.critic2.trainable_variables))
         
+        # Compute additional metrics
+        avg_reward = tf.reduce_mean(rewards)  # Average reward
+        policy_entropy = -tf.reduce_mean(tf.math.log(new_actions + 1e-8))  # Policy entropy
+
         # Log metrics
         with self.train_summary_writer.as_default():
             tf.summary.scalar('actor_loss', actor_loss, step=self.actor_optimizer.iterations)
             tf.summary.scalar('critic1_loss', critic1_loss, step=self.critic1_optimizer.iterations)
             tf.summary.scalar('critic2_loss', critic2_loss, step=self.critic2_optimizer.iterations)
+            tf.summary.scalar('avg_reward', avg_reward, step=self.actor_optimizer.iterations)
+            tf.summary.scalar('policy_entropy', policy_entropy, step=self.actor_optimizer.iterations)
         
-        return actor_loss, critic1_loss, critic2_loss
+        return actor_loss, critic1_loss, critic2_loss, avg_reward, policy_entropy
 
+    def validate(self, validation_data):
+        """Evaluate the model on validation data."""
+        states, actions, rewards, next_states, dones = validation_data
+        with tf.GradientTape() as tape:
+            next_actions = self.actor(next_states)
+            next_state_actions = tf.concat([next_states, next_actions], axis=1)
+            target_q1 = self.target_critic1(next_state_actions)
+            target_q2 = self.target_critic2(next_state_actions)
+            target_q = tf.minimum(target_q1, target_q2)
+            predicted_rewards = rewards + self.gamma * (1 - dones) * target_q
+
+        avg_validation_reward = tf.reduce_mean(predicted_rewards)
+        return avg_validation_reward.numpy()
+    
     def train(self, batch_size: int):
         if self.replay_buffer.size() < batch_size:
             return
@@ -223,18 +240,15 @@ def get_optimal_batch_size(available_memory: float) -> int:
     else:
         return 64_000
 
+# Main function (Modified to include validation set)
 def main():
-    # Configure GPU
     gpus = configure_gpu()
-    
-    # Set random seeds for reproducibility
     tf.random.set_seed(42)
     np.random.seed(42)
     random.seed(42)
-    
+
     try:
-        # Load and filter dataset
-        dataset_folder = "dataset"  # Path to the folder containing datasets
+        dataset_folder = os.path.expanduser("~/Desktop/milad-5G/dataset/Sionna-5G/Data/dataset")
         try:
             latest_dataset = max(
                 [os.path.join(dataset_folder, f) for f in os.listdir(dataset_folder) if f.endswith('.h5')],
@@ -244,7 +258,6 @@ def main():
         except ValueError:
             raise FileNotFoundError(f"No .h5 files found in the dataset folder: {dataset_folder}")
 
-        # Load and filter dataset
         with h5py.File(latest_dataset, "r") as f:
             raw_dataset = {
                 'states': f["states"][:],
@@ -252,85 +265,92 @@ def main():
                 'rewards': f["rewards"][:],
                 'next_states': f["next_states"][:],
                 'dones': f["dones"][:],
-                'fspl': f["fspl"][:]  # Assuming fspl is included in the dataset
+                'fspl': f["fspl"][:]
             }
-        
-        # Filter with enhanced statistics
+
         filtered_dataset = filter_invalid_samples(raw_dataset)
-        
-        # Add validation check
-        if len(filtered_dataset['states']) < 1000:  # Minimum required samples
+
+        if len(filtered_dataset['states']) < 1000:
             raise ValueError("Too many samples filtered out. Check dataset quality.")
 
-        # Initialize replay buffer
-        replay_buffer = ReplayBuffer(max_size=20_000_000)
+        # Split dataset into training and validation sets
+        split_idx = int(0.8 * len(filtered_dataset['states']))
+        training_data = {
+            key: value[:split_idx] for key, value in filtered_dataset.items()
+        }
+        validation_data = {
+            key: value[split_idx:] for key, value in filtered_dataset.items()
+        }
 
-        # Add filtered data to replay buffer
-        for i in range(len(filtered_dataset['states'])):
+        # Initialize replay buffer
+        replay_buffer = ReplayBuffer(max_size=15_000_000)
+        for i in range(len(training_data['states'])):
             replay_buffer.add(
-                filtered_dataset['states'][i], 
-                filtered_dataset['actions'][i], 
-                filtered_dataset['rewards'][i], 
-                filtered_dataset['next_states'][i], 
-                filtered_dataset['dones'][i]
+                training_data['states'][i], 
+                training_data['actions'][i], 
+                training_data['rewards'][i], 
+                training_data['next_states'][i], 
+                training_data['dones'][i]
             )
 
-
-        # Initialize SAC agent
-        state_dim = filtered_dataset['states'].shape[1]
-        action_dim = filtered_dataset['actions'].shape[1]
+        state_dim = training_data['states'].shape[1]
+        action_dim = training_data['actions'].shape[1]
         agent = SACAgent(state_dim, action_dim, replay_buffer)
-        
-        # Get optimal batch size based on available GPU memory
+
         if gpus:
             try:
                 memory_info = tf.config.experimental.get_memory_info('GPU:0')
-                available_memory = memory_info['current'] / 1e9  # Convert to GB
+                available_memory = memory_info['current'] / 1e9
                 batch_size = get_optimal_batch_size(available_memory)
             except:
                 batch_size = 64_000
         else:
             batch_size = 32_000
-        
-        # Create models directory
-        os.makedirs("models", exist_ok=True)
-        
-        # Training loop
+
+        os.makedirs("checkpoints/models", exist_ok=True)
+
         for episode in range(1_000_000):
             try:
                 losses = agent.train(batch_size)
-                
+
                 if episode % 1000 == 0:
                     print(f"Episode {episode}: Training in progress...")
                     if losses:
-                        actor_loss, critic1_loss, critic2_loss = losses
-                        print(f"Actor Loss: {actor_loss:.4f}, "
-                            f"Critic1 Loss: {critic1_loss:.4f}, "
-                            f"Critic2 Loss: {critic2_loss:.4f}")
-                
-                # Save models periodically
+                        actor_loss, critic1_loss, critic2_loss, avg_reward, policy_entropy = losses
+                        print(f"Actor Loss: {actor_loss:.4f}, Critic1 Loss: {critic1_loss:.4f}, "
+                            f"Critic2 Loss: {critic2_loss:.4f}, Avg Reward: {avg_reward:.4f}, "
+                            f"Policy Entropy: {policy_entropy:.4f}")
+
+                if episode % 5000 == 0:
+                    val_reward = agent.validate((
+                        tf.convert_to_tensor(validation_data['states'], dtype=tf.float32),
+                        tf.convert_to_tensor(validation_data['actions'], dtype=tf.float32),
+                        tf.convert_to_tensor(validation_data['rewards'], dtype=tf.float32),
+                        tf.convert_to_tensor(validation_data['next_states'], dtype=tf.float32),
+                        tf.convert_to_tensor(validation_data['dones'], dtype=tf.float32)
+                    ))
+                    print(f"Episode {episode}: Validation Avg Reward: {val_reward:.4f}")
+
                 if episode % 10_000 == 0:
-                    agent.actor.save(f"models/actor_{episode}.h5")
-                    agent.critic1.save(f"models/critic1_{episode}.h5")
-                    agent.critic2.save(f"models/critic2_{episode}.h5")
+                    agent.actor.save(f"checkpoints/models/actor_{episode}.h5")
+                    agent.critic1.save(f"checkpoints/models/critic1_{episode}.h5")
+                    agent.critic2.save(f"checkpoints/models/critic2_{episode}.h5")
                     print(f"Saved models at episode {episode}")
-                    
+
             except tf.errors.ResourceExhaustedError:
-                # Reduce batch size if OOM error occurs
                 batch_size = max(1000, batch_size // 2)
                 print(f"Reducing batch size to {batch_size} due to memory constraints")
                 continue
-                
+
             except Exception as e:
                 print(f"Error during training: {str(e)}")
                 continue
-        
-        # Save final models
-        agent.actor.save("models/actor_final.h5")
-        agent.critic1.save("models/critic1_final.h5")
-        agent.critic2.save("models/critic2_final.h5")
+
+        agent.actor.save("checkpoints/models/actor_final.h5")
+        agent.critic1.save("checkpoints/models/critic1_final.h5")
+        agent.critic2.save("checkpoints/models/critic2_final.h5")
         print("Training completed. Final models saved.")
-        
+
     except Exception as e:
         print(f"Error in main execution: {str(e)}")
 
