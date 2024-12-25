@@ -71,22 +71,13 @@ class MIMODatasetGenerator:
                     total_memory = memory_info['current'] / 1e9  # Convert to GB
                     self.logger.info(f"Initial GPU memory usage: {total_memory:.2f} GB")
                     
-                    # Adjust batch size based on available memory (old version)
-                    #if total_memory > 8.0:  # More than 8GB available
-                        #self.batch_size = 64000
-                    #elif total_memory > 4.0:  # More than 4GB available
-                        #self.batch_size = 32000
-                    #else:  # Limited memory
-                        #self.batch_size = 19000
                     # Adjust batch size based on available memory
-                    if total_memory > 64.0:  # More than 8GB available
+                    if total_memory > 64.0:  # More than 64GB available
                         self.batch_size = 256_000
-                    elif total_memory > 16.0:  # More than 4GB available
+                    elif total_memory > 16.0:  # More than 16GB available
                         self.batch_size = 128_000
                     else:  # Limited memory
                         self.batch_size = 64_000
-
-
 
                 except Exception as mem_error:
                     self.logger.warning(f"Could not get GPU memory info: {mem_error}")
@@ -104,9 +95,8 @@ class MIMODatasetGenerator:
                     except:
                         pass
                 
-                self.memory_callback = self.memory_monitoring_callback
+                self.memory_callback = memory_monitoring_callback
                 
-            
             else:
                 self.batch_size = 5000  # Reduced CPU batch size
                 self.logger.info(f"Using CPU with batch size {self.batch_size}")
@@ -122,6 +112,36 @@ class MIMODatasetGenerator:
             self.logger.warning(f"Error configuring GPU: {e}. Defaulting to CPU processing")
             self.batch_size = 50000
             self.memory_callback = None
+    
+    def validate_consistency(self, f):
+        """
+        Validate consistency of dataset sizes across all components.
+        """
+        try:
+            base_size = f['modulation_data']['16QAM']['effective_snr'].shape[0]
+            for mod_scheme in f['modulation_data']:
+                for dataset_name in f['modulation_data'][mod_scheme]:
+                    if f['modulation_data'][mod_scheme][dataset_name].shape[0] != base_size:
+                        self.logger.error(f"Inconsistent size in {mod_scheme}/{dataset_name}")
+                        return False
+            return True
+        except Exception as e:
+            self.logger.error(f"Dataset consistency validation failed: {e}")
+            return False
+    
+    def adjust_batch_size(self, batch_idx):
+        """
+        Adjust distances and path loss computations with updated batch size.
+        """
+        try:
+            batch_size = self.batch_size
+            distances = distances[:batch_size]
+            fspl = self.path_loss_manager.calculate_free_space_path_loss(distances)
+            return fspl
+        except Exception as e:
+            self.logger.error(f"Batch size adjustment failed: {e}")
+            raise
+
 
     def _validate_batch_data(self, batch_data: dict) -> tuple[bool, list[str]]:
         """
@@ -439,8 +459,10 @@ class MIMODatasetGenerator:
                             self.logger.info(f"Distances shape: {distances.shape}")
 
                             # Calculate path loss data
-                            fspl = self.path_loss_manager.calculate_free_space_path_loss(distances)
-                            scenario_pl = self.path_loss_manager.calculate_path_loss(distances, 'umi')
+                            # Align path loss dataset sizes with modulation datasets
+                            total_samples = len(f['modulation_data'][mod_scheme]['effective_snr'])  # Base size
+                            fspl = self.path_loss_manager.calculate_free_space_path_loss(distances[:total_samples])
+                            scenario_pl = self.path_loss_manager.calculate_path_loss(distances[:total_samples], 'umi')
                             
                             # Debug checks before saving
                             fspl_stats = {
@@ -518,7 +540,7 @@ class MIMODatasetGenerator:
                             # Save path loss data with global indexing
                             f['path_loss_data']['fspl'][pl_start_idx:pl_end_idx] = fspl.numpy()
                             f['path_loss_data']['scenario_pathloss'][pl_start_idx:pl_end_idx] = scenario_pl.numpy()
-
+                            
                             # Add verification logging
                             self.logger.info(
                                 f"\nVerification after save:"
@@ -552,8 +574,9 @@ class MIMODatasetGenerator:
                             else:
                                 raise
                     
-                    # Update path loss offset for next modulation scheme
-                    path_loss_offset += samples_per_mod  
+                    # Path loss offset recalculated based on actual processed samples
+                    processed_samples = batch_idx * self.batch_size
+                    path_loss_offset += processed_samples
                     
                     mod_progress.close()
                 
