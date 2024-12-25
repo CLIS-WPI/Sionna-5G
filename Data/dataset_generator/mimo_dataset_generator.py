@@ -296,6 +296,7 @@ class MIMODatasetGenerator:
         Generate comprehensive MIMO dataset with enhanced shape validation and memory management
         """
         try:
+
             self._prepare_output_directory(save_path)
 
             # Check and remove existing file
@@ -456,7 +457,7 @@ class MIMODatasetGenerator:
                                 f"\n - Zero values: {fspl_stats['zeros']}"
                             )
 
-                            # Add enhanced validation and safety checks
+                                                        # Add enhanced validation and safety checks
                             min_pl = 20.0
                             max_pl = 160.0
                             # Clip values with validation
@@ -497,7 +498,7 @@ class MIMODatasetGenerator:
                             if tf.reduce_any(scenario_pl < 20.0) or tf.reduce_any(scenario_pl > 160.0):
                                 self.logger.warning("Some scenario path loss values were clipped to physical bounds")
 
-                            # Slice the tensors to match batch_size (your existing code continues here)
+                            # Slice the tensors to match batch_size
                             fspl = tf.slice(fspl, [0], [self.batch_size])
                             scenario_pl = tf.slice(scenario_pl, [0], [self.batch_size])
 
@@ -524,13 +525,6 @@ class MIMODatasetGenerator:
                                 f"\n - Saved values range: [{np.min(f['path_loss_data']['fspl'][start_idx:end_idx]):.2f}, "
                                 f"{np.max(f['path_loss_data']['fspl'][start_idx:end_idx]):.2f}] dB"
                                 f"\n - Zero values in saved data: {np.sum(f['path_loss_data']['fspl'][start_idx:end_idx] == 0.0)}"
-                            )
-
-                            prev_values = f['path_loss_data']['fspl'][start_idx:end_idx]
-                            self.logger.info(
-                                f"\nVerification after save:"
-                                f"\n - Saved values range: [{np.min(prev_values):.2f}, {np.max(prev_values):.2f}] dB"
-                                f"\n - Zero values in saved data: {np.sum(prev_values == 0.0)}"
                             )
 
                             # Update progress
@@ -565,17 +559,67 @@ class MIMODatasetGenerator:
                 
                 total_progress.close()
 
-            # Verify the complete dataset
-            if self.verify_dataset(save_path):
-                self.logger.info(f"Dataset successfully generated and verified at {save_path}")
-            else:
-                self.logger.warning("Dataset generated but failed verification")
-            
+                # Add final metadata
+                f.attrs['completion_date'] = datetime.now().isoformat()
+                f.attrs['total_samples_generated'] = num_samples
+                f.attrs['final_batch_size'] = self.batch_size
+                
+                # Verify dataset integrity
+                self.integrity_checker = MIMODatasetIntegrityChecker(save_path)
+                integrity_report = self.integrity_checker.check_dataset_integrity()
+                
+                if integrity_report['overall_status']:
+                    self.logger.info("Dataset integrity verification passed")
+                    return True
+                else:
+                    self.logger.error("Dataset integrity verification failed")
+                    self.logger.error("Integrity report:", integrity_report)
+                    return False
+
         except Exception as e:
             self.logger.error(f"Dataset generation failed: {str(e)}")
             self.logger.error("Detailed error traceback:", exc_info=True)
             raise
+
         
+    def _process_batch(self, batch_size: int, mod_scheme: str) -> Dict[str, tf.Tensor]:
+        """
+        Process a single batch of data
+        
+        Args:
+            batch_size: Size of the batch to process
+            mod_scheme: Current modulation scheme
+            
+        Returns:
+            Dictionary containing processed batch data
+        """
+        try:
+            # Generate channel data
+            channel_data = self.channel_model.generate_mimo_channel(
+                batch_size,
+                self.system_params.snr_range
+            )
+            
+            # Calculate metrics
+            metrics = self.metrics_calculator.calculate_performance_metrics(
+                channel_data['perfect_channel'],
+                channel_data['tx_symbols'],
+                channel_data['rx_symbols'],
+                channel_data['snr_db']
+            )
+            
+            return {
+                'channel_response': channel_data['perfect_channel'],
+                'sinr': metrics['sinr'],
+                'spectral_efficiency': metrics['spectral_efficiency'],
+                'effective_snr': metrics['effective_snr'],
+                'eigenvalues': metrics['eigenvalues']
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Batch processing failed: {str(e)}")
+            raise
+
     def _get_dataset_units(self, dataset_name: str) -> str:
         """Helper method to return appropriate units for each dataset type"""
         units_map = {
@@ -712,10 +756,38 @@ class MIMODatasetGenerator:
         except:
             return min(batch_size, 5000)  # Conservative default
         
+    def _validate_dataset_sizes(self, dataset_components: Dict[str, tf.Tensor]) -> bool:
+        """
+        Validate that all dataset components have consistent sizes
+        
+        Args:
+            dataset_components: Dictionary of dataset components
+        Returns:
+            bool: True if sizes are consistent, False otherwise
+        """
+        try:
+            # Get the expected size from system parameters
+            expected_size = self.system_params.total_samples
+            
+            # Check each component
+            for name, component in dataset_components.items():
+                current_size = component.shape[0] if hasattr(component, 'shape') else len(component)
+                if current_size != expected_size:
+                    self.logger.error(
+                        f"Size mismatch in {name}: "
+                        f"Expected {expected_size}, got {current_size}"
+                    )
+                    return False
+                    
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error during size validation: {str(e)}")
+            return False    
 # Example usage
 def main():
     generator = MIMODatasetGenerator()
-    generator.generate_dataset(num_samples=12_000_000)
+    generator.generate_dataset(num_samples=20_000_000)
     generator.verify_dataset('dataset/mimo_dataset.h5')
 
 if __name__ == "__main__":
