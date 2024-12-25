@@ -116,31 +116,52 @@ class MIMODatasetGenerator:
     def validate_consistency(self, f):
         """
         Validate consistency of dataset sizes across all components.
+        
+        Args:
+            f: HDF5 file object
+        
+        Returns:
+            bool: True if consistent, False otherwise
         """
         try:
-            base_size = f['modulation_data']['16QAM']['effective_snr'].shape[0]
+            base_size = None
             for mod_scheme in f['modulation_data']:
                 for dataset_name in f['modulation_data'][mod_scheme]:
-                    if f['modulation_data'][mod_scheme][dataset_name].shape[0] != base_size:
+                    dataset_size = f['modulation_data'][mod_scheme][dataset_name].shape[0]
+                    if base_size is None:
+                        base_size = dataset_size  # Initialize base size
+                    elif dataset_size != base_size:
                         self.logger.error(f"Inconsistent size in {mod_scheme}/{dataset_name}")
                         return False
             return True
+        except KeyError as e:
+            self.logger.error(f"Missing key during consistency validation: {e}")
+            return False
         except Exception as e:
             self.logger.error(f"Dataset consistency validation failed: {e}")
             return False
+
     
-    def adjust_batch_size(self, batch_idx):
+    def adjust_batch_size(self, batch_idx, distances):
         """
         Adjust distances and path loss computations with updated batch size.
+        
+        Args:
+            batch_idx: Current batch index (not used in this implementation)
+            distances: Tensor containing distance values
+        
+        Returns:
+            Adjusted FSPL tensor
         """
         try:
             batch_size = self.batch_size
-            distances = distances[:batch_size]
+            distances = distances[:batch_size]  # Ensure distances match batch size
             fspl = self.path_loss_manager.calculate_free_space_path_loss(distances)
             return fspl
         except Exception as e:
             self.logger.error(f"Batch size adjustment failed: {e}")
             raise
+
 
 
     def _validate_batch_data(self, batch_data: dict) -> tuple[bool, list[str]]:
@@ -450,7 +471,8 @@ class MIMODatasetGenerator:
                                     self.logger.warning(f"  - {error}")
 
                             if retry_count == MAX_RETRIES:
-                                self.logger.error(f"Failed to generate valid batch after {MAX_RETRIES} attempts")
+                                self.logger.error(f"Failed to generate valid batch after {MAX_RETRIES} attempts. Logging failed batch data.")
+                                failed_batches.append(batch_data)  # Maintain a list of failed batches
                                 continue
 
                             # Before calculating path loss
@@ -461,8 +483,9 @@ class MIMODatasetGenerator:
                             # Calculate path loss data
                             # Align path loss dataset sizes with modulation datasets
                             total_samples = len(f['modulation_data'][mod_scheme]['effective_snr'])  # Base size
-                            fspl = self.path_loss_manager.calculate_free_space_path_loss(distances[:total_samples])
-                            scenario_pl = self.path_loss_manager.calculate_path_loss(distances[:total_samples], 'umi')
+                            mod_data_size = f['modulation_data'][mod_scheme]['effective_snr'].shape[0]
+                            fspl = self.path_loss_manager.calculate_free_space_path_loss(distances[:mod_data_size])
+                            scenario_pl = self.path_loss_manager.calculate_path_loss(distances[:mod_data_size], 'umi')
                             
                             # Debug checks before saving
                             fspl_stats = {
@@ -574,9 +597,7 @@ class MIMODatasetGenerator:
                             else:
                                 raise
                     
-                    # Path loss offset recalculated based on actual processed samples
-                    processed_samples = batch_idx * self.batch_size
-                    path_loss_offset += processed_samples
+                    path_loss_offset += end_idx - start_idx # Use actual processed range
                     
                     mod_progress.close()
                 
@@ -725,10 +746,15 @@ class MIMODatasetGenerator:
         
     def _manage_memory(self):
         """Memory management helper"""
-        if tf.config.list_physical_devices('GPU'):
-            tf.keras.backend.clear_session()
-        import gc
-        gc.collect()
+        try:
+            if tf.config.list_physical_devices('GPU'):
+                tf.keras.backend.clear_session()
+                tf.compat.v1.reset_default_graph()  # Reset TF graph (for TF1 compatibility)
+            import gc
+            gc.collect()
+        except Exception as e:
+            self.logger.warning(f"Memory management failed: {e}")
+
 
     def _check_memory_requirements(self, batch_size: int) -> bool:
         """
