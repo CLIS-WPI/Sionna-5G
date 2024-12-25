@@ -756,34 +756,6 @@ class MIMODatasetGenerator:
         except:
             return min(batch_size, 5000)  # Conservative default
         
-    def _validate_dataset_sizes(self, dataset_components: Dict[str, tf.Tensor]) -> bool:
-        """
-        Validate that all dataset components have consistent sizes
-        
-        Args:
-            dataset_components: Dictionary of dataset components
-        Returns:
-            bool: True if sizes are consistent, False otherwise
-        """
-        try:
-            # Get the expected size from system parameters
-            expected_size = self.system_params.total_samples
-            
-            # Check each component
-            for name, component in dataset_components.items():
-                current_size = component.shape[0] if hasattr(component, 'shape') else len(component)
-                if current_size != expected_size:
-                    self.logger.error(
-                        f"Size mismatch in {name}: "
-                        f"Expected {expected_size}, got {current_size}"
-                    )
-                    return False
-                    
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Error during size validation: {str(e)}")
-            return False    
 # Example usage
 def main():
     generator = MIMODatasetGenerator()
