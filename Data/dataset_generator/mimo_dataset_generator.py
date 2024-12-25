@@ -16,6 +16,7 @@ from utill.logging_config import LoggerManager
 from utill.tensor_shape_validator import validate_tensor_shapes  
 from datetime import datetime
 from integrity.dataset_integrity_checker import MIMODatasetIntegrityChecker
+from typing import Dict
 
 class MIMODatasetGenerator:
     """
@@ -344,6 +345,7 @@ class MIMODatasetGenerator:
         """
         Generate comprehensive MIMO dataset with enhanced shape validation and memory management
         """
+        failed_batches = []  # Initialize the list for failed batches
         try:
 
             self._prepare_output_directory(save_path)
