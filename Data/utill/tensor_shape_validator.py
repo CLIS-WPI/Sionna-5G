@@ -5,6 +5,7 @@
 
 import tensorflow as tf
 from typing import Union, List, Any
+import logging
 
 def assert_tensor_shape(
     tensor: tf.Tensor, 
@@ -165,7 +166,31 @@ def validate_tensor_properties(
     
     return tensor
 
-
+# In tensor_shape_validator.py, add complex tensor validation:
+def validate_complex_tensor(
+    tensor: tf.Tensor,
+    name: str = "channel_response"
+) -> bool:
+    try:
+        # Verify dtype
+        if not tensor.dtype in (tf.complex64, tf.complex128):
+            raise ValueError(f"{name} must be complex type")
+            
+        # Check for invalid values
+        real_part = tf.math.real(tensor)
+        imag_part = tf.math.imag(tensor)
+        
+        invalid_real = tf.reduce_any(tf.math.is_nan(real_part))
+        invalid_imag = tf.reduce_any(tf.math.is_nan(imag_part))
+        
+        if invalid_real or invalid_imag:
+            raise ValueError(f"Invalid complex values in {name}")
+            
+        return True
+        
+    except Exception as e:
+        logging.error(f"Complex tensor validation failed: {str(e)}")
+        return False
 def validate_tensor_shapes(tensors_dict):
     """
     Validate multiple tensor shapes at once

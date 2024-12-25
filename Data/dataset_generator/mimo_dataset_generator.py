@@ -125,23 +125,33 @@ class MIMODatasetGenerator:
         """
         try:
             base_size = None
+            sizes = {}
+            
+            # Check modulation data sizes
             for mod_scheme in f['modulation_data']:
-                for dataset_name in f['modulation_data'][mod_scheme]:
-                    dataset_size = f['modulation_data'][mod_scheme][dataset_name].shape[0]
-                    if base_size is None:
-                        base_size = dataset_size  # Initialize base size
-                    elif dataset_size != base_size:
-                        self.logger.error(f"Inconsistent size in {mod_scheme}/{dataset_name}")
-                        return False
+                mod_size = f['modulation_data'][mod_scheme]['channel_response'].shape[0]
+                sizes[f"modulation_{mod_scheme}"] = mod_size
+                
+                if base_size is None:
+                    base_size = mod_size
+                elif mod_size != base_size:
+                    self.logger.error(f"Size mismatch in {mod_scheme}: {mod_size} vs {base_size}")
+                    return False
+            
+            # Check path loss data sizes
+            pl_size = f['path_loss_data']['fspl'].shape[0]
+            sizes["path_loss"] = pl_size
+            
+            if pl_size != base_size:
+                self.logger.error(f"Path loss data size mismatch: {pl_size} vs {base_size}")
+                return False
+                
+            self.logger.info(f"Dataset size consistency verified: {sizes}")
             return True
-        except KeyError as e:
-            self.logger.error(f"Missing key during consistency validation: {e}")
-            return False
         except Exception as e:
-            self.logger.error(f"Dataset consistency validation failed: {e}")
+            self.logger.error(f"Consistency validation failed: {str(e)}")
             return False
 
-    
     def adjust_batch_size(self, batch_idx, distances):
         """
         Adjust distances and path loss computations with updated batch size.
@@ -161,8 +171,6 @@ class MIMODatasetGenerator:
         except Exception as e:
             self.logger.error(f"Batch size adjustment failed: {e}")
             raise
-
-
 
     def _validate_batch_data(self, batch_data: dict) -> tuple[bool, list[str]]:
         """
@@ -744,16 +752,30 @@ class MIMODatasetGenerator:
             self.logger.error(f"Dataset verification error: {str(e)}")
             return False
         
+    # In mimo_dataset_generator.py, enhance memory management:
     def _manage_memory(self):
-        """Memory management helper"""
         try:
             if tf.config.list_physical_devices('GPU'):
+                # Clear GPU memory
                 tf.keras.backend.clear_session()
-                tf.compat.v1.reset_default_graph()  # Reset TF graph (for TF1 compatibility)
+                
+                # Get current memory usage
+                memory_info = tf.config.experimental.get_memory_info('GPU:0')
+                current_usage = memory_info['current'] / 1e9  # Convert to GB
+                
+                self.logger.info(f"Current GPU memory usage: {current_usage:.2f} GB")
+                
+                # Adjust batch size if needed
+                if current_usage > self.memory_threshold:
+                    self.batch_size = max(1000, self.batch_size // 2)
+                    self.logger.warning(f"Reducing batch size to {self.batch_size}")
+                    
+            # Force garbage collection
             import gc
             gc.collect()
+            
         except Exception as e:
-            self.logger.warning(f"Memory management failed: {e}")
+            self.logger.error(f"Memory management failed: {str(e)}")
 
 
     def _check_memory_requirements(self, batch_size: int) -> bool:

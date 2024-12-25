@@ -388,6 +388,39 @@ class PathLossManager:
         except Exception as e:
             self.logger.error(f"Error generating path loss statistics: {str(e)}")
             raise        
+
+    # In path_loss_model.py, enhance validation:
+    def _validate_path_loss(self, path_loss_db: tf.Tensor, source: str) -> tf.Tensor:
+        try:
+            # Track original values
+            original_stats = {
+                'min': tf.reduce_min(path_loss_db),
+                'max': tf.reduce_max(path_loss_db),
+                'mean': tf.reduce_mean(path_loss_db)
+            }
+            
+            # Count values outside physical bounds
+            too_low = tf.reduce_sum(tf.cast(path_loss_db < 20.0, tf.int32))
+            too_high = tf.reduce_sum(tf.cast(path_loss_db > 160.0, tf.int32))
+            
+            # Clip values
+            path_loss_db = tf.clip_by_value(path_loss_db, 20.0, 160.0)
+            
+            # Log detailed statistics
+            if too_low > 0 or too_high > 0:
+                self.logger.warning(
+                    f"{source} path loss clipping stats:\n"
+                    f"Values < 20 dB: {too_low}\n"
+                    f"Values > 160 dB: {too_high}\n"
+                    f"Original range: [{original_stats['min']:.2f}, {original_stats['max']:.2f}] dB"
+                )
+                
+            return path_loss_db
+            
+        except Exception as e:
+            self.logger.error(f"Path loss validation failed: {str(e)}")
+            raise    
+        
 # Example usage
 def main():
     # Create path loss manager with default parameters

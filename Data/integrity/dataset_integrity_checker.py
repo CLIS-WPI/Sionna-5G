@@ -371,7 +371,37 @@ def verify_dataset_integrity(dataset_path: str) -> Dict[str, Any]:
     with MIMODatasetIntegrityChecker(dataset_path) as checker:
         return checker.check_dataset_integrity()
 
-
+# In dataset_integrity_checker.py, add explicit size verification:
+def validate_consistency(self, f):
+    try:
+        base_size = None
+        sizes = {}
+        
+        # Check modulation data sizes
+        for mod_scheme in f['modulation_data']:
+            mod_size = f['modulation_data'][mod_scheme]['channel_response'].shape[0]
+            sizes[f"modulation_{mod_scheme}"] = mod_size
+            
+            if base_size is None:
+                base_size = mod_size
+            elif mod_size != base_size:
+                self.logger.error(f"Size mismatch in {mod_scheme}: {mod_size} vs {base_size}")
+                return False
+        
+        # Check path loss data sizes
+        pl_size = f['path_loss_data']['fspl'].shape[0]
+        sizes["path_loss"] = pl_size
+        
+        if pl_size != base_size:
+            self.logger.error(f"Path loss data size mismatch: {pl_size} vs {base_size}")
+            return False
+            
+        self.logger.info(f"Dataset size consistency verified: {sizes}")
+        return True
+    except Exception as e:
+        self.logger.error(f"Consistency validation failed: {str(e)}")
+        return False
+    
 def verify_dataset(self) -> bool:
     """
     Verify dataset integrity
