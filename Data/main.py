@@ -16,16 +16,11 @@ import h5py
 import tensorflow as tf
 from typing import Dict
 
-# Add at the top of your main.py after imports
-
 # At the very top of main.py, after imports
 import os
-# Set extremely conservative CUDA memory settings
+# Set conservative CUDA memory settings
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
-os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
-os.environ['CUDA_LAUNCH_BLOCKING'] = '1'  # Add this for synchronous execution
-os.environ['TF_MEMORY_ALLOCATION'] = '0.3'  # Only use 30% of memory instead of 80%
-os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '0.3'  # Add this for XLA memory control
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # Use first GPU
 
 def configure_device():
     """
@@ -37,29 +32,22 @@ def configure_device():
         
         gpus = tf.config.list_physical_devices('GPU')
         if gpus:
-            # Configure each GPU
-            for gpu in gpus:
-                try:
-                    # Reset any existing configuration
+            try:
+                # Reset any existing configuration first
+                for gpu in gpus:
                     tf.config.experimental.set_virtual_device_configuration(gpu, [])
-                    
-                    # Set memory growth
+                
+                # Now set memory growth
+                for gpu in gpus:
                     tf.config.experimental.set_memory_growth(gpu, True)
-                    
-                    # Set memory limit to 30% of GPU memory
-                    memory_limit = int(11*1024*0.3)  # 30% of typical GPU memory in MB
-                    tf.config.set_logical_device_configuration(
-                        gpu,
-                        [tf.config.LogicalDeviceConfiguration(memory_limit=memory_limit)]
-                    )
-                    
-                except RuntimeError as e:
-                    print(f"GPU configuration error for {gpu}: {e}")
-                    continue
-            
-            print(f"Found {len(gpus)} GPU(s). Using GPU for processing.")
-            return True
-            
+                
+                print(f"Found {len(gpus)} GPU(s). Using GPU for processing.")
+                return True
+                
+            except RuntimeError as e:
+                print(f"GPU configuration error: {e}")
+                return False
+                
         print("No GPU found. Using CPU for processing")
         return False
         
@@ -176,6 +164,11 @@ def main():
         # Clear any existing GPU memory allocations
         tf.keras.backend.clear_session()
         
+        # Configure device first, before any other GPU operations
+        device_config = configure_device()
+        if not device_config:
+            logger.warning("GPU configuration failed, falling back to CPU")
+
         # Parse command-line arguments
         args = parse_arguments()
         
@@ -185,26 +178,6 @@ def main():
             log_file=f'logs/mimo_dataset_generation_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log',
             log_format='%(asctime)s - %(name)s - %(levelname)s - %(message)s - [%(filename)s:%(lineno)d]'
         )
-        
-        # Configure GPU with memory growth and conservative settings
-        gpus = tf.config.list_physical_devices('GPU')
-        if gpus:
-            try:
-                for gpu in gpus:
-                    # Reset any existing configuration
-                    tf.config.experimental.set_virtual_device_configuration(gpu, [])
-                    # Set memory growth
-                    tf.config.experimental.set_memory_growth(gpu, True)
-                    # Set memory limit to 30% of GPU memory
-                    memory_limit = int(11*1024*0.3)  # 30% of typical GPU memory in MB
-                    tf.config.set_logical_device_configuration(
-                        gpu,
-                        [tf.config.LogicalDeviceConfiguration(memory_limit=memory_limit)]
-                    )
-                logger.info(f"Successfully configured {len(gpus)} GPU(s)")
-            except RuntimeError as e:
-                logger.error(f"GPU configuration error: {e}")
-                return 1
         
         # Configure system parameters with conservative memory settings
         system_params = configure_system_parameters(args)
