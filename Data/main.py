@@ -2,7 +2,7 @@
 # MIMO Dataset Generation Command-Line Interface
 # Provides flexible command-line configuration for dataset generation and verification
 # Manages system configuration, logging, and dataset generation workflow
-
+import os
 import sys
 import argparse
 import logging
@@ -15,9 +15,8 @@ from integrity.dataset_integrity_checker import MIMODatasetIntegrityChecker
 import h5py
 import tensorflow as tf
 from typing import Dict
-
-# At the very top of main.py, after imports
-import os
+import tensorflow as tf
+tf.config.set_soft_device_placement(True)
 # Set conservative CUDA memory settings
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # Use first GPU
