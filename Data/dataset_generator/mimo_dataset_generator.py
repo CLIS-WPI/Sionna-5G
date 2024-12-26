@@ -128,7 +128,7 @@ class MIMODatasetGenerator:
 
     def _initialize_hardware_parameters(self):
         """
-        Initialize parameters based on available hardware resources with proper H100 detection
+        Initialize parameters based on available hardware resources
         """
         try:
             # Get system memory info
@@ -141,74 +141,50 @@ class MIMODatasetGenerator:
             # GPU detection and configuration
             gpus = tf.config.list_physical_devices('GPU')
             if gpus:
-                # Configure memory growth for all GPUs
+                # Configure memory growth for each GPU
                 for gpu in gpus:
                     try:
                         tf.config.experimental.set_memory_growth(gpu, True)
                     except RuntimeError as e:
                         self.logger.warning(f"Memory growth setting failed for {gpu}: {e}")
 
-                # Detect GPU type and memory
-                try:
-                    # Force memory allocation to get true memory capacity
-                    with tf.device('/GPU:0'):
-                        # Try allocating and immediately freeing a small tensor
-                        test_tensor = tf.random.uniform((1000, 1000))
-                        del test_tensor
+                # Safe initial values
+                self.batch_size = 8_000
+                self.memory_threshold = 60.0  # Conservative for H100
+                self.max_batch_size = 128_000  # Maximum allowed batch size
+                self.min_batch_size = 4_000   # Minimum allowed batch size
+                
+                # Initialize memory growth tracking
+                self.current_memory_usage = 0.0
+                self.stable_iterations = 0
+                self.growth_step = 1.5  # Growth factor
+                
+                # If using multiple GPUs, adjust batch size
+                if len(gpus) > 1:
+                    self.batch_size *= 2
+                    self.max_batch_size *= 2
+                    self.logger.info(f"Multiple GPUs detected, adjusted initial batch size to: {self.batch_size}")
                     
-                    memory_info = tf.config.experimental.get_memory_info('GPU:0')
-                    gpu_memory_gb = memory_info['current'] / 1e9
-                    
-                    if gpu_memory_gb < 1.0:  # If still showing as near 0, use a fallback method
-                        # H100 has 80GB, A100 has 40/80GB
-                        gpu_name = tf.test.gpu_device_name()
-                        if 'H100' in gpu_name:
-                            gpu_memory_gb = 80.0
-                        elif 'A100' in gpu_name:
-                            gpu_memory_gb = 40.0
-                        else:
-                            gpu_memory_gb = 16.0  # Conservative default
-                    
-                    self.logger.info(f"GPU Memory Available: {gpu_memory_gb:.1f} GB")
-                    
-                    # Set appropriate batch size for H100
-                    if gpu_memory_gb >= 70:  # H100
-                        self.batch_size = 128_000  # Conservative for H100
-                        self.memory_threshold = 60.0  # 75% of 80GB
-                    elif gpu_memory_gb >= 35:  # A100
-                        self.batch_size = 64_000
-                        self.memory_threshold = 30.0
-                    else:
-                        self.batch_size = 32_000
-                        self.memory_threshold = gpu_memory_gb * 0.7
-                    
-                    # If using multiple GPUs, increase batch size
-                    if len(gpus) > 1:
-                        self.batch_size *= len(gpus)
-                        self.logger.info(f"Multiple GPUs detected, adjusted batch size to: {self.batch_size}")
-                    
-                    self.logger.info(f"Configured batch size for GPU type: {self.batch_size}")
-                    
-                except Exception as e:
-                    self.logger.warning(f"GPU memory detection failed: {e}")
-                    self.batch_size = 32_000
-                    self.memory_threshold = 16.0
+                self.logger.info(f"GPU configuration complete. Initial batch size: {self.batch_size}")
+                
             else:
                 # CPU-only configuration
-                self.batch_size = 16_000
+                self.batch_size = 4_000
                 self.memory_threshold = system_memory_gb * 0.3
+                self.max_batch_size = 16_000
+                self.min_batch_size = 2_000
                 
-            # Final safety check
-            self.batch_size = self._check_batch_size_safety(self.batch_size)
-            self.logger.info(f"Final configuration:")
+            self.logger.info("Final configuration:")
             self.logger.info(f"- Batch size: {self.batch_size}")
             self.logger.info(f"- Memory threshold: {self.memory_threshold:.1f} GB")
-            
+                
         except Exception as e:
             self.logger.warning(f"Hardware initialization error: {e}")
             # Conservative fallback values
-            self.batch_size = 16_000
+            self.batch_size = 4_000
             self.memory_threshold = 16.0
+            self.max_batch_size = 16_000
+            self.min_batch_size = 2_000
 
     def validate_consistency(self, f):
         """
@@ -784,7 +760,33 @@ class MIMODatasetGenerator:
         }
         return units_map.get(dataset_name, 'dimensionless')
 
-    
+    def safe_memory_growth(self):
+        """
+        Implement safe memory growth strategy
+        """
+        try:
+            # Get current memory usage
+            memory_info = tf.config.experimental.get_memory_info('GPU:0')
+            current_usage = memory_info['current'] / 1e9
+            
+            # Update tracking
+            self.current_memory_usage = current_usage
+            
+            # If memory usage is stable and low, consider increasing batch size
+            if current_usage < self.memory_threshold * 0.7:  # Using less than 70% of threshold
+                self.stable_iterations += 1
+                if self.stable_iterations >= 5:  # Wait for 5 successful iterations
+                    potential_batch_size = int(self.batch_size * self.growth_step)
+                    if potential_batch_size <= self.max_batch_size:
+                        self.batch_size = potential_batch_size
+                        self.logger.info(f"Increasing batch size to {self.batch_size}")
+                    self.stable_iterations = 0
+            else:
+                self.stable_iterations = 0
+                
+        except Exception as e:
+            self.logger.warning(f"Memory growth check failed: {e}")
+
     def verify_dataset(self, save_path: str) -> bool:
         """
         Verify dataset integrity using MIMODatasetIntegrityChecker
@@ -853,52 +855,43 @@ class MIMODatasetGenerator:
     # In mimo_dataset_generator.py, enhance memory management:
     def _manage_memory(self):
         """
-        Enhanced memory management with gradual growth and safety checks
+        Enhanced memory management for H100 GPUs
         """
         try:
-            # Clean up first
-            tf.keras.backend.clear_session()
-            
-            for gpu_idx in range(len(tf.config.list_physical_devices('GPU'))):
+            gpus = tf.config.list_physical_devices('GPU')
+            if not gpus:
+                return
+                
+            # Monitor each GPU
+            for gpu_idx, gpu in enumerate(gpus):
                 try:
                     memory_info = tf.config.experimental.get_memory_info(f'GPU:{gpu_idx}')
                     current_usage = memory_info['current'] / 1e9
                     self.logger.info(f"GPU:{gpu_idx} memory usage: {current_usage:.2f} GB")
                     
-                    if current_usage > self.memory_threshold:
-                        # Aggressive cleanup
-                        tf.keras.backend.clear_session()
-                        import gc
-                        gc.collect()
-                        
-                        # Reduce batch size more conservatively for H100
-                        if self.is_h100:
-                            reduction_factor = 1.5
-                        else:
-                            reduction_factor = 2
-                            
-                        new_batch_size = max(8_000, int(self.batch_size / reduction_factor))
+                    # Adjust batch size based on memory usage
+                    if current_usage > self.memory_threshold * 0.9:  # Over 90% threshold
+                        new_batch_size = max(self.min_batch_size, self.batch_size // 2)
                         if new_batch_size != self.batch_size:
-                            self.logger.warning(
-                                f"High memory usage on GPU:{gpu_idx} ({current_usage:.1f} GB). "
-                                f"Reducing batch size from {self.batch_size} to {new_batch_size}"
-                            )
+                            self.logger.warning(f"High memory usage. Reducing batch size from {self.batch_size} to {new_batch_size}")
                             self.batch_size = new_batch_size
+                            self.stable_iterations = 0
                             
-                        # Wait for cleanup to take effect
-                        import time
-                        time.sleep(1)
-                        
+                            # Force cleanup
+                            tf.keras.backend.clear_session()
+                            import gc
+                            gc.collect()
+                            
                 except Exception as e:
                     self.logger.warning(f"Error monitoring GPU:{gpu_idx} - {str(e)}")
             
-            # Try to grow batch size if memory usage is low
+            # Try to grow batch size if conditions are good
             self.safe_memory_growth()
-            
+                
         except Exception as e:
             self.logger.error(f"Memory management failed: {str(e)}")
             # Fall back to conservative batch size
-            self.batch_size = 8_000
+            self.batch_size = self.min_batch_size
 
 
     def _check_memory_requirements(self, batch_size: int) -> bool:
