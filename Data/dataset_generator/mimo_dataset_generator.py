@@ -8,17 +8,26 @@ import h5py
 import numpy as np
 import tensorflow as tf
 from tqdm import tqdm
+from datetime import datetime
+from typing import Dict
+
+# System configuration imports
 from config.system_parameters import SystemParameters
 from core.channel_model import ChannelModelManager
 from core.metrics_calculator import MetricsCalculator
 from core.path_loss_model import PathLossManager
 from utill.logging_config import LoggerManager
-from utill.tensor_shape_validator import validate_tensor_shapes  
-from datetime import datetime
+from utill.tensor_shape_validator import validate_tensor_shapes
 from integrity.dataset_integrity_checker import MIMODatasetIntegrityChecker
-from typing import Dict
-import tensorflow as tf
-import numpy as np
+
+# Try to import psutil, set flag for availability
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    print("Warning: psutil not available. System memory monitoring will be limited.")
+    
 class MIMODatasetGenerator:
     """
     Comprehensive MIMO dataset generation framework
