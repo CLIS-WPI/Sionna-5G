@@ -27,7 +27,7 @@ try:
 except ImportError:
     PSUTIL_AVAILABLE = False
     print("Warning: psutil not available. System memory monitoring will be limited.")
-    
+
 class MIMODatasetGenerator:
     """
     Comprehensive MIMO dataset generation framework
@@ -128,79 +128,87 @@ class MIMODatasetGenerator:
 
     def _initialize_hardware_parameters(self):
         """
-        Initialize parameters based on available hardware resources
+        Initialize parameters based on available hardware resources with proper H100 detection
         """
         try:
             # Get system memory info
-            if not PSUTIL_AVAILABLE:
-                self.logger.warning("psutil not installed. Using conservative memory settings.")
-                self.memory_threshold = 2.0
-                self.batch_size = 4_000
-                return
+            if PSUTIL_AVAILABLE:
+                system_memory_gb = psutil.virtual_memory().total / (1024**3)
+                self.logger.info(f"Total System Memory: {system_memory_gb:.1f} GB")
+            else:
+                system_memory_gb = 64.0  # Default assumption
                 
-            system_memory_gb = psutil.virtual_memory().total / (1024**3)
-            self.logger.info(f"Total System Memory: {system_memory_gb:.1f} GB")
-
             # GPU detection and configuration
             gpus = tf.config.list_physical_devices('GPU')
             if gpus:
-                # Configure memory growth for available GPUs
+                # Configure memory growth for all GPUs
                 for gpu in gpus:
-                    tf.config.experimental.set_memory_growth(gpu, True)
-                
+                    try:
+                        tf.config.experimental.set_memory_growth(gpu, True)
+                    except RuntimeError as e:
+                        self.logger.warning(f"Memory growth setting failed for {gpu}: {e}")
+
+                # Detect GPU type and memory
                 try:
-                    # Get GPU memory info
+                    # Force memory allocation to get true memory capacity
+                    with tf.device('/GPU:0'):
+                        # Try allocating and immediately freeing a small tensor
+                        test_tensor = tf.random.uniform((1000, 1000))
+                        del test_tensor
+                    
                     memory_info = tf.config.experimental.get_memory_info('GPU:0')
                     gpu_memory_gb = memory_info['current'] / 1e9
+                    
+                    if gpu_memory_gb < 1.0:  # If still showing as near 0, use a fallback method
+                        # H100 has 80GB, A100 has 40/80GB
+                        gpu_name = tf.test.gpu_device_name()
+                        if 'H100' in gpu_name:
+                            gpu_memory_gb = 80.0
+                        elif 'A100' in gpu_name:
+                            gpu_memory_gb = 40.0
+                        else:
+                            gpu_memory_gb = 16.0  # Conservative default
+                    
                     self.logger.info(f"GPU Memory Available: {gpu_memory_gb:.1f} GB")
-
-                    # Adaptive memory threshold and batch size based on GPU memory
-                    if gpu_memory_gb >= 70:  # H100 or similar (80GB)
-                        self.memory_threshold = gpu_memory_gb * 0.7
-                        self.batch_size = 512_000
-                        self.logger.info("Configured for high-memory GPU (H100 or similar)")
-                    elif gpu_memory_gb >= 35:  # A100 40GB or similar
-                        self.memory_threshold = gpu_memory_gb * 0.7
-                        self.batch_size = 256_000
-                        self.logger.info("Configured for medium-memory GPU (A100 or similar)")
-                    elif gpu_memory_gb >= 10:  # Consumer GPUs or smaller workstation cards
-                        self.memory_threshold = gpu_memory_gb * 0.6
+                    
+                    # Set appropriate batch size for H100
+                    if gpu_memory_gb >= 70:  # H100
+                        self.batch_size = 128_000  # Conservative for H100
+                        self.memory_threshold = 60.0  # 75% of 80GB
+                    elif gpu_memory_gb >= 35:  # A100
                         self.batch_size = 64_000
-                        self.logger.info("Configured for standard GPU")
-                    else:  # Low memory GPUs
-                        self.memory_threshold = gpu_memory_gb * 0.5
+                        self.memory_threshold = 30.0
+                    else:
                         self.batch_size = 32_000
-                        self.logger.info("Configured for low-memory GPU")
+                        self.memory_threshold = gpu_memory_gb * 0.7
+                    
+                    # If using multiple GPUs, increase batch size
+                    if len(gpus) > 1:
+                        self.batch_size *= len(gpus)
+                        self.logger.info(f"Multiple GPUs detected, adjusted batch size to: {self.batch_size}")
+                    
+                    self.logger.info(f"Configured batch size for GPU type: {self.batch_size}")
+                    
                 except Exception as e:
-                    self.logger.warning(f"Could not get GPU memory info: {e}")
-                    # Conservative defaults for unknown GPU
-                    self.memory_threshold = 4.0
-                    self.batch_size = 16_000
+                    self.logger.warning(f"GPU memory detection failed: {e}")
+                    self.batch_size = 32_000
+                    self.memory_threshold = 16.0
             else:
                 # CPU-only configuration
-                if system_memory_gb >= 128:
-                    self.batch_size = 32_000
-                elif system_memory_gb >= 64:
-                    self.batch_size = 16_000
-                elif system_memory_gb >= 32:
-                    self.batch_size = 8_000
-                else:
-                    self.batch_size = 4_000
+                self.batch_size = 16_000
+                self.memory_threshold = system_memory_gb * 0.3
                 
-                self.memory_threshold = system_memory_gb * 0.3  # 30% of system memory
-                self.logger.info("Configured for CPU-only operation")
-
-            # Safety check for batch size
+            # Final safety check
             self.batch_size = self._check_batch_size_safety(self.batch_size)
-            self.logger.info(f"Final batch size set to: {self.batch_size}")
-            self.logger.info(f"Memory threshold set to: {self.memory_threshold:.1f} GB")
-
+            self.logger.info(f"Final configuration:")
+            self.logger.info(f"- Batch size: {self.batch_size}")
+            self.logger.info(f"- Memory threshold: {self.memory_threshold:.1f} GB")
+            
         except Exception as e:
-            self.logger.warning(f"Error during hardware initialization: {e}")
-            # Fallback to very conservative values
-            self.memory_threshold = 2.0
-            self.batch_size = 4_000
-            self.logger.info("Using fallback conservative configuration")
+            self.logger.warning(f"Hardware initialization error: {e}")
+            # Conservative fallback values
+            self.batch_size = 16_000
+            self.memory_threshold = 16.0
 
     def validate_consistency(self, f):
         """
@@ -845,45 +853,42 @@ class MIMODatasetGenerator:
     # In mimo_dataset_generator.py, enhance memory management:
     def _manage_memory(self):
         """
-        Adaptive memory management for varying hardware configurations
+        Enhanced memory management for H100 GPUs
         """
         try:
             gpus = tf.config.list_physical_devices('GPU')
             if gpus:
-                # Monitor GPU memory
                 for gpu_idx, gpu in enumerate(gpus):
                     try:
+                        # Clear GPU cache first
+                        tf.keras.backend.clear_session()
+                        
+                        # Get memory info
                         memory_info = tf.config.experimental.get_memory_info(f'GPU:{gpu_idx}')
                         current_usage = memory_info['current'] / 1e9
                         
                         self.logger.info(f"GPU:{gpu_idx} memory usage: {current_usage:.2f} GB")
                         
-                        # Reduce batch size if memory usage is too high
+                        # Adjust batch size if memory usage is too high
                         if current_usage > self.memory_threshold:
-                            self.batch_size = max(1000, self.batch_size // 2)
-                            self.logger.warning(f"Reducing batch size to {self.batch_size}")
-                    except Exception as gpu_error:
-                        self.logger.warning(f"Error monitoring GPU:{gpu_idx} - {str(gpu_error)}")
-            else:
-                # Monitor system memory for CPU operation
-                memory_usage = psutil.virtual_memory().percent
-                if memory_usage > 85:  # If system memory usage is above 85%
-                    self.batch_size = max(1000, self.batch_size // 2)
-                    self.logger.warning(
-                        f"High system memory usage ({memory_usage}%). "
-                        f"Reducing batch size to {self.batch_size}"
-                    )
-            
-            # Periodic cleanup
-            if hasattr(self, '_batch_counter'):
-                self._batch_counter += 1
-                if self._batch_counter % 10 == 0:
-                    tf.keras.backend.clear_session()
+                            old_batch_size = self.batch_size
+                            self.batch_size = max(16_000, self.batch_size // 2)
+                            self.logger.warning(
+                                f"High memory usage on GPU:{gpu_idx}. "
+                                f"Reducing batch size from {old_batch_size} to {self.batch_size}"
+                            )
+                    except Exception as e:
+                        self.logger.warning(f"Error monitoring GPU:{gpu_idx} - {str(e)}")
+                
+                # Force garbage collection every few iterations
+                if not hasattr(self, '_gc_counter'):
+                    self._gc_counter = 0
+                self._gc_counter += 1
+                
+                if self._gc_counter % 5 == 0:  # Every 5 iterations
                     import gc
                     gc.collect()
-            else:
-                self._batch_counter = 0
-                
+                    
         except Exception as e:
             self.logger.error(f"Memory management failed: {str(e)}")
 
