@@ -128,64 +128,63 @@ class MIMODatasetGenerator:
 
     def _initialize_hardware_parameters(self):
         """
-        Initialize parameters with conservative memory management
+        Initialize parameters for VM environment with GPU passthrough
         """
         try:
-            # Get system memory info
             if PSUTIL_AVAILABLE:
                 system_memory_gb = psutil.virtual_memory().total / (1024**3)
                 self.logger.info(f"Total System Memory: {system_memory_gb:.1f} GB")
             else:
-                system_memory_gb = 64.0  # Default assumption
-                
-            # GPU detection and configuration
+                system_memory_gb = 64.0
+            
             gpus = tf.config.list_physical_devices('GPU')
             if gpus:
-                # Start with very conservative batch sizes
-                self.batch_size = 2_000
-                self.memory_threshold = 40.0  # Conservative threshold
-                self.max_batch_size = 16_000  # Lower maximum
-                self.min_batch_size = 1_000
+                # VM-specific conservative settings
+                self.batch_size = 1_000  # Start very small for VM
+                self.memory_threshold = 16.0  # Conservative for VM
+                self.max_batch_size = 4_000  # Limited maximum
+                self.min_batch_size = 500
                 
-                # Memory tracking
+                # Simple growth parameters for VM
                 self.current_memory_usage = 0.0
                 self.stable_iterations = 0
-                self.growth_step = 1.2  # Smaller growth factor
+                self.growth_step = 1.2
                 
-                # Configure memory growth
+                # Basic GPU configuration
                 for gpu in gpus:
                     try:
                         tf.config.experimental.set_memory_growth(gpu, True)
                     except RuntimeError as e:
                         self.logger.warning(f"Memory growth setting failed for {gpu}: {e}")
                 
-                # If multiple GPUs, adjust conservatively
+                # Simple multi-GPU handling
                 if len(gpus) > 1:
                     self.batch_size *= 1.5
                     self.max_batch_size *= 1.5
                     self.logger.info(f"Multiple GPUs detected, adjusted batch size to: {self.batch_size}")
-                
-                self.logger.info(f"GPU configuration complete. Initial batch size: {self.batch_size}")
-                
             else:
-                # CPU-only configuration
-                self.batch_size = 1_000
-                self.memory_threshold = system_memory_gb * 0.3
-                self.max_batch_size = 8_000
-                self.min_batch_size = 500
+                # CPU fallback
+                self.batch_size = 500
+                self.memory_threshold = system_memory_gb * 0.2
+                self.max_batch_size = 2_000
+                self.min_batch_size = 250
             
-            # Final configuration logging
-            self.logger.info("Final configuration:")
+            # Initial cleanup
+            tf.keras.backend.clear_session()
+            import gc
+            gc.collect()
+            
+            self.logger.info("VM Configuration:")
             self.logger.info(f"- Batch size: {self.batch_size}")
             self.logger.info(f"- Memory threshold: {self.memory_threshold:.1f} GB")
             
         except Exception as e:
             self.logger.warning(f"Hardware initialization error: {e}")
             # Very conservative fallback
-            self.batch_size = 1_000
-            self.memory_threshold = 8.0
-            self.max_batch_size = 4_000
-            self.min_batch_size = 500
+            self.batch_size = 500
+            self.memory_threshold = 4.0
+            self.max_batch_size = 2_000
+            self.min_batch_size = 250
 
     def validate_consistency(self, f):
         """
@@ -763,28 +762,22 @@ class MIMODatasetGenerator:
 
     def safe_memory_growth(self):
         """
-        Implement safe memory growth strategy
+        Simplified memory growth for VM environment
         """
         try:
-            # Get current memory usage
-            memory_info = tf.config.experimental.get_memory_info('GPU:0')
-            current_usage = memory_info['current'] / 1e9
-            
-            # Update tracking
-            self.current_memory_usage = current_usage
-            
-            # If memory usage is stable and low, consider increasing batch size
-            if current_usage < self.memory_threshold * 0.7:  # Using less than 70% of threshold
+            if hasattr(self, 'stable_iterations'):
                 self.stable_iterations += 1
-                if self.stable_iterations >= 5:  # Wait for 5 successful iterations
-                    potential_batch_size = int(self.batch_size * self.growth_step)
-                    if potential_batch_size <= self.max_batch_size:
-                        self.batch_size = potential_batch_size
-                        self.logger.info(f"Increasing batch size to {self.batch_size}")
-                    self.stable_iterations = 0
-            else:
-                self.stable_iterations = 0
                 
+                if self.stable_iterations >= 10:
+                    current_batch = self.batch_size
+                    potential_batch = min(int(current_batch * 1.2), self.max_batch_size)
+                    
+                    if potential_batch > current_batch:
+                        self.batch_size = potential_batch
+                        self.logger.info(f"Increasing batch size to {self.batch_size}")
+                        
+                    self.stable_iterations = 0
+                    
         except Exception as e:
             self.logger.warning(f"Memory growth check failed: {e}")
 
