@@ -16,6 +16,11 @@ import h5py
 import tensorflow as tf
 from typing import Dict
 
+# Set environment variables for GPU memory management
+os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
+os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+os.environ['TF_MEMORY_ALLOCATION'] = '0.7'  # Use 70% of available memory
+
 os.makedirs('logs', exist_ok=True)
 def configure_device():
     """Configure and detect available processing device"""
@@ -26,11 +31,23 @@ def configure_device():
             try:
                 # Configure all available GPUs
                 for gpu in gpus:
+                    # Enable memory growth
                     tf.config.experimental.set_memory_growth(gpu, True)
+                    
+                    # Set memory limit (70% of available memory)
+                    memory_limit = int(11*1024*0.7)  # Set to 70% of memory in MB
+                    tf.config.set_logical_device_configuration(
+                        gpu,
+                        [tf.config.LogicalDeviceConfiguration(memory_limit=memory_limit)]
+                    )
+                    
                 print(f"Found {len(gpus)} GPU(s). Using GPU for processing.")
-                # For multiple GPUs, you might want to use tf.distribute.MirroredStrategy
+                
+                # For multiple GPUs, use MirroredStrategy with custom cross device ops
                 if len(gpus) > 1:
-                    strategy = tf.distribute.MirroredStrategy()
+                    strategy = tf.distribute.MirroredStrategy(
+                        cross_device_ops=tf.distribute.HierarchicalCopyAllReduce()
+                    )
                     print(f"Using {len(gpus)} GPUs with MirroredStrategy")
                     return strategy
                 return True

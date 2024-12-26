@@ -128,7 +128,7 @@ class MIMODatasetGenerator:
 
     def _initialize_hardware_parameters(self):
         """
-        Initialize parameters based on available hardware resources
+        Initialize parameters with conservative memory management
         """
         try:
             # Get system memory info
@@ -141,50 +141,51 @@ class MIMODatasetGenerator:
             # GPU detection and configuration
             gpus = tf.config.list_physical_devices('GPU')
             if gpus:
-                # Configure memory growth for each GPU
+                # Start with very conservative batch sizes
+                self.batch_size = 2_000
+                self.memory_threshold = 40.0  # Conservative threshold
+                self.max_batch_size = 16_000  # Lower maximum
+                self.min_batch_size = 1_000
+                
+                # Memory tracking
+                self.current_memory_usage = 0.0
+                self.stable_iterations = 0
+                self.growth_step = 1.2  # Smaller growth factor
+                
+                # Configure memory growth
                 for gpu in gpus:
                     try:
                         tf.config.experimental.set_memory_growth(gpu, True)
                     except RuntimeError as e:
                         self.logger.warning(f"Memory growth setting failed for {gpu}: {e}")
-
-                # Safe initial values
-                self.batch_size = 8_000
-                self.memory_threshold = 60.0  # Conservative for H100
-                self.max_batch_size = 128_000  # Maximum allowed batch size
-                self.min_batch_size = 4_000   # Minimum allowed batch size
                 
-                # Initialize memory growth tracking
-                self.current_memory_usage = 0.0
-                self.stable_iterations = 0
-                self.growth_step = 1.5  # Growth factor
-                
-                # If using multiple GPUs, adjust batch size
+                # If multiple GPUs, adjust conservatively
                 if len(gpus) > 1:
-                    self.batch_size *= 2
-                    self.max_batch_size *= 2
-                    self.logger.info(f"Multiple GPUs detected, adjusted initial batch size to: {self.batch_size}")
-                    
+                    self.batch_size *= 1.5
+                    self.max_batch_size *= 1.5
+                    self.logger.info(f"Multiple GPUs detected, adjusted batch size to: {self.batch_size}")
+                
                 self.logger.info(f"GPU configuration complete. Initial batch size: {self.batch_size}")
                 
             else:
                 # CPU-only configuration
-                self.batch_size = 4_000
+                self.batch_size = 1_000
                 self.memory_threshold = system_memory_gb * 0.3
-                self.max_batch_size = 16_000
-                self.min_batch_size = 2_000
-                
+                self.max_batch_size = 8_000
+                self.min_batch_size = 500
+            
+            # Final configuration logging
             self.logger.info("Final configuration:")
             self.logger.info(f"- Batch size: {self.batch_size}")
             self.logger.info(f"- Memory threshold: {self.memory_threshold:.1f} GB")
-                
+            
         except Exception as e:
             self.logger.warning(f"Hardware initialization error: {e}")
-            # Conservative fallback values
-            self.batch_size = 4_000
-            self.memory_threshold = 16.0
-            self.max_batch_size = 16_000
-            self.min_batch_size = 2_000
+            # Very conservative fallback
+            self.batch_size = 1_000
+            self.memory_threshold = 8.0
+            self.max_batch_size = 4_000
+            self.min_batch_size = 500
 
     def validate_consistency(self, f):
         """
