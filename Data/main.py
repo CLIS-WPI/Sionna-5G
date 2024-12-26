@@ -16,41 +16,44 @@ import h5py
 import tensorflow as tf
 from typing import Dict
 
-# Set environment variables for GPU memory management
-os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
-os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
-os.environ['TF_MEMORY_ALLOCATION'] = '0.7'  # Use 70% of available memory
+# Add at the top of your main.py after imports
 
-os.makedirs('logs', exist_ok=True)
+# Set extremely conservative CUDA memory settings
+os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+os.environ['TF_MEMORY_ALLOCATION'] = '0.3'  # Only use 30% of memory
+os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '0.3'
+
 def configure_device():
     """Configure and detect available processing device"""
     try:
-        # Check for GPU availability
         gpus = tf.config.list_physical_devices('GPU')
         if gpus:
             try:
-                # Configure all available GPUs
                 for gpu in gpus:
                     # Enable memory growth
                     tf.config.experimental.set_memory_growth(gpu, True)
                     
-                    # Set memory limit (70% of available memory)
-                    memory_limit = int(11*1024*0.7)  # Set to 70% of memory in MB
+                    # Set very conservative memory limit (30% of available memory)
+                    memory_limit = int(11*1024*0.3)  # Set to 30% of memory in MB
                     tf.config.set_logical_device_configuration(
                         gpu,
                         [tf.config.LogicalDeviceConfiguration(memory_limit=memory_limit)]
                     )
-                    
+                
                 print(f"Found {len(gpus)} GPU(s). Using GPU for processing.")
                 
-                # For multiple GPUs, use MirroredStrategy with custom cross device ops
                 if len(gpus) > 1:
-                    strategy = tf.distribute.MirroredStrategy(
+                    # Use more conservative strategy for multiple GPUs
+                    options = tf.distribute.MirroredStrategyOptions(
                         cross_device_ops=tf.distribute.HierarchicalCopyAllReduce()
                     )
+                    strategy = tf.distribute.MirroredStrategy(options=options)
                     print(f"Using {len(gpus)} GPUs with MirroredStrategy")
                     return strategy
                 return True
+                
             except RuntimeError as e:
                 print(f"GPU configuration error: {e}")
                 print("Falling back to CPU")
@@ -58,6 +61,7 @@ def configure_device():
         else:
             print("No GPU found. Using CPU for processing")
             return False
+            
     except Exception as e:
         print(f"Error during device configuration: {e}")
         return False
