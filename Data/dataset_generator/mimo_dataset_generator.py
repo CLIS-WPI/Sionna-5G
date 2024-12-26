@@ -853,44 +853,52 @@ class MIMODatasetGenerator:
     # In mimo_dataset_generator.py, enhance memory management:
     def _manage_memory(self):
         """
-        Enhanced memory management for H100 GPUs
+        Enhanced memory management with gradual growth and safety checks
         """
         try:
-            gpus = tf.config.list_physical_devices('GPU')
-            if gpus:
-                for gpu_idx, gpu in enumerate(gpus):
-                    try:
-                        # Clear GPU cache first
-                        tf.keras.backend.clear_session()
-                        
-                        # Get memory info
-                        memory_info = tf.config.experimental.get_memory_info(f'GPU:{gpu_idx}')
-                        current_usage = memory_info['current'] / 1e9
-                        
-                        self.logger.info(f"GPU:{gpu_idx} memory usage: {current_usage:.2f} GB")
-                        
-                        # Adjust batch size if memory usage is too high
-                        if current_usage > self.memory_threshold:
-                            old_batch_size = self.batch_size
-                            self.batch_size = max(16_000, self.batch_size // 2)
-                            self.logger.warning(
-                                f"High memory usage on GPU:{gpu_idx}. "
-                                f"Reducing batch size from {old_batch_size} to {self.batch_size}"
-                            )
-                    except Exception as e:
-                        self.logger.warning(f"Error monitoring GPU:{gpu_idx} - {str(e)}")
-                
-                # Force garbage collection every few iterations
-                if not hasattr(self, '_gc_counter'):
-                    self._gc_counter = 0
-                self._gc_counter += 1
-                
-                if self._gc_counter % 5 == 0:  # Every 5 iterations
-                    import gc
-                    gc.collect()
+            # Clean up first
+            tf.keras.backend.clear_session()
+            
+            for gpu_idx in range(len(tf.config.list_physical_devices('GPU'))):
+                try:
+                    memory_info = tf.config.experimental.get_memory_info(f'GPU:{gpu_idx}')
+                    current_usage = memory_info['current'] / 1e9
+                    self.logger.info(f"GPU:{gpu_idx} memory usage: {current_usage:.2f} GB")
                     
+                    if current_usage > self.memory_threshold:
+                        # Aggressive cleanup
+                        tf.keras.backend.clear_session()
+                        import gc
+                        gc.collect()
+                        
+                        # Reduce batch size more conservatively for H100
+                        if self.is_h100:
+                            reduction_factor = 1.5
+                        else:
+                            reduction_factor = 2
+                            
+                        new_batch_size = max(8_000, int(self.batch_size / reduction_factor))
+                        if new_batch_size != self.batch_size:
+                            self.logger.warning(
+                                f"High memory usage on GPU:{gpu_idx} ({current_usage:.1f} GB). "
+                                f"Reducing batch size from {self.batch_size} to {new_batch_size}"
+                            )
+                            self.batch_size = new_batch_size
+                            
+                        # Wait for cleanup to take effect
+                        import time
+                        time.sleep(1)
+                        
+                except Exception as e:
+                    self.logger.warning(f"Error monitoring GPU:{gpu_idx} - {str(e)}")
+            
+            # Try to grow batch size if memory usage is low
+            self.safe_memory_growth()
+            
         except Exception as e:
             self.logger.error(f"Memory management failed: {str(e)}")
+            # Fall back to conservative batch size
+            self.batch_size = 8_000
 
 
     def _check_memory_requirements(self, batch_size: int) -> bool:
