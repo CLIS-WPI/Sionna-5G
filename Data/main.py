@@ -26,42 +26,23 @@ os.environ['TF_MEMORY_ALLOCATION'] = '0.3'  # Only use 30% of memory
 os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '0.3'
 
 def configure_device():
-    """Configure and detect available processing device"""
     try:
         gpus = tf.config.list_physical_devices('GPU')
         if gpus:
-            try:
-                for gpu in gpus:
-                    # Enable memory growth
-                    tf.config.experimental.set_memory_growth(gpu, True)
-                    
-                    # Set very conservative memory limit (30% of available memory)
-                    memory_limit = int(11*1024*0.3)  # Set to 30% of memory in MB
-                    tf.config.set_logical_device_configuration(
-                        gpu,
-                        [tf.config.LogicalDeviceConfiguration(memory_limit=memory_limit)]
-                    )
+            for gpu in gpus:
+                # Memory growth must be set before GPUs have been initialized
+                tf.config.experimental.set_memory_growth(gpu, True)
                 
-                print(f"Found {len(gpus)} GPU(s). Using GPU for processing.")
-                
-                if len(gpus) > 1:
-                    # Use more conservative strategy for multiple GPUs
-                    options = tf.distribute.MirroredStrategyOptions(
-                        cross_device_ops=tf.distribute.HierarchicalCopyAllReduce()
-                    )
-                    strategy = tf.distribute.MirroredStrategy(options=options)
-                    print(f"Using {len(gpus)} GPUs with MirroredStrategy")
-                    return strategy
-                return True
-                
-            except RuntimeError as e:
-                print(f"GPU configuration error: {e}")
-                print("Falling back to CPU")
-                return False
-        else:
-            print("No GPU found. Using CPU for processing")
-            return False
+            # Use mirrored strategy without custom options
+            if len(gpus) > 1:
+                strategy = tf.distribute.MirroredStrategy()
+                print(f"Using {len(gpus)} GPUs with MirroredStrategy")
+                return strategy
+            return True
             
+        print("No GPU found. Using CPU for processing")
+        return False
+        
     except Exception as e:
         print(f"Error during device configuration: {e}")
         return False
@@ -184,6 +165,7 @@ def main():
         
         # Configure system parameters
         system_params = configure_system_parameters(args)
+        system_params.replay_buffer_size = min(system_params.replay_buffer_size, 1000000)  # More conservative buffer
         
         # Generate output path
         output_path = generate_output_path(args.output)

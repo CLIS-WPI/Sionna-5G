@@ -244,30 +244,38 @@ class ChannelModelManager:
 
     def calculate_spectral_efficiency(self, channel_response: tf.Tensor, snr_db: tf.Tensor) -> tf.Tensor:
         """
-        Calculate spectral efficiency using the channel capacity formula
+        Calculate spectral efficiency using the channel capacity formula with enhanced memory management
         """
         try:
-            # Convert SNR to linear scale
-            snr_linear = tf.pow(10.0, snr_db/10.0)
+            # Ensure tensors are in float32 format
+            channel_response = tf.cast(channel_response, tf.complex64)
+            snr_db = tf.cast(snr_db, tf.float32)
+            
+            # Convert SNR to linear scale with safe casting
+            snr_linear = tf.exp(tf.math.log(10.0) * snr_db / 10.0)
             snr_linear = tf.reshape(snr_linear, [-1, 1, 1])
             
-            # Calculate channel correlation matrix
+            # Calculate channel correlation matrix with controlled memory
             h_hermitian = tf.matmul(
                 channel_response, 
                 tf.transpose(channel_response, perm=[0, 2, 1], conjugate=True)
             )
             
-            # Calculate eigenvalues
-            eigenvalues = tf.abs(tf.linalg.eigvals(h_hermitian))
+            # Calculate eigenvalues with safe computation
+            eigenvalues = tf.cast(tf.abs(tf.linalg.eigvals(h_hermitian)), tf.float32)
             
-            # Calculate capacity using eigenvalues
+            # Calculate capacity using eigenvalues with numerical stability
             capacity = tf.reduce_sum(
-                tf.math.log(1.0 + snr_linear * eigenvalues) / tf.math.log(2.0),
+                tf.math.log1p(snr_linear * eigenvalues) / tf.math.log(2.0),
                 axis=1
             )
             
-            # Convert to spectral efficiency (bits/s/Hz)
-            spectral_efficiency = capacity / self.system_params.num_tx
+            # Convert to spectral efficiency with bounds checking
+            spectral_efficiency = tf.clip_by_value(
+                capacity / tf.cast(self.system_params.num_tx, tf.float32),
+                0.0,
+                1000.0  # reasonable upper bound
+            )
             
             return spectral_efficiency
             
