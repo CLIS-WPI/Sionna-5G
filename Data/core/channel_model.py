@@ -244,10 +244,10 @@ class ChannelModelManager:
 
     def calculate_spectral_efficiency(self, channel_response: tf.Tensor, snr_db: tf.Tensor) -> tf.Tensor:
         """
-        Calculate spectral efficiency using the channel capacity formula with enhanced memory management
+        Calculate spectral efficiency with improved memory handling
         """
         try:
-            # Ensure tensors are in float32 format
+            # Ensure tensors are on the same device and have correct dtype
             channel_response = tf.cast(channel_response, tf.complex64)
             snr_db = tf.cast(snr_db, tf.float32)
             
@@ -255,26 +255,45 @@ class ChannelModelManager:
             snr_linear = tf.exp(tf.math.log(10.0) * snr_db / 10.0)
             snr_linear = tf.reshape(snr_linear, [-1, 1, 1])
             
-            # Calculate channel correlation matrix with controlled memory
-            h_hermitian = tf.matmul(
-                channel_response, 
-                tf.transpose(channel_response, perm=[0, 2, 1], conjugate=True)
-            )
+            # Calculate channel correlation matrix in chunks if needed
+            batch_size = tf.shape(channel_response)[0]
+            max_chunk_size = 1000  # Adjust based on your GPU memory
             
-            # Calculate eigenvalues with safe computation
-            eigenvalues = tf.cast(tf.abs(tf.linalg.eigvals(h_hermitian)), tf.float32)
+            spectral_efficiency_list = []
             
-            # Calculate capacity using eigenvalues with numerical stability
-            capacity = tf.reduce_sum(
-                tf.math.log1p(snr_linear * eigenvalues) / tf.math.log(2.0),
-                axis=1
-            )
+            for i in range(0, batch_size, max_chunk_size):
+                end_idx = tf.minimum(i + max_chunk_size, batch_size)
+                chunk_channel = channel_response[i:end_idx]
+                chunk_snr = snr_linear[i:end_idx]
+                
+                # Calculate correlation matrix for chunk
+                h_hermitian = tf.matmul(
+                    chunk_channel,
+                    tf.transpose(chunk_channel, perm=[0, 2, 1], conjugate=True)
+                )
+                
+                # Calculate eigenvalues safely
+                eigenvalues = tf.cast(
+                    tf.abs(tf.linalg.eigvals(h_hermitian)),
+                    tf.float32
+                )
+                
+                # Calculate capacity for chunk
+                chunk_capacity = tf.reduce_sum(
+                    tf.math.log1p(chunk_snr * eigenvalues) / tf.math.log(2.0),
+                    axis=1
+                )
+                
+                spectral_efficiency_list.append(chunk_capacity)
             
-            # Convert to spectral efficiency with bounds checking
+            # Combine results
+            spectral_efficiency = tf.concat(spectral_efficiency_list, axis=0)
+            
+            # Normalize and clip values
             spectral_efficiency = tf.clip_by_value(
-                capacity / tf.cast(self.system_params.num_tx, tf.float32),
+                spectral_efficiency / tf.cast(self.system_params.num_tx, tf.float32),
                 0.0,
-                1000.0  # reasonable upper bound
+                1000.0
             )
             
             return spectral_efficiency

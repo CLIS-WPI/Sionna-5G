@@ -65,18 +65,6 @@ class SystemParameters:
         # Set global seeds
         self.set_global_seeds()
 
-                # Add memory constraints
-        if tf.config.list_physical_devices('GPU'):
-            try:
-                for gpu in tf.config.list_physical_devices('GPU'):
-                    tf.config.experimental.set_memory_growth(gpu, True)
-                    memory_limit = int(11*1024*self.max_memory_fraction)  # MB
-                    tf.config.set_logical_device_configuration(
-                        gpu,
-                        [tf.config.LogicalDeviceConfiguration(memory_limit=memory_limit)]
-                    )
-            except Exception as e:
-                logging.warning(f"Could not set GPU memory constraints: {e}")
 
     def __init__(
         self, 

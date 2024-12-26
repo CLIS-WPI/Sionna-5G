@@ -18,26 +18,46 @@ from typing import Dict
 
 # Add at the top of your main.py after imports
 
+# At the very top of main.py, after imports
+import os
 # Set extremely conservative CUDA memory settings
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
-os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-os.environ['TF_MEMORY_ALLOCATION'] = '0.3'  # Only use 30% of memory
-os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '0.3'
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'  # Add this for synchronous execution
+os.environ['TF_MEMORY_ALLOCATION'] = '0.3'  # Only use 30% of memory instead of 80%
+os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '0.3'  # Add this for XLA memory control
 
 def configure_device():
+    """
+    Configure GPU devices with conservative memory settings
+    """
     try:
+        # Clear any existing GPU configurations
+        tf.keras.backend.clear_session()
+        
         gpus = tf.config.list_physical_devices('GPU')
         if gpus:
+            # Configure each GPU
             for gpu in gpus:
-                # Memory growth must be set before GPUs have been initialized
-                tf.config.experimental.set_memory_growth(gpu, True)
-                
-            # Use mirrored strategy without custom options
-            if len(gpus) > 1:
-                strategy = tf.distribute.MirroredStrategy()
-                print(f"Using {len(gpus)} GPUs with MirroredStrategy")
-                return strategy
+                try:
+                    # Reset any existing configuration
+                    tf.config.experimental.set_virtual_device_configuration(gpu, [])
+                    
+                    # Set memory growth
+                    tf.config.experimental.set_memory_growth(gpu, True)
+                    
+                    # Set memory limit to 30% of GPU memory
+                    memory_limit = int(11*1024*0.3)  # 30% of typical GPU memory in MB
+                    tf.config.set_logical_device_configuration(
+                        gpu,
+                        [tf.config.LogicalDeviceConfiguration(memory_limit=memory_limit)]
+                    )
+                    
+                except RuntimeError as e:
+                    print(f"GPU configuration error for {gpu}: {e}")
+                    continue
+            
+            print(f"Found {len(gpus)} GPU(s). Using GPU for processing.")
             return True
             
         print("No GPU found. Using CPU for processing")
@@ -150,9 +170,12 @@ def generate_output_path(base_path=None):
 
 def main():
     """
-    Main entry point for MIMO dataset generation
+    Main entry point for MIMO dataset generation with enhanced GPU and memory management
     """
     try:
+        # Clear any existing GPU memory allocations
+        tf.keras.backend.clear_session()
+        
         # Parse command-line arguments
         args = parse_arguments()
         
@@ -163,9 +186,33 @@ def main():
             log_format='%(asctime)s - %(name)s - %(levelname)s - %(message)s - [%(filename)s:%(lineno)d]'
         )
         
-        # Configure system parameters
+        # Configure GPU with memory growth and conservative settings
+        gpus = tf.config.list_physical_devices('GPU')
+        if gpus:
+            try:
+                for gpu in gpus:
+                    # Reset any existing configuration
+                    tf.config.experimental.set_virtual_device_configuration(gpu, [])
+                    # Set memory growth
+                    tf.config.experimental.set_memory_growth(gpu, True)
+                    # Set memory limit to 30% of GPU memory
+                    memory_limit = int(11*1024*0.3)  # 30% of typical GPU memory in MB
+                    tf.config.set_logical_device_configuration(
+                        gpu,
+                        [tf.config.LogicalDeviceConfiguration(memory_limit=memory_limit)]
+                    )
+                logger.info(f"Successfully configured {len(gpus)} GPU(s)")
+            except RuntimeError as e:
+                logger.error(f"GPU configuration error: {e}")
+                return 1
+        
+        # Configure system parameters with conservative memory settings
         system_params = configure_system_parameters(args)
-        system_params.replay_buffer_size = min(system_params.replay_buffer_size, 1000000)  # More conservative buffer
+        system_params.replay_buffer_size = min(system_params.replay_buffer_size, 100000)  # Even more conservative buffer
+        
+        # Set conservative batch size if not specified
+        if args.batch_size is None:
+            args.batch_size = 1000  # Start with a very conservative batch size
         
         # Generate output path
         output_path = generate_output_path(args.output)
@@ -178,10 +225,12 @@ def main():
         logger.info(f"RX Antennas: {system_params.num_rx}")
         logger.info(f"Output path: {output_path}")
         logger.info(f"Verification enabled: {args.verify}")
+        logger.info(f"Batch size: {args.batch_size}")
 
-        # Configure device before creating generator
+        # Configure device with enhanced error handling
         device_config = configure_device()
         logger.info("Device configuration completed")
+        
         if isinstance(device_config, tf.distribute.Strategy):
             logger.info("Using distributed strategy with multiple GPUs")
         elif device_config:
@@ -189,22 +238,35 @@ def main():
         else:
             logger.info("Using CPU")
         
-        # Add GPU memory info if available
+        # Monitor GPU memory with enhanced error handling
         if tf.config.list_physical_devices('GPU'):
             try:
                 memory_info = tf.config.experimental.get_memory_info('GPU:0')
-                logger.info(f"GPU memory usage: {memory_info['current'] / 1e9:.2f} GB")
-            except:
-                logger.info("GPU memory information not available")
+                logger.info(f"Initial GPU memory usage: {memory_info['current'] / 1e9:.2f} GB")
+                
+                # Add memory monitoring callback
+                def memory_monitoring_callback():
+                    try:
+                        current_memory = tf.config.experimental.get_memory_info('GPU:0')['current'] / 1e9
+                        if current_memory > 0.8:  # If using more than 80% memory
+                            logger.warning(f"High GPU memory usage detected: {current_memory:.2f} GB")
+                    except:
+                        pass
+                
+            except Exception as e:
+                logger.warning(f"GPU memory monitoring not available: {e}")
 
-        # Create and configure dataset generator
+        # Create and configure dataset generator with memory cleanup
         logger.debug("Initializing dataset generator...")
+        import gc
+        gc.collect()  # Force garbage collection before creating generator
+        
         generator = MIMODatasetGenerator(
             system_params=system_params,
             logger=logger
         )
         
-        # Generate dataset
+        # Generate dataset with enhanced error handling
         logger.info("Starting dataset generation...")
         try:
             generator.generate_dataset(
@@ -213,23 +275,30 @@ def main():
             )
             logger.info("Dataset generation completed")
             
-            # Check if the file exists and has content
+            # Verify output file
             if os.path.exists(output_path):
                 file_size = os.path.getsize(output_path)
-                logger.info(f"Generated file size: {file_size} bytes")
+                logger.info(f"Generated file size: {file_size / (1024*1024):.2f} MB")
                 if file_size == 0:
                     raise ValueError("Generated dataset file is empty")
             else:
                 raise FileNotFoundError("Dataset file was not created")
+                
+        except tf.errors.ResourceExhaustedError:
+            logger.error("GPU memory exhausted. Try reducing batch size or total samples.")
+            return 1
         except Exception as e:
             logger.error(f"Dataset generation failed: {str(e)}", exc_info=True)
             return 1
 
-        # Verification section
+        # Verification section with enhanced memory management
         if args.verify:
             logger.info("Starting dataset verification...")
             try:
-                # Check if file exists and is not empty
+                # Clear memory before verification
+                tf.keras.backend.clear_session()
+                gc.collect()
+                
                 if not os.path.exists(output_path):
                     logger.error("Dataset file does not exist")
                     return 1
@@ -239,10 +308,10 @@ def main():
                     logger.error("Dataset file is empty")
                     return 1
                     
-                logger.info(f"Dataset file size: {file_size} bytes")
+                logger.info(f"Dataset file size: {file_size / (1024*1024):.2f} MB")
                 
                 with MIMODatasetIntegrityChecker(output_path) as checker:
-                    # Log dataset structure
+                    # Log dataset structure with enhanced error handling
                     try:
                         with h5py.File(output_path, 'r') as f:
                             logger.debug("=== Dataset Structure ===")
