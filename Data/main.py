@@ -26,19 +26,24 @@ def configure_device():
     Configure GPU devices with conservative memory settings
     """
     try:
-        # Clear any existing GPU configurations
-        tf.keras.backend.clear_session()
-        
         gpus = tf.config.list_physical_devices('GPU')
         if gpus:
             try:
-                # Reset any existing configuration first
+                # First, reset any existing configurations
                 for gpu in gpus:
                     tf.config.experimental.set_virtual_device_configuration(gpu, [])
                 
-                # Now set memory growth
+                # Then set memory growth for each GPU
                 for gpu in gpus:
                     tf.config.experimental.set_memory_growth(gpu, True)
+                
+                # Finally, set memory limits if needed
+                for gpu in gpus:
+                    memory_limit = int(11*1024*0.3)  # Use 30% of GPU memory
+                    tf.config.set_logical_device_configuration(
+                        gpu,
+                        [tf.config.LogicalDeviceConfiguration(memory_limit=memory_limit)]
+                    )
                 
                 print(f"Found {len(gpus)} GPU(s). Using GPU for processing.")
                 return True
@@ -160,9 +165,7 @@ def main():
     Main entry point for MIMO dataset generation with enhanced GPU and memory management
     """
     try:
-        # Clear any existing GPU memory allocations
-        tf.keras.backend.clear_session()
-        
+
         # Configure device first, before any other GPU operations
         device_config = configure_device()
         if not device_config:
@@ -177,10 +180,18 @@ def main():
             log_file=f'logs/mimo_dataset_generation_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log',
             log_format='%(asctime)s - %(name)s - %(levelname)s - %(message)s - [%(filename)s:%(lineno)d]'
         )
+        # Clear any existing GPU memory allocations
+        logger.info("Clearing GPU memory and configuring device...")
+        tf.keras.backend.clear_session()
+        
+        # Configure device after logger is initialized
+        device_config = configure_device()
+        if not device_config:
+            logger.warning("GPU configuration failed, falling back to CPU")
         
         # Configure system parameters with conservative memory settings
         system_params = configure_system_parameters(args)
-        system_params.replay_buffer_size = min(system_params.replay_buffer_size, 100000)  # Even more conservative buffer
+        system_params.replay_buffer_size = min(system_params.replay_buffer_size, 100000)
         
         # Set conservative batch size if not specified
         if args.batch_size is None:
@@ -325,8 +336,15 @@ def main():
         return 0
 
     except Exception as e:
+        # Create a basic logger if the main logger hasn't been initialized
+        if 'logger' not in locals():
+            logger = logging.getLogger()
+            logger.setLevel(logging.ERROR)
+            handler = logging.StreamHandler()
+            logger.addHandler(handler)
+        
         logger.error(f"Critical error during execution: {str(e)}", exc_info=True)
         return 1
-
+    
 if __name__ == "__main__":
     sys.exit(main())
