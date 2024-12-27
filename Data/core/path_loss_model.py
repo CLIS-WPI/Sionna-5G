@@ -11,6 +11,7 @@ from typing import Optional, Tuple, Callable
 from config.system_parameters import SystemParameters
 from utill.tensor_shape_validator import assert_tensor_shape
 from utill.logging_config import LoggerManager
+import traceback
 
 class PathLossManager:
     """
@@ -193,95 +194,179 @@ class PathLossManager:
             self.logger.error(f"FSPL calculation failed: {str(e)}")
             raise
 
-    def calculate_path_loss(self, distance: tf.Tensor, scenario: str = 'umi') -> tf.Tensor:
+    def calculate_path_loss(
+        self,
+        distance: tf.Tensor,
+        scenario: str = 'umi',
+        path_loss_params: Optional[dict] = None
+    ) -> tf.Tensor:
         """
-        Calculate path loss for different scenarios with improved shape handling
+        Calculate path loss for different scenarios with enhanced validation, retry mechanisms, and detailed logging.
         
         Args:
-            distance (tf.Tensor): Distance between transmitter and receiver in meters
-            scenario (str): Path loss scenario ('umi' or 'uma')
-        
+            distance (tf.Tensor): Distance between transmitter and receiver in meters.
+            scenario (str): Path loss scenario ('umi' or 'uma').
+            path_loss_params (Optional[dict]): Optional override for default parameters.
+            
         Returns:
-            tf.Tensor: Path loss in dB with shape [batch_size]
+            tf.Tensor: Path loss in dB with shape [batch_size].
         """
         try:
-            # Input validation and reshaping
-            distance = tf.cast(distance, dtype=tf.float32)
-            distance = tf.reshape(distance, [-1])
-            batch_size = tf.shape(distance)[0]
-            
-            # Apply minimum distance constraint
-            min_distance = 1.0
-            distance = tf.maximum(distance, min_distance)
-            
-            # Set heights based on scenario
-            bs_height = 10.0 if scenario.lower() == 'umi' else 25.0
+            # Load default or override parameters
+            params = {
+                'min_distance': 1.0,
+                'max_distance': 5000.0,
+                'shadow_std_umi': 4.0,
+                'shadow_std_uma': 6.0,
+                'min_path_loss': 20.0,
+                'max_path_loss': 160.0,
+                'max_batch_size': 10000,  # New: Maximum batch size
+                'freq_scaling': 1.0,  # New: Frequency correction scaling
+                'validation_thresholds': {  # New: Thresholds for validation
+                    'min_valid_path_loss': 20.0,
+                    'max_valid_path_loss': 160.0
+                }
+            }
+            if path_loss_params:
+                params.update(path_loss_params)
+
+            # Validate scenario initialization
+            if not hasattr(self, 'umi_scenario') or not hasattr(self, 'uma_scenario'):
+                raise RuntimeError("Path loss scenarios are not properly initialized.")
+            if not hasattr(self, 'carrier_frequency') or self.carrier_frequency <= 0:
+                raise ValueError("Invalid or uninitialized carrier frequency.")
+
+            # Persistent RNG for shadow fading
+            if not hasattr(self, '_rng'):
+                self._rng = tf.random.Generator.from_seed(42)
+
+            # Input validation
+            if not isinstance(distance, tf.Tensor):
+                self.logger.warning(f"Converting distance input from {type(distance)} to TensorFlow tensor.")
+                distance = tf.convert_to_tensor(distance, dtype=tf.float32)
+
+            # Handle and reshape distances
+            original_shape = distance.shape
+            try:
+                distance = tf.cast(distance, dtype=tf.float32)
+                distance = tf.reshape(distance, [-1])
+                batch_size = tf.shape(distance)[0]
+
+                # Enforce maximum batch size
+                if batch_size > params['max_batch_size']:
+                    raise ValueError(f"Batch size {batch_size} exceeds maximum allowed size {params['max_batch_size']}.")
+                
+                self.logger.info(f"Processing batch size: {batch_size}, original shape: {original_shape}")
+            except Exception as e:
+                raise ValueError(f"Failed to process distance shape {original_shape}: {str(e)}")
+
+            # Distance range validation and clipping
+            original_distance = distance
+            distance = tf.clip_by_value(distance, params['min_distance'], params['max_distance'])
+
+            # Log clipped distances
+            clipped_mask = tf.not_equal(original_distance, distance)
+            num_clipped = tf.reduce_sum(tf.cast(clipped_mask, tf.int32))
+            if num_clipped > 0:
+                self.logger.warning(f"Total clipped distances: {num_clipped.numpy()}")
+                clipped_indices = tf.where(clipped_mask)[:5]
+                clipped_orig = tf.gather(original_distance, clipped_indices)
+                clipped_new = tf.gather(distance, clipped_indices)
+                self.logger.warning(
+                    f"Clipped distances (first 5 examples):\n" +
+                    "\n".join([f"Index {idx.numpy()[0]}: {orig.numpy():.2f}m -> {new.numpy():.2f}m" 
+                            for idx, orig, new in zip(clipped_indices, clipped_orig, clipped_new)])
+                )
+
+            # Scenario validation with fallback
+            scenario = scenario.lower()
+            if scenario not in ['umi', 'uma']:
+                self.logger.warning(f"Invalid scenario '{scenario}', defaulting to 'umi'.")
+                scenario = 'umi'
+
+            # Scenario-specific parameters
+            shadow_std = params['shadow_std_umi'] if scenario == 'umi' else params['shadow_std_uma']
+            bs_height = 10.0 if scenario == 'umi' else 25.0
             ut_height = 1.5
-            
+
             # Create location tensors
-            ut_locations = tf.stack([
-                distance,
-                tf.zeros_like(distance),
-                tf.ones_like(distance) * ut_height
-            ], axis=1)
-            ut_locations = tf.expand_dims(ut_locations, axis=0)
-            
-            bs_locations = tf.tile(
-                tf.constant([[[0., 0., bs_height]]], dtype=tf.float32),
-                [1, batch_size, 1]
-            )
-            
-            # Select appropriate scenario
-            scenario_obj = self.umi_scenario if scenario.lower() == 'umi' else self.uma_scenario
-            
-            # Create auxiliary tensors
+            ut_locations = tf.expand_dims(tf.stack([distance, tf.zeros_like(distance), tf.ones_like(distance) * ut_height], axis=1), axis=0)
+            bs_locations = tf.tile(tf.constant([[[0.0, 0.0, bs_height]]], dtype=tf.float32), [1, batch_size, 1])
+
+            # Validate tensor shapes
+            expected_shape = [1, batch_size, 3]
+            for tensor, name in [(ut_locations, 'UT'), (bs_locations, 'BS')]:
+                if tensor.shape.as_list()[1:] != expected_shape[1:]:
+                    raise ValueError(f"Invalid {name} locations shape: {tensor.shape} vs expected {expected_shape}")
+
+            # Auxiliary tensors
             zero_orientations = tf.zeros([1, batch_size, 3], dtype=tf.float32)
             zero_velocities = tf.zeros([1, batch_size, 3], dtype=tf.float32)
             indoor_state = tf.zeros([1, batch_size], dtype=tf.bool)
-            
-            # Debug logging
-            self.logger.debug(f"Shapes before set_topology:")
-            self.logger.debug(f"ut_locations: {ut_locations.shape}")
-            self.logger.debug(f"bs_locations: {bs_locations.shape}")
-            self.logger.debug(f"zero_orientations: {zero_orientations.shape}")
-            self.logger.debug(f"indoor_state: {indoor_state.shape}")
 
-            # Set topology
-            scenario_obj.set_topology(
-                ut_loc=ut_locations,
-                bs_loc=bs_locations,
-                in_state=indoor_state,
-                ut_orientations=zero_orientations,
-                bs_orientations=zero_orientations,
-                ut_velocities=zero_velocities
-            )
+            # Retry mechanism for topology setting
+            scenario_obj = self.umi_scenario if scenario == 'umi' else self.uma_scenario
+            max_retries = 3
+            for retry in range(max_retries):
+                try:
+                    scenario_obj.set_topology(
+                        ut_loc=ut_locations,
+                        bs_loc=bs_locations,
+                        in_state=indoor_state,
+                        ut_orientations=zero_orientations,
+                        bs_orientations=zero_orientations,
+                        ut_velocities=zero_velocities
+                    )
+                    break
+                except Exception as e:
+                    if retry == max_retries - 1:
+                        raise RuntimeError(f"Failed to set topology after {max_retries} attempts: {str(e)}")
+                    self.logger.warning(f"Retry {retry + 1}/{max_retries} setting topology.")
+
+            # Path loss components
+            path_loss = tf.clip_by_value(scenario_obj.basic_pathloss, 0.0, 200.0)
             
-            # Calculate basic path loss
-            path_loss = scenario_obj.basic_pathloss
-            
-            # Apply frequency correction
+            # Frequency correction
             freq_ghz = self.carrier_frequency / 1e9
-            freq_correction = 20.0 * tf.math.log(freq_ghz) / tf.math.log(10.0)
-            
-            # Generate shadow fading
-            shadow_std = 4.0 if scenario.lower() == 'umi' else 6.0
-            shadow_fading = tf.random.normal(
-                [batch_size],
-                mean=0.0,
-                stddev=shadow_std,
-                dtype=tf.float32
+            if not (0.1 <= freq_ghz <= 100.0):
+                raise ValueError(f"Invalid frequency: {freq_ghz} GHz")
+            freq_correction = params['freq_scaling'] * (20.0 * tf.math.log(freq_ghz) / tf.math.log(10.0))
+            shadow_fading = self._rng.normal(shape=[batch_size], mean=0.0, stddev=shadow_std, dtype=tf.float32)
+
+            # Combine components and clip
+            total_path_loss = tf.clip_by_value(path_loss + freq_correction + shadow_fading, params['min_path_loss'], params['max_path_loss'])
+
+            # Apply validation thresholds
+            valid_mask = tf.logical_and(
+                total_path_loss >= params['validation_thresholds']['min_valid_path_loss'],
+                total_path_loss <= params['validation_thresholds']['max_valid_path_loss']
             )
-            
-            # Combine all components
-            total_path_loss = tf.squeeze(path_loss + freq_correction + shadow_fading)
-            
-            # Clip values to reasonable range
-            total_path_loss = tf.clip_by_value(total_path_loss, 20.0, 160.0)
-            
+            if not tf.reduce_all(valid_mask):
+                invalid_count = tf.reduce_sum(tf.cast(~valid_mask, tf.int32))
+                self.logger.warning(f"Detected {invalid_count.numpy()} path loss values outside validation thresholds.")
+
+            # Statistics logging
+            stats = {
+                'mean': tf.reduce_mean(total_path_loss),
+                'min': tf.reduce_min(total_path_loss),
+                'max': tf.reduce_max(total_path_loss),
+                'std': tf.math.reduce_std(total_path_loss)
+            }
+            self.logger.info("Path loss statistics:")
+            for key, value in stats.items():
+                self.logger.info(f"- {key}: {value:.2f} dB")
+
+            # Log clipped path loss values
+            clipped_mask = tf.not_equal(total_path_loss, path_loss + freq_correction + shadow_fading)
+            num_clipped = tf.reduce_sum(tf.cast(clipped_mask, tf.int32))
+            if num_clipped > 0:
+                self.logger.warning(f"Total clipped path loss values: {num_clipped.numpy()}")
+
             return total_path_loss
-            
+
         except Exception as e:
             self.logger.error(f"Path loss calculation failed: {str(e)}")
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
             raise
     
     def apply_path_loss(

@@ -152,10 +152,10 @@ class MIMODatasetGenerator:
             gpus = tf.config.list_physical_devices('GPU')
             if gpus:
                 # Optimized settings for H100 GPUs
-                self.batch_size = 64000  # Larger batch size for H100
-                self.memory_threshold = 80.0  # Higher threshold for H100 (80GB per GPU)
-                self.max_batch_size = 128000  # Maximum batch size
-                self.min_batch_size = 32000  # Minimum batch size
+                self.batch_size = 32000  # Larger batch size for H100
+                self.memory_threshold = 40.0  # Higher threshold for H100 (80GB per GPU)
+                self.max_batch_size = 64000  # Maximum batch size
+                self.min_batch_size = 16000  # Minimum batch size
 
                 # Configure each GPU
                 for gpu in gpus:
