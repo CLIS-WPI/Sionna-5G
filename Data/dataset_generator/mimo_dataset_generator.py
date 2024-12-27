@@ -134,6 +134,25 @@ class MIMODatasetGenerator:
             self.batch_size = 50000
             self.memory_callback = None
 
+    def _initialize_batch_size(self):
+        """
+        Initialize batch size based on memory and system constraints.
+        """
+        try:
+            if PSUTIL_AVAILABLE:
+                # Estimate memory available and set a safe batch size
+                available_memory = psutil.virtual_memory().available / (1024**3)  # Convert to GB
+                estimated_batch_size = int(available_memory / 0.5)  # Use half of the available memory
+                self.batch_size = min(self.max_batch_size, estimated_batch_size)
+            else:
+                # Default to conservative batch size
+                self.batch_size = self.max_batch_size // 4
+            self.logger.info(f"Initialized batch size to: {self.batch_size}")
+        except Exception as e:
+            self.logger.error(f"Error during batch size initialization: {str(e)}")
+            self.batch_size = 1000  # Fallback to a minimal batch size
+
+
     def _initialize_hardware_parameters(self):
         """
         Initialize parameters optimized for high-end hardware (H100 GPUs and large RAM)
