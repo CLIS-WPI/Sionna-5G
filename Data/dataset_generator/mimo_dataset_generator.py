@@ -130,7 +130,7 @@ class MIMODatasetGenerator:
 
     def _initialize_hardware_parameters(self):
         """
-        Initialize parameters for VM environment with GPU passthrough
+        Initialize parameters optimized for high-end hardware (H100 GPUs and large RAM)
         """
         try:
             # Import psutil if available
@@ -139,88 +139,91 @@ class MIMODatasetGenerator:
                 PSUTIL_AVAILABLE = True
             except ImportError:
                 PSUTIL_AVAILABLE = False
-                print("Warning: psutil not available, using default memory settings")
+                self.logger.warning("psutil not available, using default memory settings")
 
             # Get system memory
             if PSUTIL_AVAILABLE:
                 system_memory_gb = psutil.virtual_memory().total / (1024**3)
-                print(f"Total System Memory: {system_memory_gb:.1f} GB")
+                self.logger.info(f"Total System Memory: {system_memory_gb:.1f} GB")
             else:
-                system_memory_gb = 64.0
+                system_memory_gb = 386.0  # Default to known system memory
 
             # Configure GPU settings
             gpus = tf.config.list_physical_devices('GPU')
             if gpus:
-                # Conservative initial settings
-                self.batch_size = int(1000 * self.batch_size_scaling)
-                self.memory_threshold = self.max_memory_fraction * 16.0
-                self.max_batch_size = int(4000 * self.batch_size_scaling)
-                self.min_batch_size = 500
+                # Optimized settings for H100 GPUs
+                self.batch_size = 64000  # Larger batch size for H100
+                self.memory_threshold = 80.0  # Higher threshold for H100 (80GB per GPU)
+                self.max_batch_size = 128000  # Maximum batch size
+                self.min_batch_size = 32000  # Minimum batch size
 
                 # Configure each GPU
                 for gpu in gpus:
                     try:
-                        # Enable memory growth
+                        # Enable memory growth for better memory management
                         tf.config.experimental.set_memory_growth(gpu, True)
                         
-                        # Set memory limit (optional)
+                        # Optional: Set memory limit per GPU (uncomment if needed)
                         # tf.config.set_logical_device_configuration(
                         #     gpu,
-                        #     [tf.config.LogicalDeviceConfiguration(memory_limit=1024*14)]  # 14GB limit
+                        #     [tf.config.LogicalDeviceConfiguration(memory_limit=1024*75)]  # 75GB limit
                         # )
                     except RuntimeError as e:
-                        print(f"GPU configuration warning for {gpu}: {e}")
+                        self.logger.warning(f"GPU configuration warning for {gpu}: {e}")
                         continue
 
-                # Multi-GPU handling
+                # Multi-GPU optimization (for 2x H100)
                 if len(gpus) > 1:
-                    self.batch_size = int(self.batch_size * 1.5)
+                    self.batch_size = int(self.batch_size * 1.5)  # Increase batch size for multi-GPU
                     self.max_batch_size = int(self.max_batch_size * 1.5)
-                    print(f"Multiple GPUs detected, adjusted batch size to: {self.batch_size}")
+                    self.logger.info(f"Multiple GPUs detected, adjusted batch size to: {self.batch_size}")
 
-                # Enable mixed precision
+                # Enable mixed precision (crucial for H100 performance)
                 try:
                     policy = tf.keras.mixed_precision.Policy('mixed_float16')
                     tf.keras.mixed_precision.set_global_policy(policy)
                 except Exception as e:
-                    print(f"Mixed precision configuration warning: {e}")
+                    self.logger.warning(f"Mixed precision configuration warning: {e}")
 
             else:
-                # CPU fallback settings
-                self.batch_size = 500
-                self.memory_threshold = system_memory_gb * 0.2
-                self.max_batch_size = 2000
-                self.min_batch_size = 250
+                # CPU fallback settings (utilizing high RAM)
+                self.batch_size = int(system_memory_gb * 100)  # Scale with available RAM
+                self.memory_threshold = system_memory_gb * 0.4  # Use 40% of system RAM
+                self.max_batch_size = int(system_memory_gb * 200)
+                self.min_batch_size = int(system_memory_gb * 50)
 
-            # Memory management
+            # Advanced memory management
             self.current_memory_usage = 0.0
             self.stable_iterations = 0
             self.growth_step = 1.2
+            self.memory_buffer = 0.15  # 15% memory buffer
 
             # Clear session and garbage collect
             tf.keras.backend.clear_session()
             import gc
             gc.collect()
 
-            # Log configuration
-            print("Hardware Configuration:")
-            print(f"- Batch size: {self.batch_size}")
-            print(f"- Memory threshold: {self.memory_threshold:.1f} GB")
-            print(f"- Max batch size: {self.max_batch_size}")
-            print(f"- Min batch size: {self.min_batch_size}")
+            # Log detailed configuration
+            self.logger.info("Hardware Configuration:")
+            self.logger.info(f"- Batch size: {self.batch_size}")
+            self.logger.info(f"- Memory threshold: {self.memory_threshold:.1f} GB")
+            self.logger.info(f"- Max batch size: {self.max_batch_size}")
+            self.logger.info(f"- Min batch size: {self.min_batch_size}")
             
             if gpus:
-                print(f"- GPU count: {len(gpus)}")
-                print(f"- Memory growth enabled: True")
-                print(f"- Mixed precision enabled: True")
+                self.logger.info(f"- GPU count: {len(gpus)}")
+                self.logger.info(f"- Memory growth enabled: True")
+                self.logger.info(f"- Mixed precision enabled: True")
+                self.logger.info(f"- GPU type: H100")
+                self.logger.info(f"- Available system RAM: {system_memory_gb:.1f} GB")
 
         except Exception as e:
-            print(f"Hardware initialization error: {e}")
+            self.logger.error(f"Hardware initialization error: {e}")
             # Conservative fallback settings
-            self.batch_size = 500
-            self.memory_threshold = 4.0
-            self.max_batch_size = 2000
-            self.min_batch_size = 250
+            self.batch_size = 32000
+            self.memory_threshold = 40.0
+            self.max_batch_size = 64000
+            self.min_batch_size = 16000
             
             # Ensure basic attributes are set
             if not hasattr(self, 'current_memory_usage'):
