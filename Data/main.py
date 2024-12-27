@@ -33,14 +33,8 @@ def configure_device():
                 for gpu in gpus:
                     tf.config.experimental.set_memory_growth(gpu, True)
                 
-                # Then set memory limits if needed
-                for gpu in gpus:
-                    memory_limit = int(11*1024*0.3)  # Use 30% of GPU memory
-                    tf.config.set_logical_device_configuration(
-                        gpu,
-                        [tf.config.LogicalDeviceConfiguration(memory_limit=memory_limit)]
-                    )
-                
+                # Remove the logical device configuration since it conflicts
+                # with memory growth setting
                 print(f"Found {len(gpus)} GPU(s). Using GPU for processing.")
                 return True
                 

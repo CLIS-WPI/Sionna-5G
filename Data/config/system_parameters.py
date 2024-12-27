@@ -48,6 +48,57 @@ class SystemParameters:
     samples_per_modulation: int = None
     replay_buffer_size: int = 20_000_000  # Add replay buffer size (this is for gpu server runing)
 
+    def _initialize_hardware_parameters(self):
+        """
+        Initialize hardware parameters for GPU/CPU configuration
+        """
+        try:
+            # Import psutil if available for memory monitoring
+            try:
+                import psutil
+                PSUTIL_AVAILABLE = True
+            except ImportError:
+                PSUTIL_AVAILABLE = False
+                logging.warning("psutil not available, using default memory settings")
+
+            # Get system memory if possible
+            if PSUTIL_AVAILABLE:
+                system_memory_gb = psutil.virtual_memory().total / (1024**3)
+                logging.info(f"Total System Memory: {system_memory_gb:.1f} GB")
+            else:
+                system_memory_gb = 64.0  # Default assumption
+                
+            # Check for GPU availability
+            gpus = tf.config.list_physical_devices('GPU')
+            if gpus:
+                # GPU configuration
+                self.batch_size = int(1000 * self.batch_size_scaling)  # Scaled batch size
+                self.memory_threshold = self.max_memory_fraction * 16.0  # Assuming 16GB GPU
+                self.max_batch_size = int(4000 * self.batch_size_scaling)
+                self.min_batch_size = 500
+                
+                # Basic cleanup
+                tf.keras.backend.clear_session()
+                
+            else:
+                # CPU configuration
+                self.batch_size = 500
+                self.memory_threshold = system_memory_gb * 0.2  # Use 20% of system memory
+                self.max_batch_size = 2000
+                self.min_batch_size = 250
+                
+            logging.info(f"Hardware Configuration:")
+            logging.info(f"- Batch size: {self.batch_size}")
+            logging.info(f"- Memory threshold: {self.memory_threshold:.1f} GB")
+            
+        except Exception as e:
+            logging.warning(f"Hardware initialization error: {e}")
+            # Conservative fallback settings
+            self.batch_size = 500
+            self.memory_threshold = 4.0
+            self.max_batch_size = 2000
+            self.min_batch_size = 250
+            
     def __post_init__(self):
         """
         Post-initialization validation and calculations
@@ -59,12 +110,14 @@ class SystemParameters:
         # Ensure num_streams does not exceed antenna count
         self.num_streams = min(self.num_streams, self.num_tx, self.num_rx)
         
+        # Initialize hardware parameters
+        self._initialize_hardware_parameters()
+        
         # Validate parameters
         self._validate_parameters()
         
         # Set global seeds
         self.set_global_seeds()
-
 
     def __init__(
         self, 
@@ -101,6 +154,7 @@ class SystemParameters:
 
         # Call post-initialization
         self.__post_init__()
+
     def _validate_parameters(self):
         """
         Rigorously validate system parameters for consistency and physical plausibility
@@ -125,6 +179,7 @@ class SystemParameters:
         
         # Element spacing validation
         assert 0.1 <= self.element_spacing <= 1.0, "Element spacing must be between 0.1 and 1.0 wavelengths"
+
     def set_global_seeds(self):
         """
         Comprehensive global seed setting for reproducible randomness
