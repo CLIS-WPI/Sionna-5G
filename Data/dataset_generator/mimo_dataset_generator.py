@@ -46,6 +46,8 @@ class MIMODatasetGenerator:
         """
         # Use default system parameters if not provided
         self.system_params = system_params or SystemParameters()
+        self.batch_size_scaling = 0.5  # Default scaling factor
+        self.max_memory_fraction = 0.8  # Default memory fraction
         
         # Configure logger
         self.logger = logger or LoggerManager.get_logger(

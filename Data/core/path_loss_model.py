@@ -257,7 +257,7 @@ class PathLossManager:
             )
             
             # Calculate basic path loss
-            path_loss = tf.squeeze(scenario_obj.basic_pathloss)
+            path_loss = scenario_obj.basic_pathloss
             
             # Apply frequency correction
             freq_ghz = self.carrier_frequency / 1e9
@@ -273,12 +273,12 @@ class PathLossManager:
             )
             
             # Combine all components
-            total_path_loss = path_loss + freq_correction + shadow_fading
+            total_path_loss = tf.squeeze(path_loss + freq_correction + shadow_fading)
             
             # Clip values to reasonable range
             total_path_loss = tf.clip_by_value(total_path_loss, 20.0, 160.0)
             
-            return tf.reshape(total_path_loss, [-1])
+            return total_path_loss
             
         except Exception as e:
             self.logger.error(f"Path loss calculation failed: {str(e)}")
