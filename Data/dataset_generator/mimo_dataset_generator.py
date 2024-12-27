@@ -567,6 +567,17 @@ class MIMODatasetGenerator:
                                 self._manage_memory()
                                 continue
 
+                            # Validate tensor size before reshaping
+                            expected_elements = self.batch_size * self.system_params.num_rx * self.system_params.num_tx
+                            actual_elements = tf.size(h_perfect).numpy()
+
+                            if actual_elements != expected_elements:
+                                self.logger.error(
+                                    f"Tensor size mismatch: expected {expected_elements} elements, "
+                                    f"but got {actual_elements}. Adjusting batch size or input parameters."
+                                )
+                                raise ValueError("Tensor size mismatch detected during reshaping.")
+
                             # Ensure correct shape [batch_size, num_rx, num_tx]
                             h_perfect = tf.reshape(h_perfect, 
                                                 [self.batch_size, self.system_params.num_rx, self.system_params.num_tx])
