@@ -35,7 +35,8 @@ class MIMODatasetGenerator:
     def __init__(
         self, 
         system_params: SystemParameters = None,
-        logger=None
+        logger=None,
+        max_batch_size=10000  # Default maximum batch size
     ):
         """
         Initialize MIMO dataset generator
@@ -43,9 +44,11 @@ class MIMODatasetGenerator:
         Args:
             system_params (SystemParameters, optional): System configuration
             logger (logging.Logger, optional): Logger instance
+            max_batch_size (int, optional): Maximum allowed batch size for processing
         """
         # Use default system parameters if not provided
         self.system_params = system_params or SystemParameters()
+        self.max_batch_size = max_batch_size  # Maximum batch size parameter
         self.batch_size_scaling = 0.5  # Default scaling factor
         self.max_memory_fraction = 0.8  # Default memory fraction
         
@@ -54,6 +57,9 @@ class MIMODatasetGenerator:
             name='MIMODatasetGenerator', 
             log_level='INFO'
         )
+
+        # Initialize batch size based on memory constraints
+        self._initialize_batch_size()
         
         # Initialize core components
         self.channel_model = ChannelModelManager(self.system_params)
@@ -973,38 +979,40 @@ class MIMODatasetGenerator:
     
     def _check_batch_size_safety(self, batch_size: int) -> int:
         """
-        Verify and adjust batch size based on available memory
+        Verify and adjust batch size based on memory constraints and PathLossManager settings.
         """
         try:
-            if not PSUTIL_AVAILABLE:
-                self.logger.warning("Memory monitoring requires psutil. Using GPU memory info only.")
-                return
-            available_memory = psutil.virtual_memory().available / (1024**3)  # GB
-            
-            # Calculate approximate memory requirement per sample
-            sample_size = (self.system_params.num_tx * 
-                        self.system_params.num_rx * 
-                        8 * 3)  # 8 bytes per complex64, factor of 3 for overhead
-            
-            # Convert to GB
-            memory_per_batch = (batch_size * sample_size) / (1024**3)
-            
-            # If batch would use more than 40% of available memory, reduce it
-            if memory_per_batch > available_memory * 0.4:
-                new_batch_size = int((available_memory * 0.4 * 1024**3) / sample_size)
-                # Round down to nearest 1000
-                new_batch_size = (new_batch_size // 1000) * 1000
+            # Get max_batch_size from PathLossManager or default
+            max_batch_size = getattr(self.path_loss_manager.system_params, 'max_batch_size', self.max_batch_size)
+            if batch_size > max_batch_size:
                 self.logger.warning(
-                    f"Batch size {batch_size} would use too much memory. "
-                    f"Reducing to {new_batch_size}"
+                    f"Batch size {batch_size} exceeds max allowed by PathLossManager ({max_batch_size}). "
+                    f"Reducing to {max_batch_size}."
                 )
-                return max(1000, new_batch_size)  # Ensure minimum batch size of 1000
-            
+                batch_size = max_batch_size
+
+            # Further adjustments based on system memory
+            if PSUTIL_AVAILABLE:
+                available_memory = psutil.virtual_memory().available / (1024**3)  # GB
+                sample_size = self.system_params.num_tx * self.system_params.num_rx * 8 * 3  # Bytes per sample
+                memory_per_batch = (batch_size * sample_size) / (1024**3)  # Convert to GB
+
+                if memory_per_batch > available_memory * 0.4:  # Adjust batch size if exceeding 40% of memory
+                    new_batch_size = int((available_memory * 0.4 * 1024**3) / sample_size)
+                    new_batch_size = (new_batch_size // 1000) * 1000  # Round to nearest 1000
+                    self.logger.warning(
+                        f"Batch size {batch_size} exceeds memory constraints. "
+                        f"Reducing to {new_batch_size}."
+                    )
+                    return max(1000, new_batch_size)
+
             return batch_size
-            
+
         except Exception as e:
             self.logger.warning(f"Error in batch size safety check: {e}")
-            return min(batch_size, 4_000)  # Conservative fallback
+            return min(batch_size, self.max_batch_size)
+
+
         
 # Example usage
 def main():

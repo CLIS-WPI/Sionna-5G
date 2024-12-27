@@ -251,12 +251,17 @@ class PathLossManager:
                 distance = tf.cast(distance, dtype=tf.float32)
                 distance = tf.reshape(distance, [-1])
                 batch_size = tf.shape(distance)[0]
-
+                
+                # batch size validation and adjustment
                 # Enforce maximum batch size
                 if batch_size > params['max_batch_size']:
-                    raise ValueError(f"Batch size {batch_size} exceeds maximum allowed size {params['max_batch_size']}.")
+                    self.logger.warning(
+                        f"Batch size {batch_size} exceeds max allowed size {params['max_batch_size']}. "
+                        f"Adjusting dynamically to {params['max_batch_size']}."
+                    )
+                    distance = distance[:params['max_batch_size']]
+                    batch_size = params['max_batch_size']
                 
-                self.logger.info(f"Processing batch size: {batch_size}, original shape: {original_shape}")
             except Exception as e:
                 raise ValueError(f"Failed to process distance shape {original_shape}: {str(e)}")
 
