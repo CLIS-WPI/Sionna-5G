@@ -29,15 +29,11 @@ def configure_device():
         gpus = tf.config.list_physical_devices('GPU')
         if gpus:
             try:
-                # First, reset any existing configurations
-                for gpu in gpus:
-                    tf.config.experimental.set_virtual_device_configuration(gpu, [])
-                
-                # Then set memory growth for each GPU
+                # Set memory growth first, before any other configurations
                 for gpu in gpus:
                     tf.config.experimental.set_memory_growth(gpu, True)
                 
-                # Finally, set memory limits if needed
+                # Then set memory limits if needed
                 for gpu in gpus:
                     memory_limit = int(11*1024*0.3)  # Use 30% of GPU memory
                     tf.config.set_logical_device_configuration(
@@ -165,31 +161,26 @@ def main():
     Main entry point for MIMO dataset generation with enhanced GPU and memory management
     """
     try:
-
-        # Configure device first, before any other GPU operations
-        device_config = configure_device()
-        if not device_config:
-            logger.warning("GPU configuration failed, falling back to CPU")
-
-        # Parse command-line arguments
+        # Parse arguments first
         args = parse_arguments()
         
-        # Configure logging with detailed format
+        # Initialize logger before any other operations
         logger = configure_logging(
             log_level=args.log_level,
             log_file=f'logs/mimo_dataset_generation_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log',
             log_format='%(asctime)s - %(name)s - %(levelname)s - %(message)s - [%(filename)s:%(lineno)d]'
         )
-        # Clear any existing GPU memory allocations
-        logger.info("Clearing GPU memory and configuring device...")
-        tf.keras.backend.clear_session()
-        
-        # Configure device after logger is initialized
+
+        # Then configure device
         device_config = configure_device()
         if not device_config:
             logger.warning("GPU configuration failed, falling back to CPU")
+            
+        # Clear GPU memory
+        logger.info("Clearing GPU memory and configuring device...")
+        tf.keras.backend.clear_session()
         
-        # Configure system parameters with conservative memory settings
+        # Configure system parameters
         system_params = configure_system_parameters(args)
         system_params.replay_buffer_size = min(system_params.replay_buffer_size, 100000)
         
