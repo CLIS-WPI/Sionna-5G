@@ -311,8 +311,9 @@ class ChannelModelManager:
         try:
             # Ensure proper types and shapes
             batch_size = tf.cast(batch_size, tf.int32)
-            # Ensure snr_db matches batch size by slicing
-            snr_db = snr_db[:batch_size]
+            
+            # Ensure snr_db matches batch size by slicing and reshaping
+            snr_db = tf.reshape(snr_db[:batch_size], [batch_size])
             
             # Generate channel samples with controlled variance
             h_shape = [batch_size, self.system_params.num_rx, self.system_params.num_tx]
@@ -323,11 +324,16 @@ class ChannelModelManager:
             h_imag = tf.random.normal(h_shape, mean=0.0, stddev=std_dev, dtype=tf.float32)
             h = tf.complex(h_real, h_imag)
             
-            # Verify tensor shapes immediately after generation
-            tf.debugging.assert_shapes([
-                (h, h_shape),
-                (snr_db, (batch_size,))
-            ], message="Shape mismatch in generate_mimo_channel")
+            # Verify tensor shapes immediately after generation using explicit shapes
+            expected_shapes = {
+                'h': (batch_size, self.system_params.num_rx, self.system_params.num_tx),
+                'snr_db': (batch_size,)
+            }
+            
+            # Verify shapes using dynamic assertions
+            tf.Assert(tf.equal(tf.shape(h)[0], batch_size), ["Channel batch size mismatch"])
+            tf.Assert(tf.equal(tf.shape(h)[1], self.system_params.num_rx), ["Channel RX dimension mismatch"])
+            tf.Assert(tf.equal(tf.shape(h)[2], self.system_params.num_tx), ["Channel TX dimension mismatch"])
             
             h_normalized = normalize_complex_tensor(h)
             
@@ -343,11 +349,11 @@ class ChannelModelManager:
             snr_db_clipped = tf.clip_by_value(snr_db, -20.0, 30.0)
             noise_power = tf.pow(10.0, -snr_db_clipped / 10.0)
             noise_power = tf.maximum(noise_power, 1e-10)
-            noise_power = tf.reshape(noise_power, [-1, 1, 1])
+            noise_power = tf.reshape(noise_power, [batch_size, 1, 1])
             
             noise_std = tf.sqrt(noise_power / 2.0)
-            noise_real = tf.random.normal(tf.shape(h_normalized), mean=0.0, stddev=noise_std)
-            noise_imag = tf.random.normal(tf.shape(h_normalized), mean=0.0, stddev=noise_std)
+            noise_real = tf.random.normal(h_shape, mean=0.0, stddev=noise_std)
+            noise_imag = tf.random.normal(h_shape, mean=0.0, stddev=noise_std)
             noise = tf.complex(noise_real, noise_imag)
             
             # Add noise to channel
@@ -361,13 +367,19 @@ class ChannelModelManager:
                 'snr_db': snr_db
             }
             
-            # Verify all output shapes are consistent
+            # Verify output shapes with explicit dimension checks
             for name, tensor in output_tensors.items():
-                if name != 'snr_db':
-                    tf.debugging.assert_shapes([
-                        (tensor, (batch_size, None, None))
-                    ], message=f"Shape mismatch in {name}")
-                    
+                if name == 'snr_db':
+                    tf.Assert(tf.equal(tf.shape(tensor)[0], batch_size), 
+                            [f"Shape mismatch in {name}"])
+                else:
+                    tf.Assert(tf.equal(tf.shape(tensor)[0], batch_size), 
+                            [f"Batch size mismatch in {name}"])
+                    tf.Assert(tf.equal(tf.shape(tensor)[1], self.system_params.num_rx), 
+                            [f"RX dimension mismatch in {name}"])
+                    tf.Assert(tf.equal(tf.shape(tensor)[2], self.system_params.num_tx), 
+                            [f"TX dimension mismatch in {name}"])
+            
             return output_tensors
                 
         except Exception as e:
