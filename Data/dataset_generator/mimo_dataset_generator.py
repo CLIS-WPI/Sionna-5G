@@ -717,8 +717,15 @@ class MIMODatasetGenerator:
                             # Memory management
                             self._manage_memory()
                             
-                            # Increment batch index
+                            # Validate the dataset consistency after saving the batch
+                            if not self.validate_consistency(f):
+                                self.logger.error(f"Dataset inconsistency detected after batch {batch_idx} for {mod_scheme}.")
+                                raise ValueError("Dataset inconsistency detected during generation.")
+
                             batch_idx += 1
+                        except Exception as batch_error:
+                            self.logger.error(f"Error processing batch {batch_idx}: {str(batch_error)}")
+                            continue
                             
                         except tf.errors.ResourceExhaustedError as oom_error:
                             self.batch_size = max(1000, self.batch_size // 2)
@@ -993,24 +1000,35 @@ class MIMODatasetGenerator:
 
             # Further adjustments based on system memory
             if PSUTIL_AVAILABLE:
-                available_memory = psutil.virtual_memory().available / (1024**3)  # GB
+                available_memory = psutil.virtual_memory().available / (1024**3)  # Convert to GB
                 sample_size = self.system_params.num_tx * self.system_params.num_rx * 8 * 3  # Bytes per sample
                 memory_per_batch = (batch_size * sample_size) / (1024**3)  # Convert to GB
 
-                if memory_per_batch > available_memory * 0.4:  # Adjust batch size if exceeding 40% of memory
+                self.logger.info(
+                    f"Batch size {batch_size} requires ~{memory_per_batch:.2f} GB of memory. "
+                    f"Available system memory: {available_memory:.2f} GB."
+                )
+
+                # Adjust batch size if exceeding 40% of available memory
+                if memory_per_batch > available_memory * 0.4:
                     new_batch_size = int((available_memory * 0.4 * 1024**3) / sample_size)
                     new_batch_size = (new_batch_size // 1000) * 1000  # Round to nearest 1000
                     self.logger.warning(
                         f"Batch size {batch_size} exceeds memory constraints. "
                         f"Reducing to {new_batch_size}."
                     )
-                    return max(1000, new_batch_size)
+                    batch_size = max(1000, new_batch_size)  # Ensure minimum batch size of 1000
 
+            # Final check to ensure batch size is within safe limits
+            batch_size = min(batch_size, max_batch_size)
+            self.logger.info(f"Final adjusted batch size: {batch_size}")
             return batch_size
 
         except Exception as e:
-            self.logger.warning(f"Error in batch size safety check: {e}")
-            return min(batch_size, self.max_batch_size)
+            self.logger.error(f"Error in batch size safety check: {e}. Falling back to conservative default.")
+            # Fall back to a conservative batch size if an error occurs
+            return min(batch_size, self.max_batch_size // 2)
+
 
 
         
