@@ -239,6 +239,13 @@ class PathLossManager:
             zero_velocities = tf.zeros([1, batch_size, 3], dtype=tf.float32)
             indoor_state = tf.zeros([1, batch_size], dtype=tf.bool)
             
+            # Debug logging
+            self.logger.debug(f"Shapes before set_topology:")
+            self.logger.debug(f"ut_locations: {ut_locations.shape}")
+            self.logger.debug(f"bs_locations: {bs_locations.shape}")
+            self.logger.debug(f"zero_orientations: {zero_orientations.shape}")
+            self.logger.debug(f"indoor_state: {indoor_state.shape}")
+
             # Set topology
             scenario_obj.set_topology(
                 ut_loc=ut_locations,

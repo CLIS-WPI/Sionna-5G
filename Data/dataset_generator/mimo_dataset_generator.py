@@ -131,60 +131,105 @@ class MIMODatasetGenerator:
         Initialize parameters for VM environment with GPU passthrough
         """
         try:
+            # Import psutil if available
+            try:
+                import psutil
+                PSUTIL_AVAILABLE = True
+            except ImportError:
+                PSUTIL_AVAILABLE = False
+                print("Warning: psutil not available, using default memory settings")
+
+            # Get system memory
             if PSUTIL_AVAILABLE:
                 system_memory_gb = psutil.virtual_memory().total / (1024**3)
-                self.logger.info(f"Total System Memory: {system_memory_gb:.1f} GB")
+                print(f"Total System Memory: {system_memory_gb:.1f} GB")
             else:
                 system_memory_gb = 64.0
-            
+
+            # Configure GPU settings
             gpus = tf.config.list_physical_devices('GPU')
             if gpus:
-                # VM-specific conservative settings
-                self.batch_size = 1_000  # Start very small for VM
-                self.memory_threshold = 16.0  # Conservative for VM
-                self.max_batch_size = 4_000  # Limited maximum
+                # Conservative initial settings
+                self.batch_size = int(1000 * self.batch_size_scaling)
+                self.memory_threshold = self.max_memory_fraction * 16.0
+                self.max_batch_size = int(4000 * self.batch_size_scaling)
                 self.min_batch_size = 500
-                
-                # Simple growth parameters for VM
-                self.current_memory_usage = 0.0
-                self.stable_iterations = 0
-                self.growth_step = 1.2
-                
-                # Basic GPU configuration
+
+                # Configure each GPU
                 for gpu in gpus:
                     try:
+                        # Enable memory growth
                         tf.config.experimental.set_memory_growth(gpu, True)
+                        
+                        # Set memory limit (optional)
+                        # tf.config.set_logical_device_configuration(
+                        #     gpu,
+                        #     [tf.config.LogicalDeviceConfiguration(memory_limit=1024*14)]  # 14GB limit
+                        # )
                     except RuntimeError as e:
-                        self.logger.warning(f"Memory growth setting failed for {gpu}: {e}")
-                
-                # Simple multi-GPU handling
+                        print(f"GPU configuration warning for {gpu}: {e}")
+                        continue
+
+                # Multi-GPU handling
                 if len(gpus) > 1:
-                    self.batch_size *= 1.5
-                    self.max_batch_size *= 1.5
-                    self.logger.info(f"Multiple GPUs detected, adjusted batch size to: {self.batch_size}")
+                    self.batch_size = int(self.batch_size * 1.5)
+                    self.max_batch_size = int(self.max_batch_size * 1.5)
+                    print(f"Multiple GPUs detected, adjusted batch size to: {self.batch_size}")
+
+                # Enable mixed precision
+                try:
+                    policy = tf.keras.mixed_precision.Policy('mixed_float16')
+                    tf.keras.mixed_precision.set_global_policy(policy)
+                except Exception as e:
+                    print(f"Mixed precision configuration warning: {e}")
+
             else:
-                # CPU fallback
+                # CPU fallback settings
                 self.batch_size = 500
                 self.memory_threshold = system_memory_gb * 0.2
-                self.max_batch_size = 2_000
+                self.max_batch_size = 2000
                 self.min_batch_size = 250
-            
-            # Initial cleanup
+
+            # Memory management
+            self.current_memory_usage = 0.0
+            self.stable_iterations = 0
+            self.growth_step = 1.2
+
+            # Clear session and garbage collect
             tf.keras.backend.clear_session()
             import gc
             gc.collect()
+
+            # Log configuration
+            print("Hardware Configuration:")
+            print(f"- Batch size: {self.batch_size}")
+            print(f"- Memory threshold: {self.memory_threshold:.1f} GB")
+            print(f"- Max batch size: {self.max_batch_size}")
+            print(f"- Min batch size: {self.min_batch_size}")
             
-            self.logger.info("VM Configuration:")
-            self.logger.info(f"- Batch size: {self.batch_size}")
-            self.logger.info(f"- Memory threshold: {self.memory_threshold:.1f} GB")
-            
+            if gpus:
+                print(f"- GPU count: {len(gpus)}")
+                print(f"- Memory growth enabled: True")
+                print(f"- Mixed precision enabled: True")
+
         except Exception as e:
-            self.logger.warning(f"Hardware initialization error: {e}")
-            # Very conservative fallback
+            print(f"Hardware initialization error: {e}")
+            # Conservative fallback settings
             self.batch_size = 500
             self.memory_threshold = 4.0
-            self.max_batch_size = 2_000
+            self.max_batch_size = 2000
             self.min_batch_size = 250
+            
+            # Ensure basic attributes are set
+            if not hasattr(self, 'current_memory_usage'):
+                self.current_memory_usage = 0.0
+            if not hasattr(self, 'stable_iterations'):
+                self.stable_iterations = 0
+            if not hasattr(self, 'growth_step'):
+                self.growth_step = 1.2
+
+        # Return success status
+        return gpus is not None and len(gpus) > 0
 
     def validate_consistency(self, f):
         """
