@@ -19,6 +19,7 @@ from core.path_loss_model import PathLossManager
 from utill.logging_config import LoggerManager
 from utill.tensor_shape_validator import validate_tensor_shapes
 from integrity.dataset_integrity_checker import MIMODatasetIntegrityChecker
+from utill.tensor_shape_validator import verify_batch_consistency
 
 # Try to import psutil, set flag for availability
 try:
@@ -548,19 +549,46 @@ class MIMODatasetGenerator:
                             distances = tf.random.uniform(
                                 [self.batch_size], 
                                 minval=1.0,  # Minimum distance (1 meter)
-                                maxval=500.0  # Maximum distance (500 meters)
+                                maxval=500.0,  # Maximum distance (500 meters)
+                                dtype=tf.float32
 )
                             snr_db = tf.random.uniform(
                                 [self.batch_size],
                                 self.system_params.snr_range[0],
-                                self.system_params.snr_range[1]
+                                self.system_params.snr_range[1],
+                                dtype=tf.float32
                             )
+
+                            #First tensor verification
+                            batch_tensors = {
+                                'distances': distances,
+                                'snr_db': snr_db
+                                }
+                                
+                            if not verify_batch_consistency(batch_tensors, self.batch_size):
+                                raise ValueError("Batch size inconsistency detected in input tensors")
+    
+                            # Verify tensor shapes before processing
+                            tf.debugging.assert_shapes([
+                                (distances, ('B',)),
+                                (snr_db, ('B',))
+                            ], message="Input tensor shape mismatch")
 
                             # Generate channel data with error handling
                             try:
                                 channel_data = self.channel_model.generate_mimo_channel(self.batch_size, snr_db)
                                 h_perfect = channel_data['perfect_channel']
                                 h_noisy = channel_data['noisy_channel']
+
+                                # ADD HERE: Channel data verification
+                                channel_tensors = {
+                                    'channel_response': h_perfect,
+                                    'noisy_channel': h_noisy
+                                }
+                                
+                                if not verify_batch_consistency(channel_tensors, self.batch_size):
+                                    raise ValueError("Batch size inconsistency detected in channel tensors")
+    
                             except tf.errors.ResourceExhaustedError:
                                 self.batch_size = max(1000, self.batch_size // 2)
                                 self.logger.warning(f"OOM error in channel generation, reducing batch size to {self.batch_size}")
@@ -715,6 +743,20 @@ class MIMODatasetGenerator:
                             # Slice the tensors to match batch_size
                             fspl = tf.slice(fspl, [0], [self.batch_size])
                             scenario_pl = tf.slice(scenario_pl, [0], [self.batch_size])
+
+                            # ADD HERE: Final verification before saving
+                            output_tensors = {
+                                'channel_response': h_perfect,
+                                'sinr': sinr,
+                                'spectral_efficiency': spectral_efficiency,
+                                'effective_snr': effective_snr,
+                                'eigenvalues': eigenvalues,
+                                'ber': enhanced_metrics['ber'],
+                                'throughput': enhanced_metrics['throughput']
+                            }
+
+                            if not verify_batch_consistency(output_tensors, self.batch_size):
+                                raise ValueError("Batch size inconsistency detected in output tensors")
 
                             # Save all data to HDF5
                             mod_group['channel_response'][start_idx:end_idx] = h_perfect.numpy()

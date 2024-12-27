@@ -169,7 +169,7 @@ class ChannelModelManager:
         try:
             batch_size = tf.cast(batch_size, tf.int32)
             h_shape = [batch_size, self.system_params.num_rx, self.system_params.num_tx]
-
+            tf.debugging.assert_greater(batch_size, 0, message="Batch size must be positive")
             # Use controlled standard deviation for better stability
             std_dev = 1.0/np.sqrt(2.0 * self.system_params.num_tx)
             

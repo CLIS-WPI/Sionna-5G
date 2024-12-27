@@ -212,6 +212,16 @@ class PathLossManager:
             tf.Tensor: Path loss in dB with shape [batch_size].
         """
         try:
+            # Ensure proper tensor shape and type
+            if not isinstance(distance, tf.Tensor):
+                distance = tf.convert_to_tensor(distance, dtype=tf.float32)
+                
+            # Get batch size from input tensor
+            batch_size = tf.shape(distance)[0]
+            
+            # Reshape and validate distance tensor
+            distance = tf.reshape(distance, [batch_size])
+            
             # Load default or override parameters
             params = {
                 'min_distance': 1.0,

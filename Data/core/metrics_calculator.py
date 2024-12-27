@@ -76,14 +76,24 @@ class MetricsCalculator:
         Calculate comprehensive MIMO performance metrics with enhanced stability
         """
         try:
-            # Validate input shapes
+            # Get and validate batch size
             batch_size = tf.shape(channel_response)[0]
-            expected_shapes = {
-                'channel_response': (batch_size, self.system_params.num_rx, self.system_params.num_tx),
-                'tx_symbols': (batch_size, self.system_params.num_tx, 1),
-                'rx_symbols': (batch_size, self.system_params.num_rx, 1),
-                'snr_db': (batch_size,)
-            }
+            
+            # Ensure consistent shapes across all inputs
+            channel_response = tf.ensure_shape(
+                channel_response, 
+                [batch_size, self.system_params.num_rx, self.system_params.num_tx]
+            )
+            tx_symbols = tf.ensure_shape(
+                tx_symbols, 
+                [batch_size, self.system_params.num_tx, 1]
+            )
+            rx_symbols = tf.ensure_shape(
+                rx_symbols, 
+                [batch_size, self.system_params.num_rx, 1]
+            )
+            snr_db = tf.reshape(snr_db[:batch_size], [batch_size])
+                
             
             # Calculate channel properties with enhanced numerical stability
             H = channel_response
