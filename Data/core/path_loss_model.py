@@ -256,7 +256,18 @@ class PathLossManager:
                 distance = tf.convert_to_tensor(distance, dtype=tf.float32)
 
             # Handle and reshape distances
-            original_shape = distance.shape
+            original_shape = tf.shape(distance)
+            batch_size = original_shape[0]
+            
+            # Ensure distance tensor is properly shaped
+            distance = tf.reshape(distance, [-1])
+            
+            # Add strict range validation
+            if tf.reduce_any(distance < 1.0) or tf.reduce_any(distance > 1000.0):
+                self.logger.warning("Distances out of range. Clipping to valid bounds.")
+            
+            distance = tf.clip_by_value(distance, 1.0, 1000.0)
+            
             try:
                 distance = tf.cast(distance, dtype=tf.float32)
                 distance = tf.reshape(distance, [-1])

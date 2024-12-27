@@ -15,7 +15,7 @@ from config.system_parameters import SystemParameters
 from utill.tensor_shape_validator import assert_tensor_shape, normalize_complex_tensor
 from sionna.mimo import StreamManagement
 from utill.logging_config import LoggerManager
-
+from utill.tensor_shape_validator import normalize_complex_tensor
 class ChannelModelManager:
     """
     Advanced channel model management for MIMO communication systems
@@ -307,37 +307,71 @@ class ChannelModelManager:
         batch_size: int,
         snr_db: tf.Tensor
     ) -> Dict[str, tf.Tensor]:
-        """
-        Generate comprehensive MIMO channel data
-        
-        Args:
-            batch_size (int): Number of channel realizations
-            snr_db (tf.Tensor): Signal-to-Noise Ratio in dB
-        
-        Returns:
-            Dict[str, tf.Tensor]: Dictionary of channel-related tensors
-        """
+        """Generate channel data with explicit shape control"""
         try:
-            # Generate channel samples - now correctly unpacking 3 values
-            perfect_channel, noisy_channel, eigenvalues = self.generate_channel_samples(
-                batch_size, snr_db
+            # Ensure proper types and shapes
+            batch_size = tf.cast(batch_size, tf.int32)
+            # Ensure snr_db matches batch size by slicing
+            snr_db = snr_db[:batch_size]
+            
+            # Generate channel samples with controlled variance
+            h_shape = [batch_size, self.system_params.num_rx, self.system_params.num_tx]
+            std_dev = 1.0/np.sqrt(2.0 * self.system_params.num_tx)
+            
+            # Explicitly control shapes during generation
+            h_real = tf.random.normal(h_shape, mean=0.0, stddev=std_dev, dtype=tf.float32)
+            h_imag = tf.random.normal(h_shape, mean=0.0, stddev=std_dev, dtype=tf.float32)
+            h = tf.complex(h_real, h_imag)
+            
+            # Verify tensor shapes immediately after generation
+            tf.debugging.assert_shapes([
+                (h, h_shape),
+                (snr_db, (batch_size,))
+            ], message="Shape mismatch in generate_mimo_channel")
+            
+            h_normalized = normalize_complex_tensor(h)
+            
+            # Calculate eigenvalues with proper normalization
+            h_hermitian = tf.matmul(
+                h_normalized, 
+                tf.transpose(h_normalized, perm=[0, 2, 1], conjugate=True)
             )
+            eigenvalues = tf.abs(tf.linalg.eigvals(h_hermitian))
+            eigenvalues = eigenvalues / tf.reduce_max(eigenvalues, axis=1, keepdims=True)
             
-            # Calculate additional metrics
-            effective_snr = self.calculate_effective_snr(perfect_channel, snr_db)
-            spectral_eff = self.calculate_spectral_efficiency(perfect_channel, snr_db)
+            # Generate noise with controlled variance
+            snr_db_clipped = tf.clip_by_value(snr_db, -20.0, 30.0)
+            noise_power = tf.pow(10.0, -snr_db_clipped / 10.0)
+            noise_power = tf.maximum(noise_power, 1e-10)
+            noise_power = tf.reshape(noise_power, [-1, 1, 1])
             
-            return {
-                'perfect_channel': perfect_channel,
+            noise_std = tf.sqrt(noise_power / 2.0)
+            noise_real = tf.random.normal(tf.shape(h_normalized), mean=0.0, stddev=noise_std)
+            noise_imag = tf.random.normal(tf.shape(h_normalized), mean=0.0, stddev=noise_std)
+            noise = tf.complex(noise_real, noise_imag)
+            
+            # Add noise to channel
+            noisy_channel = h_normalized + noise
+            
+            # Final shape verification
+            output_tensors = {
+                'perfect_channel': h_normalized,
                 'noisy_channel': noisy_channel,
                 'eigenvalues': eigenvalues,
-                'snr_db': snr_db,
-                'effective_snr': effective_snr,
-                'spectral_efficiency': spectral_eff
+                'snr_db': snr_db
             }
             
+            # Verify all output shapes are consistent
+            for name, tensor in output_tensors.items():
+                if name != 'snr_db':
+                    tf.debugging.assert_shapes([
+                        (tensor, (batch_size, None, None))
+                    ], message=f"Shape mismatch in {name}")
+                    
+            return output_tensors
+                
         except Exception as e:
-            self.logger.error(f"Error in generate_mimo_channel: {str(e)}")
+            self.logger.error(f"Error generating MIMO channel: {str(e)}")
             raise
     
     def get_channel_statistics(
