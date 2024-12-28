@@ -1059,7 +1059,7 @@ class MIMODatasetGenerator:
 
     def _check_batch_size(self, requested_batch_size: int) -> int:
         """Ensure batch size is within valid range"""
-        max_allowed = 2000  # Maximum allowed by PathLossManager
+        max_allowed = 64000  # Maximum allowed by PathLossManager
         if requested_batch_size > max_allowed:
             self.logger.warning(f"Reducing batch size from {requested_batch_size} to {max_allowed}")
             return max_allowed

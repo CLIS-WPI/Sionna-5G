@@ -71,11 +71,22 @@ class SystemParameters:
             # Check for GPU availability
             gpus = tf.config.list_physical_devices('GPU')
             if gpus:
-                # GPU configuration
-                self.batch_size = int(1000 * self.batch_size_scaling)  # Scaled batch size
-                self.memory_threshold = self.max_memory_fraction * 16.0  # Assuming 16GB GPU
-                self.max_batch_size = int(4000 * self.batch_size_scaling)
-                self.min_batch_size = 500
+                # Detect GPU type (H100 vs others)
+                gpu_name = tf.test.gpu_device_name()
+                is_h100 = 'H100' in gpu_name.upper()
+                
+                if is_h100:
+                    # H100 GPU configuration
+                    self.batch_size = int(64000 * self.batch_size_scaling)
+                    self.memory_threshold = self.max_memory_fraction * 80.0  # H100 has 80GB
+                    self.max_batch_size = 96000
+                    self.min_batch_size = 16000
+                else:
+                    # Standard GPU configuration
+                    self.batch_size = int(1000 * self.batch_size_scaling)
+                    self.memory_threshold = self.max_memory_fraction * 16.0  # Assuming 16GB GPU
+                    self.max_batch_size = int(4000 * self.batch_size_scaling)
+                    self.min_batch_size = 500
                 
                 # Basic cleanup
                 tf.keras.backend.clear_session()
@@ -90,6 +101,8 @@ class SystemParameters:
             logging.info(f"Hardware Configuration:")
             logging.info(f"- Batch size: {self.batch_size}")
             logging.info(f"- Memory threshold: {self.memory_threshold:.1f} GB")
+            logging.info(f"- Max batch size: {self.max_batch_size}")
+            logging.info(f"- Min batch size: {self.min_batch_size}")
             
         except Exception as e:
             logging.warning(f"Hardware initialization error: {e}")
