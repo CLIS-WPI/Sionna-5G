@@ -48,6 +48,7 @@ class MIMODatasetGenerator:
             max_batch_size (int, optional): Maximum allowed batch size for processing
         """
         # Use default system parameters if not provided
+        self.max_batch_size = self._check_batch_size(max_batch_size)
         self.system_params = system_params or SystemParameters()
         self.max_batch_size = max_batch_size  # Maximum batch size parameter
         self.batch_size_scaling = 0.5  # Default scaling factor
@@ -136,6 +137,9 @@ class MIMODatasetGenerator:
             self.memory_callback = None
 
     def _initialize_batch_size(self):
+        initial_batch_size = self.calculate_initial_batch_size()
+        self.batch_size = self._check_batch_size(initial_batch_size)
+        self.logger.info(f"Initialized batch size to: {self.batch_size}")
         """
         Initialize batch size based on memory and system constraints.
         """
@@ -1056,6 +1060,14 @@ class MIMODatasetGenerator:
         except Exception as e:
             self.logger.debug(f"Memory monitoring error: {e}")
             pass
+
+    def _check_batch_size(self, requested_batch_size: int) -> int:
+        """Ensure batch size is within valid range"""
+        max_allowed = 2000  # Maximum allowed by PathLossManager
+        if requested_batch_size > max_allowed:
+            self.logger.warning(f"Reducing batch size from {requested_batch_size} to {max_allowed}")
+            return max_allowed
+        return requested_batch_size
     
     def _check_batch_size_safety(self, batch_size: int) -> int:
         """
