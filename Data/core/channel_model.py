@@ -311,7 +311,10 @@ class ChannelModelManager:
         try:
             # Ensure proper types and shapes
             batch_size = tf.cast(batch_size, tf.int32)
-            
+                    # Add shape verification
+            if tf.shape(snr_db)[0] < batch_size:
+            # Either pad the tensor or reduce batch_size
+                snr_db = tf.pad(snr_db, [[0, batch_size - tf.shape(snr_db)[0]]])
             # Ensure snr_db matches batch size by slicing and reshaping
             snr_db = tf.reshape(snr_db[:batch_size], [batch_size])
             
@@ -323,12 +326,6 @@ class ChannelModelManager:
             h_real = tf.random.normal(h_shape, mean=0.0, stddev=std_dev, dtype=tf.float32)
             h_imag = tf.random.normal(h_shape, mean=0.0, stddev=std_dev, dtype=tf.float32)
             h = tf.complex(h_real, h_imag)
-            
-            # Verify tensor shapes immediately after generation using explicit shapes
-            expected_shapes = {
-                'h': (batch_size, self.system_params.num_rx, self.system_params.num_tx),
-                'snr_db': (batch_size,)
-            }
             
             # Verify shapes using dynamic assertions
             tf.Assert(tf.equal(tf.shape(h)[0], batch_size), ["Channel batch size mismatch"])
