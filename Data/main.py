@@ -63,7 +63,7 @@ def parse_arguments():
     parser.add_argument(
         '--samples', 
         type=int, 
-        default=20_000_000,#900_000, 
+        default=21_000_000,#900_000, 
         help="Number of samples to generate (default: 1,000,000)"
     )
 

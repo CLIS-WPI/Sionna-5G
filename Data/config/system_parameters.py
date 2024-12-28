@@ -6,6 +6,14 @@ from datetime import datetime
 import json
 import logging
 
+# At the top of system_parameters.py
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    logging.warning("psutil not available, using default memory settings")
+
 @dataclasses.dataclass
 class SystemParameters:
     # Antenna Configuration
@@ -44,12 +52,14 @@ class SystemParameters:
     random_seed: int = 42  # Seed for reproducible results
     
     # Dataset Generation Parameters
-    total_samples: int = 20_000_000 #900_000
+    total_samples: int = 21_000_000 #900_000
     samples_per_modulation: int = None
-    replay_buffer_size: int = 20_000_000  # Add replay buffer size (this is for gpu server runing)
+    replay_buffer_size: int = 21_000_000  # Add replay buffer size (this is for gpu server runing)
+    # At the top of system_parameters.py
 
     def _initialize_hardware_parameters(self):
         try:
+            
             # Get system memory
             if PSUTIL_AVAILABLE:
                 system_memory_gb = psutil.virtual_memory().total / (1024**3)
@@ -119,7 +129,7 @@ class SystemParameters:
         self, 
         num_tx: int = 4,
         num_rx: int = 4,
-        total_samples: int = 20_000_000,#900_000,
+        total_samples: int = 21_000_000,#900_000,
         **kwargs
     ):
         """

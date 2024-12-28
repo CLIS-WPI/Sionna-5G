@@ -1061,26 +1061,31 @@ class MIMODatasetGenerator:
             pass
 
     def _check_batch_size(self, requested_batch_size: int) -> int:
-        """
-        Validate and adjust batch size based on hardware capabilities
-        """
+        """Validate and adjust batch size based on hardware capabilities"""
         try:
-            # Get max batch size from path loss manager if available
-            if hasattr(self, 'path_loss_manager') and hasattr(self.path_loss_manager, 'max_batch_size'):
+            # Get max batch size from path loss manager
+            if hasattr(self.path_loss_manager, 'max_batch_size'):
                 max_allowed = self.path_loss_manager.max_batch_size
             else:
-                # Default for H100 GPU
-                max_allowed = 64000
-            
+                max_allowed = 64000  # Default for H100
+                
             if requested_batch_size > max_allowed:
-                self.logger.warning(f"Batch size {requested_batch_size} exceeds max allowed ({max_allowed}). Reducing to {max_allowed}.")
+                self.logger.warning(
+                    f"Batch size {requested_batch_size} exceeds max allowed ({max_allowed}). "
+                    f"Reducing to {max_allowed}."
+                )
                 return max_allowed
-            
-            return requested_batch_size
+                
+            # Ensure batch size is a multiple of 1000 for better alignment
+            adjusted_batch_size = (requested_batch_size // 1000) * 1000
+            if adjusted_batch_size < self.path_loss_manager.min_batch_size:
+                adjusted_batch_size = self.path_loss_manager.min_batch_size
+                
+            return adjusted_batch_size
             
         except Exception as e:
             self.logger.warning(f"Error checking batch size: {str(e)}")
-            return 64000  # Safe default for H100
+            return 16000  # Safe default
     
     def _check_batch_size_safety(self, batch_size: int) -> int:
         """
@@ -1140,7 +1145,7 @@ class MIMODatasetGenerator:
 # Example usage
 def main():
     generator = MIMODatasetGenerator()
-    generator.generate_dataset(num_samples=20_000_000)
+    generator.generate_dataset(num_samples=21_000_000)
     generator.verify_dataset('dataset/mimo_dataset.h5')
 
 if __name__ == "__main__":
