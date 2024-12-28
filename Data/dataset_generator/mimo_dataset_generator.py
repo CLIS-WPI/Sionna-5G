@@ -1088,6 +1088,10 @@ class MIMODatasetGenerator:
         try:
             # Get max_batch_size from PathLossManager or use default
             max_batch_size = getattr(self.path_loss_manager.system_params, 'max_batch_size', self.max_batch_size)
+            
+            # Ensure integer type for batch size
+            batch_size = tf.cast(batch_size, tf.int32).numpy()
+            
             if batch_size > max_batch_size:
                 self.logger.warning(
                     f"Batch size {batch_size} exceeds max allowed by PathLossManager ({max_batch_size}). "
@@ -1114,7 +1118,7 @@ class MIMODatasetGenerator:
                         f"Batch size {batch_size} exceeds memory constraints. "
                         f"Reducing to {new_batch_size}."
                     )
-                    batch_size = max(1000, new_batch_size)  # Ensure minimum batch size of 1000
+                    batch_size = max(1000, new_batch_size)
 
             # Validate batch size compatibility with tensor shape requirements
             total_elements = batch_size * self.system_params.num_rx * self.system_params.num_tx
@@ -1126,14 +1130,86 @@ class MIMODatasetGenerator:
                 batch_size = (total_elements // (self.system_params.num_rx * self.system_params.num_tx))
 
             # Final check to ensure batch size is within safe limits
-            batch_size = min(batch_size, max_batch_size)
+            batch_size = min(int(batch_size), int(max_batch_size))
             self.logger.info(f"Final adjusted batch size: {batch_size}")
             return batch_size
 
         except Exception as e:
             self.logger.error(f"Error in batch size safety check: {e}. Falling back to conservative default.")
-            # Fall back to a conservative batch size if an error occurs
-            return min(batch_size, self.max_batch_size // 2)
+            return min(1000, self.max_batch_size // 2)
+
+    def generate_batch_data(self, batch_idx: int, batch_size: int):
+        """
+        Generate batch data with proper integer types for the current batch
+        
+        Args:
+            batch_idx (int): Index of the current batch
+            batch_size (int): Size of the batch to generate
+            
+        Returns:
+            tuple: Generated distances and SNR values for the batch
+        """
+        try:
+            # Ensure batch_size is int32
+            batch_size = tf.cast(batch_size, tf.int32)
+            
+            # Generate distances
+            distances = tf.random.uniform(
+                shape=[batch_size],
+                minval=self.system_params.min_distance,
+                maxval=self.system_params.max_distance,
+                dtype=tf.float32
+            )
+            
+            # Generate SNR values
+            snr_db = tf.random.uniform(
+                shape=[batch_size],
+                minval=self.system_params.snr_range[0],
+                maxval=self.system_params.snr_range[1],
+                dtype=tf.float32
+            )
+            
+            self.logger.debug(f"Generated batch {batch_idx} with size {batch_size}")
+            return distances, snr_db
+            
+        except Exception as e:
+            self.logger.error(f"Error generating batch data: {str(e)}")
+            raise
+
+    def _generate_channel_samples(self, batch_size: int):
+        """
+        Generate MIMO channel samples with proper integer types
+        
+        Args:
+            batch_size (int): Size of the batch to generate
+            
+        Returns:
+            tf.Tensor: Generated complex channel matrix
+        """
+        try:
+            # Ensure batch_size is int32
+            batch_size = tf.cast(batch_size, tf.int32)
+            
+            # Define shape as integer tensor
+            shape = tf.convert_to_tensor(
+                [batch_size, self.system_params.num_rx, self.system_params.num_tx], 
+                dtype=tf.int32
+            )
+            
+            # Generate complex channel matrix
+            channel_matrix = tf.complex(
+                tf.random.normal(shape, mean=0.0, stddev=1.0, dtype=tf.float32),
+                tf.random.normal(shape, mean=0.0, stddev=1.0, dtype=tf.float32)
+            ) / tf.sqrt(2.0)
+            
+            self.logger.debug(
+                f"Generated channel samples with shape: {channel_matrix.shape}"
+            )
+            return channel_matrix
+            
+        except Exception as e:
+            self.logger.error(f"Error generating channel samples: {str(e)}")
+            raise
 
 # Example usage
 def main():
