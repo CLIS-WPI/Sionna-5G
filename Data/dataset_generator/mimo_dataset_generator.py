@@ -10,7 +10,6 @@ import tensorflow as tf
 from tqdm import tqdm
 from datetime import datetime
 from typing import Dict
-
 # System configuration imports
 from config.system_parameters import SystemParameters
 from core.channel_model import ChannelModelManager
@@ -47,19 +46,19 @@ class MIMODatasetGenerator:
             logger (logging.Logger, optional): Logger instance
             max_batch_size (int, optional): Maximum allowed batch size for processing
         """
-        # Use default system parameters if not provided
-        self.max_batch_size = self._check_batch_size(max_batch_size)
-        self.system_params = system_params or SystemParameters()
-        self.max_batch_size = max_batch_size  # Maximum batch size parameter
-        self.batch_size_scaling = 0.5  # Default scaling factor
-        self.max_memory_fraction = 0.8  # Default memory fraction
-        
         # Configure logger
         self.logger = logger or LoggerManager.get_logger(
             name='MIMODatasetGenerator', 
             log_level='INFO'
         )
 
+        self.max_batch_size = max_batch_size  # Maximum batch size parameter
+        # Use default system parameters if not provided
+        self.max_batch_size = self._check_batch_size(max_batch_size)
+        self.system_params = system_params or SystemParameters()
+        self.batch_size_scaling = 0.5  # Default scaling factor
+        self.max_memory_fraction = 0.8  # Default memory fraction
+        
         # Initialize batch size based on memory constraints
         self._initialize_batch_size()
         
