@@ -52,7 +52,6 @@ class MIMODatasetGenerator:
             log_level='INFO'
         )
 
-        self.max_batch_size = max_batch_size  # Maximum batch size parameter
         # Use default system parameters if not provided
         self.max_batch_size = self._check_batch_size(max_batch_size)
         self.system_params = system_params or SystemParameters()
@@ -68,9 +67,13 @@ class MIMODatasetGenerator:
         self.path_loss_manager = PathLossManager(self.system_params)
         self.integrity_checker = None
         
+        #Now check batch size after components are initialized
+        self.max_batch_size = max_batch_size  # Maximum batch size parameter
+        # Initialize batch size based on memory constraints
+        self._initialize_batch_size()
         # Initialize hardware-adaptive parameters
         self._initialize_hardware_parameters()
-        
+
         self.validation_thresholds = {
             'eigenvalues': {'min': 1e-10, 'max': 100.0},  # Increased range
             'effective_snr': {'min': -50.0, 'max': 60.0},  # Wider SNR range
@@ -1058,17 +1061,26 @@ class MIMODatasetGenerator:
             pass
 
     def _check_batch_size(self, requested_batch_size: int) -> int:
-        """Validate and adjust batch size based on hardware capabilities"""
-        if hasattr(self.path_loss_manager, 'max_batch_size'):
-            max_allowed = self.path_loss_manager.max_batch_size
-        else:
-            max_allowed = 64000  # Default for H100
+        """
+        Validate and adjust batch size based on hardware capabilities
+        """
+        try:
+            # Get max batch size from path loss manager if available
+            if hasattr(self, 'path_loss_manager') and hasattr(self.path_loss_manager, 'max_batch_size'):
+                max_allowed = self.path_loss_manager.max_batch_size
+            else:
+                # Default for H100 GPU
+                max_allowed = 64000
             
-        if requested_batch_size > max_allowed:
-            self.logger.warning(f"Reducing batch size from {requested_batch_size} to {max_allowed}")
-            return max_allowed
-        
-        return requested_batch_size
+            if requested_batch_size > max_allowed:
+                self.logger.warning(f"Batch size {requested_batch_size} exceeds max allowed ({max_allowed}). Reducing to {max_allowed}.")
+                return max_allowed
+            
+            return requested_batch_size
+            
+        except Exception as e:
+            self.logger.warning(f"Error checking batch size: {str(e)}")
+            return 64000  # Safe default for H100
     
     def _check_batch_size_safety(self, batch_size: int) -> int:
         """
