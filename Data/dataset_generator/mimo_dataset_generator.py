@@ -36,7 +36,7 @@ class MIMODatasetGenerator:
         self, 
         system_params: SystemParameters = None,
         logger=None,
-        max_batch_size=10000  # Default maximum batch size
+        max_batch_size=10000
     ):
         """
         Initialize MIMO dataset generator
@@ -46,32 +46,31 @@ class MIMODatasetGenerator:
             logger (logging.Logger, optional): Logger instance
             max_batch_size (int, optional): Maximum allowed batch size for processing
         """
-        # Configure logger
+        # Configure logger first
         self.logger = logger or LoggerManager.get_logger(
             name='MIMODatasetGenerator', 
             log_level='INFO'
         )
 
         # Use default system parameters if not provided
-        self.max_batch_size = self._check_batch_size(max_batch_size)
         self.system_params = system_params or SystemParameters()
-        self.batch_size_scaling = 0.5  # Default scaling factor
-        self.max_memory_fraction = 0.8  # Default memory fraction
         
-        # Initialize batch size based on memory constraints
-        self._initialize_batch_size()
-        
-        # Initialize core components
+        # Initialize core components before batch size checks
+        self.path_loss_manager = PathLossManager(self.system_params)
         self.channel_model = ChannelModelManager(self.system_params)
         self.metrics_calculator = MetricsCalculator(self.system_params)
-        self.path_loss_manager = PathLossManager(self.system_params)
         self.integrity_checker = None
         
-        #Now check batch size after components are initialized
-        self.max_batch_size = max_batch_size  # Maximum batch size parameter
-        # Initialize batch size based on memory constraints
+        # Initialize batch size parameters
+        self.batch_size_scaling = 0.5  # Default scaling factor
+        self.max_memory_fraction = 0.8  # Default memory fraction
+        self.max_batch_size = max_batch_size
+        
+        # Now check and initialize batch size
+        self.batch_size = self._check_batch_size(max_batch_size)
         self._initialize_batch_size()
-        # Initialize hardware-adaptive parameters
+        
+        # Initialize hardware parameters last
         self._initialize_hardware_parameters()
 
         self.validation_thresholds = {
@@ -1061,31 +1060,25 @@ class MIMODatasetGenerator:
             pass
 
     def _check_batch_size(self, requested_batch_size: int) -> int:
-        """Validate and adjust batch size based on hardware capabilities"""
+        """
+        Validate and adjust batch size based on hardware capabilities
+        """
         try:
             # Get max batch size from path loss manager
-            if hasattr(self.path_loss_manager, 'max_batch_size'):
-                max_allowed = self.path_loss_manager.max_batch_size
-            else:
-                max_allowed = 64000  # Default for H100
-                
+            max_allowed = self.path_loss_manager.max_batch_size
+            
             if requested_batch_size > max_allowed:
                 self.logger.warning(
                     f"Batch size {requested_batch_size} exceeds max allowed ({max_allowed}). "
                     f"Reducing to {max_allowed}."
                 )
                 return max_allowed
-                
-            # Ensure batch size is a multiple of 1000 for better alignment
-            adjusted_batch_size = (requested_batch_size // 1000) * 1000
-            if adjusted_batch_size < self.path_loss_manager.min_batch_size:
-                adjusted_batch_size = self.path_loss_manager.min_batch_size
-                
-            return adjusted_batch_size
+            
+            return requested_batch_size
             
         except Exception as e:
             self.logger.warning(f"Error checking batch size: {str(e)}")
-            return 16000  # Safe default
+            return 4000  # Safe default for H100
     
     def _check_batch_size_safety(self, batch_size: int) -> int:
         """
