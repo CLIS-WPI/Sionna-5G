@@ -1081,55 +1081,33 @@ class MIMODatasetGenerator:
             return 4000  # Safe default for H100
     
     def _check_batch_size_safety(self, batch_size: int) -> int:
-        """
-        Verify and adjust batch size based on memory constraints, tensor shape requirements,
-        and PathLossManager settings.
-        """
         try:
-            # Get max_batch_size from PathLossManager or use default
+            # Get max_batch_size from PathLossManager
             max_batch_size = getattr(self.path_loss_manager.system_params, 'max_batch_size', self.max_batch_size)
             
             # Ensure integer type for batch size
-            batch_size = tf.cast(batch_size, tf.int32).numpy()
+            batch_size = int(tf.cast(batch_size, tf.int32).numpy())
             
             if batch_size > max_batch_size:
                 self.logger.warning(
                     f"Batch size {batch_size} exceeds max allowed by PathLossManager ({max_batch_size}). "
                     f"Reducing to {max_batch_size}."
                 )
-                batch_size = max_batch_size
+                batch_size = int(max_batch_size)  # Ensure integer
 
-            # Adjust batch size based on system memory availability
-            if PSUTIL_AVAILABLE:
-                available_memory = psutil.virtual_memory().available / (1024**3)  # Convert to GB
-                sample_size = self.system_params.num_tx * self.system_params.num_rx * 8 * 3  # Bytes per sample
-                memory_per_batch = (batch_size * sample_size) / (1024**3)  # Convert to GB
-
-                self.logger.info(
-                    f"Batch size {batch_size} requires ~{memory_per_batch:.2f} GB of memory. "
-                    f"Available system memory: {available_memory:.2f} GB."
-                )
-
-                # Adjust batch size if exceeding 40% of available memory
-                if memory_per_batch > available_memory * 0.4:
-                    new_batch_size = int((available_memory * 0.4 * 1024**3) / sample_size)
-                    new_batch_size = (new_batch_size // 1000) * 1000  # Round to nearest 1000
-                    self.logger.warning(
-                        f"Batch size {batch_size} exceeds memory constraints. "
-                        f"Reducing to {new_batch_size}."
-                    )
-                    batch_size = max(1000, new_batch_size)
-
-            # Validate batch size compatibility with tensor shape requirements
+            # Calculate total elements needed
             total_elements = batch_size * self.system_params.num_rx * self.system_params.num_tx
+            
+            # Adjust batch size to ensure it's compatible with tensor dimensions
             if total_elements % (self.system_params.num_rx * self.system_params.num_tx) != 0:
+                adjusted_batch_size = total_elements // (self.system_params.num_rx * self.system_params.num_tx)
                 self.logger.warning(
-                    f"Batch size {batch_size} is not compatible with the required tensor dimensions. "
-                    f"Adjusting to nearest valid batch size."
+                    f"Adjusting batch size from {batch_size} to {adjusted_batch_size} "
+                    f"to match tensor dimensions"
                 )
-                batch_size = (total_elements // (self.system_params.num_rx * self.system_params.num_tx))
+                batch_size = adjusted_batch_size
 
-            # Final check to ensure batch size is within safe limits
+            # Final validation
             batch_size = min(int(batch_size), int(max_batch_size))
             self.logger.info(f"Final adjusted batch size: {batch_size}")
             return batch_size

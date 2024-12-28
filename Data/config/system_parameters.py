@@ -73,7 +73,7 @@ class SystemParameters:
                 # Force H100 configuration for your setup
                 self.batch_size = 4000  # Conservative batch size
                 self.memory_threshold = 40.0  # 40GB per GPU
-                self.max_batch_size = 4000  # Match with PathLossManager
+                self.max_batch_size = 6000  # Match with PathLossManager
                 self.min_batch_size = 1000  # Conservative minimum
                 
                 # Configure each GPU
