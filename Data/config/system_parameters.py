@@ -49,9 +49,6 @@ class SystemParameters:
     replay_buffer_size: int = 20_000_000  # Add replay buffer size (this is for gpu server runing)
 
     def _initialize_hardware_parameters(self):
-        """
-        Initialize hardware parameters for GPU/CPU configuration
-        """
         try:
             # Import psutil if available for memory monitoring
             try:
@@ -76,16 +73,16 @@ class SystemParameters:
                 is_h100 = 'H100' in gpu_name.upper()
                 
                 if is_h100:
-                    # H100 GPU configuration
-                    self.batch_size = int(64000 * self.batch_size_scaling)
+                    # H100 GPU configuration - use consistent values
+                    self.batch_size = 64000
                     self.memory_threshold = self.max_memory_fraction * 80.0  # H100 has 80GB
-                    self.max_batch_size = 96000
-                    self.min_batch_size = 16000
+                    self.max_batch_size = 64000  # Match PathLossManager
+                    self.min_batch_size = 16000  # Match PathLossManager
                 else:
                     # Standard GPU configuration
-                    self.batch_size = int(1000 * self.batch_size_scaling)
-                    self.memory_threshold = self.max_memory_fraction * 16.0  # Assuming 16GB GPU
-                    self.max_batch_size = int(4000 * self.batch_size_scaling)
+                    self.batch_size = 1000
+                    self.memory_threshold = self.max_memory_fraction * 16.0
+                    self.max_batch_size = 4000
                     self.min_batch_size = 500
                 
                 # Basic cleanup
@@ -94,7 +91,7 @@ class SystemParameters:
             else:
                 # CPU configuration
                 self.batch_size = 500
-                self.memory_threshold = system_memory_gb * 0.2  # Use 20% of system memory
+                self.memory_threshold = system_memory_gb * 0.2
                 self.max_batch_size = 2000
                 self.min_batch_size = 250
                 

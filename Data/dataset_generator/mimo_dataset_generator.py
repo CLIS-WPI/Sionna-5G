@@ -1058,11 +1058,16 @@ class MIMODatasetGenerator:
             pass
 
     def _check_batch_size(self, requested_batch_size: int) -> int:
-        """Ensure batch size is within valid range"""
-        max_allowed = 64000  # Maximum allowed by PathLossManager
+        """Validate and adjust batch size based on hardware capabilities"""
+        if hasattr(self.path_loss_manager, 'max_batch_size'):
+            max_allowed = self.path_loss_manager.max_batch_size
+        else:
+            max_allowed = 64000  # Default for H100
+            
         if requested_batch_size > max_allowed:
             self.logger.warning(f"Reducing batch size from {requested_batch_size} to {max_allowed}")
             return max_allowed
+        
         return requested_batch_size
     
     def _check_batch_size_safety(self, batch_size: int) -> int:
