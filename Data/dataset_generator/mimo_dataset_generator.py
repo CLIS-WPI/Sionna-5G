@@ -136,9 +136,6 @@ class MIMODatasetGenerator:
             self.memory_callback = None
 
     def _initialize_batch_size(self):
-        initial_batch_size = self.calculate_initial_batch_size()
-        self.batch_size = self._check_batch_size(initial_batch_size)
-        self.logger.info(f"Initialized batch size to: {self.batch_size}")
         """
         Initialize batch size based on memory and system constraints.
         """
