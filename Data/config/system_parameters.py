@@ -50,50 +50,36 @@ class SystemParameters:
 
     def _initialize_hardware_parameters(self):
         try:
-            # Import psutil if available for memory monitoring
-            try:
-                import psutil
-                PSUTIL_AVAILABLE = True
-            except ImportError:
-                PSUTIL_AVAILABLE = False
-                logging.warning("psutil not available, using default memory settings")
-
-            # Get system memory if possible
+            # Get system memory
             if PSUTIL_AVAILABLE:
                 system_memory_gb = psutil.virtual_memory().total / (1024**3)
                 logging.info(f"Total System Memory: {system_memory_gb:.1f} GB")
             else:
-                system_memory_gb = 64.0  # Default assumption
+                system_memory_gb = 196.0  # Default assumption
                 
             # Check for GPU availability
             gpus = tf.config.list_physical_devices('GPU')
             if gpus:
-                # Detect GPU type (H100 vs others)
-                gpu_name = tf.test.gpu_device_name()
-                is_h100 = 'H100' in gpu_name.upper()
+                # Force H100 configuration for your setup
+                self.batch_size = 4000  # Conservative batch size
+                self.memory_threshold = 40.0  # 40GB per GPU
+                self.max_batch_size = 4000  # Match with PathLossManager
+                self.min_batch_size = 1000  # Conservative minimum
                 
-                if is_h100:
-                    # H100 GPU configuration - use consistent values
-                    self.batch_size = 64000
-                    self.memory_threshold = self.max_memory_fraction * 80.0  # H100 has 80GB
-                    self.max_batch_size = 64000  # Match PathLossManager
-                    self.min_batch_size = 16000  # Match PathLossManager
-                else:
-                    # Standard GPU configuration
-                    self.batch_size = 1000
-                    self.memory_threshold = self.max_memory_fraction * 16.0
-                    self.max_batch_size = 4000
-                    self.min_batch_size = 500
+                # Configure each GPU
+                for gpu in gpus:
+                    tf.config.experimental.set_memory_growth(gpu, True)
                 
-                # Basic cleanup
-                tf.keras.backend.clear_session()
-                
+                if len(gpus) > 1:
+                    self.batch_size *= 1.5  # Slight increase for multi-GPU
+                    self.max_batch_size *= 1.5
+                    
             else:
                 # CPU configuration
-                self.batch_size = 500
+                self.batch_size = 1000
                 self.memory_threshold = system_memory_gb * 0.2
                 self.max_batch_size = 2000
-                self.min_batch_size = 250
+                self.min_batch_size = 500
                 
             logging.info(f"Hardware Configuration:")
             logging.info(f"- Batch size: {self.batch_size}")
@@ -104,10 +90,10 @@ class SystemParameters:
         except Exception as e:
             logging.warning(f"Hardware initialization error: {e}")
             # Conservative fallback settings
-            self.batch_size = 500
+            self.batch_size = 1000
             self.memory_threshold = 4.0
             self.max_batch_size = 2000
-            self.min_batch_size = 250
+            self.min_batch_size = 500
             
     def __post_init__(self):
         """

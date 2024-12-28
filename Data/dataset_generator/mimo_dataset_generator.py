@@ -147,10 +147,10 @@ class MIMODatasetGenerator:
                 # Estimate memory available and set a safe batch size
                 available_memory = psutil.virtual_memory().available / (1024**3)  # Convert to GB
                 estimated_batch_size = int(available_memory / 0.5)  # Use half of the available memory
-                self.batch_size = min(self.max_batch_size, estimated_batch_size)
+                self.batch_size = min(4000, int(available_memory * 100))
             else:
                 # Default to conservative batch size
-                self.batch_size = self.max_batch_size // 4
+                self.batch_size = 4000
             self.logger.info(f"Initialized batch size to: {self.batch_size}")
         except Exception as e:
             self.logger.error(f"Error during batch size initialization: {str(e)}")

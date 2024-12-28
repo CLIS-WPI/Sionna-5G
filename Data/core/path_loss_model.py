@@ -30,8 +30,8 @@ class PathLossManager:
         """
         # Initialize system parameters
         self.system_params = system_params or SystemParameters()
-        self.max_batch_size = 64000
-        self.min_batch_size = 16000
+        self.max_batch_size = 4000
+        self.min_batch_size = 1000
         
         # Initialize logger
         self.logger = LoggerManager.get_logger(__name__)
