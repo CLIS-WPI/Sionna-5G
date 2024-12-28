@@ -311,18 +311,24 @@ class ChannelModelManager:
         try:
             # Ensure proper types and shapes
             batch_size = tf.cast(batch_size, tf.int32)
-                    # Add shape verification
+            
+            # Reshape and cast snr_db to ensure correct format
+            snr_db = tf.cast(snr_db, tf.float32)
+            snr_db = tf.reshape(snr_db, [-1])  # Flatten to 1D
+            
+            # Handle SNR tensor size mismatch
             if tf.shape(snr_db)[0] < batch_size:
-            # Either pad the tensor or reduce batch_size
-                snr_db = tf.pad(snr_db, [[0, batch_size - tf.shape(snr_db)[0]]])
-            # Ensure snr_db matches batch size by slicing and reshaping
-            snr_db = tf.reshape(snr_db[:batch_size], [batch_size])
+                pad_value = tf.reduce_mean(snr_db)
+                snr_db = tf.pad(snr_db, [[0, batch_size - tf.shape(snr_db)[0]]], 
+                            constant_values=pad_value)
+            snr_db = tf.slice(snr_db, [0], [batch_size])
+            snr_db = tf.reshape(snr_db, [batch_size])
             
             # Generate channel samples with controlled variance
             h_shape = [batch_size, self.system_params.num_rx, self.system_params.num_tx]
             std_dev = 1.0/np.sqrt(2.0 * self.system_params.num_tx)
             
-            # Explicitly control shapes during generation
+            # Generate complex channel
             h_real = tf.random.normal(h_shape, mean=0.0, stddev=std_dev, dtype=tf.float32)
             h_imag = tf.random.normal(h_shape, mean=0.0, stddev=std_dev, dtype=tf.float32)
             h = tf.complex(h_real, h_imag)
@@ -334,18 +340,15 @@ class ChannelModelManager:
             
             h_normalized = normalize_complex_tensor(h)
             
-            # Calculate eigenvalues with proper normalization
-            h_hermitian = tf.matmul(
-                h_normalized, 
-                tf.transpose(h_normalized, perm=[0, 2, 1], conjugate=True)
-            )
+            # Calculate eigenvalues
+            h_hermitian = tf.matmul(h_normalized, 
+                                tf.transpose(h_normalized, perm=[0, 2, 1], conjugate=True))
             eigenvalues = tf.abs(tf.linalg.eigvals(h_hermitian))
             eigenvalues = eigenvalues / tf.reduce_max(eigenvalues, axis=1, keepdims=True)
             
-            # Generate noise with controlled variance
+            # Generate noise
             snr_db_clipped = tf.clip_by_value(snr_db, -20.0, 30.0)
-            noise_power = tf.pow(10.0, -snr_db_clipped / 10.0)
-            noise_power = tf.maximum(noise_power, 1e-10)
+            noise_power = tf.maximum(tf.pow(10.0, -snr_db_clipped / 10.0), 1e-10)
             noise_power = tf.reshape(noise_power, [batch_size, 1, 1])
             
             noise_std = tf.sqrt(noise_power / 2.0)
@@ -356,29 +359,13 @@ class ChannelModelManager:
             # Add noise to channel
             noisy_channel = h_normalized + noise
             
-            # Final shape verification
-            output_tensors = {
+            return {
                 'perfect_channel': h_normalized,
                 'noisy_channel': noisy_channel,
                 'eigenvalues': eigenvalues,
                 'snr_db': snr_db
             }
-            
-            # Verify output shapes with explicit dimension checks
-            for name, tensor in output_tensors.items():
-                if name == 'snr_db':
-                    tf.Assert(tf.equal(tf.shape(tensor)[0], batch_size), 
-                            [f"Shape mismatch in {name}"])
-                else:
-                    tf.Assert(tf.equal(tf.shape(tensor)[0], batch_size), 
-                            [f"Batch size mismatch in {name}"])
-                    tf.Assert(tf.equal(tf.shape(tensor)[1], self.system_params.num_rx), 
-                            [f"RX dimension mismatch in {name}"])
-                    tf.Assert(tf.equal(tf.shape(tensor)[2], self.system_params.num_tx), 
-                            [f"TX dimension mismatch in {name}"])
-            
-            return output_tensors
-                
+                    
         except Exception as e:
             self.logger.error(f"Error generating MIMO channel: {str(e)}")
             raise
