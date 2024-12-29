@@ -16,24 +16,16 @@ import tensorflow as tf
 from typing import Dict
 
 def clear_gpu_memory():
-    """Enhanced GPU memory cleanup"""
     try:
-        # Clear TensorFlow session
         tf.keras.backend.clear_session()
-        
-        # Reset GPU memory stats
         gpus = tf.config.list_physical_devices('GPU')
         for gpu in gpus:
             try:
                 tf.config.experimental.reset_memory_stats(gpu)
             except:
                 pass
-        
-        # Force garbage collection
-        import gc
         gc.collect()
-        
-        # Clear PyTorch cache if available
+        # PyTorch cleanup if available
         try:
             import torch
             if torch.cuda.is_available():
@@ -106,7 +98,7 @@ def parse_arguments():
     parser.add_argument(
         '--samples', 
         type=int, 
-        default=21_000_000,#900_000, 
+        default=21_000_000, 
         help="Number of samples to generate (default: 1,000,000)"
     )
 
@@ -258,16 +250,6 @@ def main():
             try:
                 memory_info = tf.config.experimental.get_memory_info('GPU:0')
                 logger.info(f"Initial GPU memory usage: {memory_info['current'] / 1e9:.2f} GB")
-                
-                # Add memory monitoring callback
-                def memory_monitoring_callback():
-                    try:
-                        current_memory = tf.config.experimental.get_memory_info('GPU:0')['current'] / 1e9
-                        if current_memory > 0.8:  # If using more than 80% memory
-                            logger.warning(f"High GPU memory usage detected: {current_memory:.2f} GB")
-                    except:
-                        pass
-                
             except Exception as e:
                 logger.warning(f"GPU memory monitoring not available: {e}")
 
@@ -377,7 +359,7 @@ def main():
         
         logger.error(f"Critical error during execution: {str(e)}", exc_info=True)
         return 1
-    
+        
 if __name__ == "__main__":
     try:
         # Set environment variables before any TF operations
