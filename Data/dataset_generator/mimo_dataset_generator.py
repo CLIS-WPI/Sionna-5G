@@ -607,6 +607,11 @@ class MIMODatasetGenerator:
                                     f"but got {actual_elements}. Adjusting batch size or input parameters."
                                 )
                                 raise ValueError("Tensor size mismatch detected during reshaping.")
+                            
+                            # Calculate correct batch size
+                            correct_batch_size = actual_elements // (self.system_params.num_rx * self.system_params.num_tx)
+                            self.logger.warning(f"Adjusting batch size from {self.batch_size} to {correct_batch_size}")
+                            self.batch_size = correct_batch_size
 
                             # Ensure correct shape [batch_size, num_rx, num_tx]
                             h_perfect = tf.reshape(h_perfect, 
@@ -1189,15 +1194,26 @@ class MIMODatasetGenerator:
     
     def _check_batch_size_safety(self, batch_size: int) -> int:
         """
-        Ensure batch size is compatible with tensor dimensions
+        Ensure batch size is compatible with tensor dimensions and memory constraints
+        
+        Args:
+            batch_size (int): Initial batch size to check
+            
+        Returns:
+            int: Safe and adjusted batch size
         """
         try:
+            # Print initial batch size for debugging
+            print(f"\nInitial batch size before safety checks: {batch_size}")
+            
             # Get max_batch_size from PathLossManager
             max_batch_size = getattr(self.path_loss_manager.system_params, 'max_batch_size', self.max_batch_size)
+            print(f"Maximum allowed batch size from PathLossManager: {max_batch_size}")
             
             # Ensure integer type for batch size
             batch_size = int(tf.cast(batch_size, tf.int32).numpy())
             
+            # Check against maximum allowed batch size
             if batch_size > max_batch_size:
                 self.logger.warning(
                     f"Batch size {batch_size} exceeds max allowed by PathLossManager ({max_batch_size}). "
@@ -1205,25 +1221,62 @@ class MIMODatasetGenerator:
                 )
                 batch_size = int(max_batch_size)
             
-            # Ensure batch size is compatible with MIMO dimensions
+            # Get MIMO dimensions
             num_rx = self.system_params.num_rx
             num_tx = self.system_params.num_tx
-            total_elements = batch_size * num_rx * num_tx
+            print(f"MIMO dimensions - RX: {num_rx}, TX: {num_tx}")
             
-            # Adjust batch size if needed to ensure proper tensor dimensions
+            # Calculate total elements
+            total_elements = batch_size * num_rx * num_tx
+            print(f"Total elements with current batch size: {total_elements}")
+            
+            # Calculate maximum allowed elements
+            max_elements = 9000 * num_rx * num_tx  # 9000 is the safe maximum batch size
+            print(f"Maximum allowed elements: {max_elements}")
+            
+            # Check if total elements exceeds maximum
+            if total_elements > max_elements:
+                adjusted_batch_size = max_elements // (num_rx * num_tx)
+                self.logger.warning(
+                    f"Total elements {total_elements} exceeds maximum {max_elements}. "
+                    f"Adjusting batch size from {batch_size} to {adjusted_batch_size}"
+                )
+                batch_size = adjusted_batch_size
+                total_elements = batch_size * num_rx * num_tx
+            
+            # Verify tensor dimensions compatibility
             if total_elements % (num_rx * num_tx) != 0:
                 adjusted_batch_size = total_elements // (num_rx * num_tx)
                 self.logger.warning(
-                    f"Adjusting batch size from {batch_size} to {adjusted_batch_size} "
-                    f"to match MIMO dimensions"
+                    f"Batch size {batch_size} not compatible with MIMO dimensions ({num_rx}x{num_tx}). "
+                    f"Adjusting to {adjusted_batch_size}"
                 )
                 batch_size = adjusted_batch_size
+            
+            # Apply minimum batch size constraint
+            min_batch_size = 1000  # Minimum safe batch size
+            if batch_size < min_batch_size:
+                self.logger.warning(
+                    f"Batch size {batch_size} below minimum {min_batch_size}. "
+                    f"Setting to minimum."
+                )
+                batch_size = min_batch_size
+            
+            # Final validation
+            final_elements = batch_size * num_rx * num_tx
+            print(f"\nFinal validation:")
+            print(f"- Final batch size: {batch_size}")
+            print(f"- Final total elements: {final_elements}")
+            print(f"- Dimensions check: {final_elements % (num_rx * num_tx) == 0}")
+            print(f"- Maximum check: {final_elements <= max_elements}")
             
             self.logger.info(f"Final adjusted batch size: {batch_size}")
             return batch_size
             
         except Exception as e:
-            self.logger.error(f"Error in batch size safety check: {e}")
+            error_msg = f"Error in batch size safety check: {str(e)}"
+            print(f"\nERROR: {error_msg}")
+            self.logger.error(error_msg)
             return 1000  # Conservative fallback
 
     def generate_batch_data(self, batch_idx: int, batch_size: int):
