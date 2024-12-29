@@ -828,24 +828,78 @@ class MIMODatasetGenerator:
                 f.attrs['total_samples_generated'] = num_samples
                 f.attrs['final_batch_size'] = self.batch_size
                 
-                # Verify dataset integrity
-                self.integrity_checker = MIMODatasetIntegrityChecker(save_path)
-                integrity_report = self.integrity_checker.check_dataset_integrity()
-                
-                if integrity_report['overall_status']:
-                    self.logger.info("Dataset integrity verification passed")
-                    return True
-                else:
-                    self.logger.error("Dataset integrity verification failed")
-                    self.logger.error("Integrity report:", integrity_report)
-                    return False
-
+                # Verify dataset integrity with enhanced reporting
+                try:
+                    self.integrity_checker = MIMODatasetIntegrityChecker(save_path)
+                    with self.integrity_checker as checker:
+                        # Perform comprehensive validation
+                        integrity_report = checker.check_dataset_integrity()
+                        
+                        if integrity_report['overall_status']:
+                            self.logger.info("✅ Dataset integrity verification passed")
+                            
+                            # Log detailed statistics
+                            if 'validation_details' in integrity_report:
+                                self.logger.info("\nValidation Details:")
+                                for key, stats in integrity_report['validation_details'].items():
+                                    self.logger.info(f"\n{key}:")
+                                    for stat_name, value in stats.items():
+                                        self.logger.info(f"  {stat_name}: {value}")
+                            
+                            # Log modulation scheme statistics
+                            if 'modulation_schemes' in integrity_report:
+                                self.logger.info("\nModulation Scheme Details:")
+                                for mod_scheme, details in integrity_report['modulation_schemes'].items():
+                                    self.logger.info(f"\n{mod_scheme}:")
+                                    self.logger.info(f"  Samples: {details.get('samples', 0)}")
+                                    self.logger.info(f"  Status: {'✅ Valid' if details.get('integrity', False) else '❌ Invalid'}")
+                                    
+                                    # Log dataset-specific statistics if available
+                                    if 'datasets' in details:
+                                        for dataset_name, dataset_stats in details['datasets'].items():
+                                            if dataset_stats.get('valid', False):
+                                                self.logger.info(f"  {dataset_name}: ✅ Valid")
+                                            else:
+                                                self.logger.warning(f"  {dataset_name}: ❌ Invalid")
+                            
+                            # Log any warnings
+                            if 'warnings' in integrity_report and integrity_report['warnings']:
+                                self.logger.warning("\nWarnings:")
+                                for warning in integrity_report['warnings']:
+                                    self.logger.warning(f"  • {warning}")
+                            
+                            self.logger.info(f"\nTotal samples verified: {integrity_report.get('total_samples', 0)}")
+                            return True
+                        else:
+                            self.logger.error("❌ Dataset integrity verification failed")
+                            
+                            # Log all errors
+                            if 'errors' in integrity_report:
+                                self.logger.error("\nErrors:")
+                                for error in integrity_report['errors']:
+                                    self.logger.error(f"  • {error}")
+                                    
+                            # Log specific validation failures
+                            if 'validation_details' in integrity_report:
+                                self.logger.error("\nValidation Failures:")
+                                for key, stats in integrity_report['validation_details'].items():
+                                    if isinstance(stats, dict) and ('errors' in stats or 'failed' in stats):
+                                        self.logger.error(f"\n{key}:")
+                                        if 'errors' in stats:
+                                            for error in stats['errors']:
+                                                self.logger.error(f"  • {error}")
+                            
+                            return False
+                            
+                except Exception as e:
+                            self.logger.error(f"Critical error during integrity verification: {str(e)}")
+                            self.logger.error("Detailed error traceback:", exc_info=True)
+                return False
+            
         except Exception as e:
             self.logger.error(f"Dataset generation failed: {str(e)}")
             self.logger.error("Detailed error traceback:", exc_info=True)
-            raise
-
-        
+        return False
     def _process_batch(self, batch_size: int, mod_scheme: str) -> Dict[str, tf.Tensor]:
         """
         Process a single batch of data
@@ -984,6 +1038,59 @@ class MIMODatasetGenerator:
             self.logger.error(f"Dataset verification error: {str(e)}")
             return False
         
+    def verify_and_report(self, save_path: str) -> bool:
+        """
+        Comprehensive verification of generated dataset with detailed reporting
+        
+        Args:
+            save_path: Path to the generated dataset
+            
+        Returns:
+            bool: True if verification passed
+        """
+        try:
+            # First verify using internal checks
+            if not self.verify_dataset(save_path):
+                self.logger.error("Internal dataset verification failed")
+                return False
+                
+            # Then use the integrity checker for comprehensive validation
+            with MIMODatasetIntegrityChecker(save_path) as checker:
+                integrity_report = checker.check_dataset_integrity()
+                
+                if integrity_report['overall_status']:
+                    self.logger.info("✅ Dataset integrity verification passed")
+                    
+                    # Log detailed statistics
+                    if 'validation_details' in integrity_report:
+                        self.logger.info("\nValidation Details:")
+                        for key, stats in integrity_report['validation_details'].items():
+                            self.logger.info(f"\n{key}:")
+                            for stat_name, value in stats.items():
+                                self.logger.info(f"  {stat_name}: {value}")
+                    
+                    # Log modulation scheme statistics
+                    self.logger.info("\nModulation Scheme Details:")
+                    for mod_scheme, details in integrity_report['modulation_schemes'].items():
+                        self.logger.info(f"\n{mod_scheme}:")
+                        self.logger.info(f"  Samples: {details.get('samples', 0)}")
+                        self.logger.info(f"  Status: {'✅ Valid' if details.get('integrity', False) else '❌ Invalid'}")
+                        
+                    return True
+                else:
+                    self.logger.error("❌ Dataset integrity verification failed")
+                    if 'errors' in integrity_report:
+                        for error in integrity_report['errors']:
+                            self.logger.error(f"  • {error}")
+                    if 'warnings' in integrity_report:
+                        for warning in integrity_report['warnings']:
+                            self.logger.warning(f"  • {warning}")
+                    return False
+                    
+        except Exception as e:
+            self.logger.error(f"Error during verification: {str(e)}")
+            return False
+            
     # In mimo_dataset_generator.py, enhance memory management:
     def _manage_memory(self):
         """

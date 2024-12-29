@@ -55,8 +55,8 @@ class MIMODatasetIntegrityChecker:
 
     def check_dataset_integrity(self) -> Dict[str, Any]:
         """
-        Perform comprehensive dataset integrity checks
-
+        Perform comprehensive dataset integrity checks with enhanced validation
+        
         Returns:
             Dict[str, Any]: Detailed integrity check results including:
                 - overall_status: bool indicating if all checks passed
@@ -65,6 +65,8 @@ class MIMODatasetIntegrityChecker:
                 - configuration: configuration validation results
                 - statistical_checks: results of statistical analysis
                 - errors: list of any errors encountered
+                - warnings: list of non-critical issues
+                - validation_details: detailed validation metrics
         """
         integrity_report = {
             'overall_status': True,
@@ -72,78 +74,210 @@ class MIMODatasetIntegrityChecker:
             'modulation_schemes': {},
             'configuration': {},
             'statistical_checks': {},
-            'errors': []
+            'errors': [],
+            'warnings': [],
+            'validation_details': {}
         }
 
         try:
-            # Check dataset structure
+            # Check dataset structure with enhanced validation
             try:
                 structure_valid = self._check_dataset_structure()
                 integrity_report['overall_status'] &= structure_valid
                 if not structure_valid:
                     integrity_report['errors'].append("Dataset structure validation failed")
+                    
+                # Additional structure validation
+                with h5py.File(self.dataset_path, 'r') as f:
+                    # Verify required groups exist
+                    required_groups = ['modulation_data', 'path_loss_data', 'configuration']
+                    for group in required_groups:
+                        if group not in f:
+                            integrity_report['errors'].append(f"Missing required group: {group}")
+                            integrity_report['overall_status'] = False
+                    
+                    # Check group attributes
+                    if 'configuration' in f:
+                        required_attrs = ['creation_date', 'total_samples']
+                        for attr in required_attrs:
+                            if attr not in f['configuration'].attrs:
+                                integrity_report['warnings'].append(
+                                    f"Missing configuration attribute: {attr}"
+                                )
+                    
             except Exception as e:
                 integrity_report['errors'].append(f"Structure check error: {str(e)}")
                 integrity_report['overall_status'] = False
 
-            # Configuration validation
+            # Enhanced configuration validation
             try:
                 config_result = self._validate_configuration()
                 integrity_report['configuration'] = config_result
                 if not config_result.get('valid', False):
                     integrity_report['overall_status'] = False
                     integrity_report['errors'].append("Configuration validation failed")
+                    
+                # Additional configuration checks
+                if 'num_tx' in config_result and 'num_rx' in config_result:
+                    if config_result['num_tx']['value'] <= 0 or config_result['num_rx']['value'] <= 0:
+                        integrity_report['errors'].append("Invalid antenna configuration")
+                        integrity_report['overall_status'] = False
+                        
             except Exception as e:
                 integrity_report['errors'].append(f"Configuration validation error: {str(e)}")
                 integrity_report['overall_status'] = False
 
+            # Enhanced path loss validation
             try:
-                # Verify path loss data
-                for dataset_name in ['fspl', 'scenario_pathloss']:
-                    path_loss_data = f['path_loss_data'][dataset_name][:]
-                    is_valid, pl_errors = self._verify_path_loss_values(path_loss_data)
-                    
-                    if not is_valid:
+                with h5py.File(self.dataset_path, 'r') as f:
+                    if 'path_loss_data' in f:
+                        for dataset_name in ['fspl', 'scenario_pathloss']:
+                            if dataset_name not in f['path_loss_data']:
+                                integrity_report['errors'].append(
+                                    f"Missing path loss dataset: {dataset_name}"
+                                )
+                                integrity_report['overall_status'] = False
+                                continue
+                                
+                            path_loss_data = f['path_loss_data'][dataset_name][:]
+                            
+                            # Validate path loss values
+                            is_valid, pl_errors = self._verify_path_loss_values(path_loss_data)
+                            
+                            if not is_valid:
+                                integrity_report['overall_status'] = False
+                                integrity_report['errors'].extend([
+                                    f"Path loss validation failed for {dataset_name}:"
+                                ] + pl_errors)
+                                
+                            # Additional path loss statistics
+                            pl_stats = {
+                                'mean': float(np.mean(path_loss_data)),
+                                'std': float(np.std(path_loss_data)),
+                                'min': float(np.min(path_loss_data)),
+                                'max': float(np.max(path_loss_data)),
+                                'zeros': int(np.sum(path_loss_data == 0)),
+                                'non_finite': int(np.sum(~np.isfinite(path_loss_data)))
+                            }
+                            
+                            integrity_report['validation_details'][f'{dataset_name}_stats'] = pl_stats
+                            
+                            # Check for suspicious values
+                            if pl_stats['zeros'] > 0:
+                                integrity_report['warnings'].append(
+                                    f"Found {pl_stats['zeros']} zero values in {dataset_name}"
+                                )
+                            if pl_stats['non_finite'] > 0:
+                                integrity_report['errors'].append(
+                                    f"Found {pl_stats['non_finite']} non-finite values in {dataset_name}"
+                                )
+                                integrity_report['overall_status'] = False
+                                
+                    else:
+                        integrity_report['errors'].append("Missing path_loss_data group")
                         integrity_report['overall_status'] = False
-                        integrity_report['errors'].extend([
-                            f"Path loss validation failed for {dataset_name}:"
-                        ] + pl_errors)
+                        
             except Exception as e:
                 integrity_report['errors'].append(f"Error checking path loss data: {str(e)}")
                 integrity_report['overall_status'] = False
 
-            # Check modulation-specific integrity
+            # Enhanced modulation scheme validation
             total_samples = 0
-            for mod_scheme in self.modulation_schemes:
-                try:
-                    mod_report = self._check_modulation_scheme_integrity(mod_scheme)
-                    integrity_report['modulation_schemes'][mod_scheme] = mod_report
-                    integrity_report['overall_status'] &= mod_report.get('integrity', False)
-                    total_samples += mod_report.get('samples', 0)
-                    
-                    if not mod_report.get('integrity', False):
-                        integrity_report['errors'].append(
-                            f"Integrity check failed for modulation scheme: {mod_scheme}"
-                        )
-                except Exception as e:
-                    integrity_report['errors'].append(
-                        f"Error checking modulation scheme {mod_scheme}: {str(e)}"
-                    )
-                    integrity_report['overall_status'] = False
-                    integrity_report['modulation_schemes'][mod_scheme] = {
-                        'integrity': False,
-                        'error': str(e)
-                    }
+            try:
+                with h5py.File(self.dataset_path, 'r') as f:
+                    if 'modulation_data' not in f:
+                        integrity_report['errors'].append("Missing modulation_data group")
+                        integrity_report['overall_status'] = False
+                    else:
+                        for mod_scheme in self.modulation_schemes:
+                            try:
+                                # Check modulation scheme existence
+                                if mod_scheme not in f['modulation_data']:
+                                    integrity_report['errors'].append(
+                                        f"Missing data for modulation scheme: {mod_scheme}"
+                                    )
+                                    integrity_report['overall_status'] = False
+                                    continue
+                                    
+                                # Validate modulation scheme data
+                                mod_report = self._check_modulation_scheme_integrity(mod_scheme)
+                                integrity_report['modulation_schemes'][mod_scheme] = mod_report
+                                
+                                if not mod_report.get('integrity', False):
+                                    integrity_report['errors'].append(
+                                        f"Integrity check failed for modulation scheme: {mod_scheme}"
+                                    )
+                                    integrity_report['overall_status'] = False
+                                
+                                # Count samples
+                                samples = mod_report.get('samples', 0)
+                                total_samples += samples
+                                
+                                # Additional modulation scheme validation
+                                mod_group = f['modulation_data'][mod_scheme]
+                                required_datasets = [
+                                    'channel_response', 'sinr', 'spectral_efficiency',
+                                    'effective_snr', 'eigenvalues', 'ber', 'throughput'
+                                ]
+                                
+                                for dataset in required_datasets:
+                                    if dataset not in mod_group:
+                                        integrity_report['errors'].append(
+                                            f"Missing {dataset} dataset for {mod_scheme}"
+                                        )
+                                        integrity_report['overall_status'] = False
+                                        continue
+                                        
+                                    data = mod_group[dataset][:]
+                                    
+                                    # Dataset statistics
+                                    stats = {
+                                        'mean': float(np.mean(np.abs(data))),
+                                        'std': float(np.std(np.abs(data))),
+                                        'min': float(np.min(np.abs(data))),
+                                        'max': float(np.max(np.abs(data))),
+                                        'zeros': int(np.sum(data == 0)),
+                                        'non_finite': int(np.sum(~np.isfinite(data)))
+                                    }
+                                    
+                                    integrity_report['validation_details'][f'{mod_scheme}_{dataset}_stats'] = stats
+                                    
+                                    # Check for invalid values
+                                    if stats['non_finite'] > 0:
+                                        integrity_report['errors'].append(
+                                            f"Found {stats['non_finite']} non-finite values in {mod_scheme}/{dataset}"
+                                        )
+                                        integrity_report['overall_status'] = False
+                                        
+                                    if stats['zeros'] > 0 and dataset not in ['ber']:  # BER can be zero
+                                        integrity_report['warnings'].append(
+                                            f"Found {stats['zeros']} zero values in {mod_scheme}/{dataset}"
+                                        )
+                                        
+                            except Exception as e:
+                                integrity_report['errors'].append(
+                                    f"Error checking modulation scheme {mod_scheme}: {str(e)}"
+                                )
+                                integrity_report['overall_status'] = False
+                                integrity_report['modulation_schemes'][mod_scheme] = {
+                                    'integrity': False,
+                                    'error': str(e)
+                                }
+                                
+            except Exception as e:
+                integrity_report['errors'].append(f"Error accessing dataset file: {str(e)}")
+                integrity_report['overall_status'] = False
 
             integrity_report['total_samples'] = total_samples
 
-            # Statistical checks
+            # Enhanced statistical checks
             try:
                 stat_checks = self._perform_statistical_checks()
                 integrity_report['statistical_checks'] = stat_checks
                 if not stat_checks.get('valid', False):
                     integrity_report['overall_status'] = False
                     integrity_report['errors'].append("Statistical checks failed")
+                    
             except Exception as e:
                 integrity_report['errors'].append(f"Statistical check error: {str(e)}")
                 integrity_report['overall_status'] = False
@@ -152,9 +286,19 @@ class MIMODatasetIntegrityChecker:
             if total_samples == 0:
                 integrity_report['overall_status'] = False
                 integrity_report['errors'].append("No valid samples found in dataset")
+                
+            # Check sample count consistency
+            if 'configuration' in integrity_report and 'total_samples' in integrity_report['configuration']:
+                expected_samples = integrity_report['configuration']['total_samples'].get('value', 0)
+                if total_samples != expected_samples:
+                    integrity_report['errors'].append(
+                        f"Sample count mismatch: found {total_samples}, expected {expected_samples}"
+                    )
+                    integrity_report['overall_status'] = False
 
-            # Add timestamp
+            # Add timestamp and validation version
             integrity_report['timestamp'] = datetime.now().isoformat()
+            integrity_report['validation_version'] = '2.0.0'
 
             return integrity_report
 
@@ -163,7 +307,8 @@ class MIMODatasetIntegrityChecker:
                 'overall_status': False,
                 'error': str(e),
                 'errors': [f"Critical error during integrity check: {str(e)}"],
-                'timestamp': datetime.now().isoformat()
+                'timestamp': datetime.now().isoformat(),
+                'validation_version': '2.0.0'
             }
 
     def _check_dataset_structure(self) -> bool:

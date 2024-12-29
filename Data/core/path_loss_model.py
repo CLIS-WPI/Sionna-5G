@@ -510,46 +510,81 @@ class PathLossManager:
             raise        
 
     # In path_loss_model.py, enhance validation:
-    def _validate_path_loss(self, path_loss_db: tf.Tensor, source: str) -> tf.Tensor:
+    def _validate_path_loss_values(self, path_loss_db: tf.Tensor, source: str) -> Tuple[bool, tf.Tensor]:
+        """
+        Validate path loss values with enhanced physical constraints and error reporting
+        
+        Args:
+            path_loss_db: Path loss values in dB
+            source: Source identifier for logging
+            
+        Returns:
+            Tuple containing validation status and corrected tensor
+        """
         try:
-            # Track original values
-            original_stats = {
-                'min': tf.reduce_min(path_loss_db),
-                'max': tf.reduce_max(path_loss_db),
-                'mean': tf.reduce_mean(path_loss_db)
-            }
+            # Physical constraints
+            MIN_PATH_LOSS = 20.0  # Minimum realistic path loss in dB
+            MAX_PATH_LOSS = 160.0  # Maximum realistic path loss in dB
             
-            # Set minimum path loss to ensure no zero values
-            min_path_loss = self.system_params.min_path_loss_db
-            max_path_loss = self.system_params.max_path_loss_db
-            
-            # Count values outside physical bounds
-            too_low = tf.reduce_sum(tf.cast(path_loss_db < min_path_loss, tf.int32))
-            too_high = tf.reduce_sum(tf.cast(path_loss_db > max_path_loss, tf.int32))
-            
-            # Clip values with strict bounds
-            path_loss_db = tf.clip_by_value(path_loss_db, min_path_loss, max_path_loss)
-            
-            # Verify no zero values
-            zero_values = tf.reduce_sum(tf.cast(tf.equal(path_loss_db, 0.0), tf.int32))
-            if zero_values > 0:
-                self.logger.error(f"Found {zero_values} zero values in path loss after clipping!")
-                raise ValueError("Zero path loss values detected")
+            # Initial shape validation
+            if not isinstance(path_loss_db, tf.Tensor):
+                path_loss_db = tf.convert_to_tensor(path_loss_db, dtype=tf.float32)
                 
-            # Log detailed statistics
-            if too_low > 0 or too_high > 0:
+            original_shape = tf.shape(path_loss_db)
+            path_loss_db = tf.reshape(path_loss_db, [-1])  # Flatten for processing
+            
+            # Check for invalid values
+            is_finite = tf.math.is_finite(path_loss_db)
+            non_finite_count = tf.reduce_sum(tf.cast(~is_finite, tf.int32))
+            
+            if non_finite_count > 0:
+                self.logger.warning(f"{source}: Found {non_finite_count} non-finite values")
+                # Replace non-finite values with MIN_PATH_LOSS
+                path_loss_db = tf.where(is_finite, path_loss_db, MIN_PATH_LOSS)
+            
+            # Check for zeros
+            zero_mask = tf.equal(path_loss_db, 0.0)
+            zero_count = tf.reduce_sum(tf.cast(zero_mask, tf.int32))
+            
+            if zero_count > 0:
+                self.logger.warning(f"{source}: Found {zero_count} zero values")
+                # Replace zeros with MIN_PATH_LOSS
+                path_loss_db = tf.where(zero_mask, MIN_PATH_LOSS, path_loss_db)
+            
+            # Clip values to physical bounds
+            original_path_loss = path_loss_db
+            path_loss_db = tf.clip_by_value(path_loss_db, MIN_PATH_LOSS, MAX_PATH_LOSS)
+            
+            # Count clipped values
+            clipped_low = tf.reduce_sum(tf.cast(original_path_loss < MIN_PATH_LOSS, tf.int32))
+            clipped_high = tf.reduce_sum(tf.cast(original_path_loss > MAX_PATH_LOSS, tf.int32))
+            
+            if clipped_low > 0 or clipped_high > 0:
                 self.logger.warning(
-                    f"{source} path loss clipping stats:\n"
-                    f"Values < {min_path_loss} dB: {too_low}\n"
-                    f"Values > {max_path_loss} dB: {too_high}\n"
-                    f"Original range: [{original_stats['min']:.2f}, {original_stats['max']:.2f}] dB"
+                    f"{source} path loss clipping statistics:\n"
+                    f" - Values below {MIN_PATH_LOSS} dB: {clipped_low}\n"
+                    f" - Values above {MAX_PATH_LOSS} dB: {clipped_high}"
                 )
-                
-            return path_loss_db
-                
+            
+            # Reshape back to original shape
+            path_loss_db = tf.reshape(path_loss_db, original_shape)
+            
+            # Final validation
+            final_validation = tf.logical_and(
+                tf.math.is_finite(path_loss_db),
+                tf.logical_and(
+                    tf.greater_equal(path_loss_db, MIN_PATH_LOSS),
+                    tf.less_equal(path_loss_db, MAX_PATH_LOSS)
+                )
+            )
+            
+            is_valid = tf.reduce_all(final_validation)
+            
+            return is_valid, path_loss_db
+            
         except Exception as e:
-            self.logger.error(f"Path loss validation failed: {str(e)}")
-            raise  
+            self.logger.error(f"Path loss validation error: {str(e)}")
+            raise
         
 # Example usage
 def main():

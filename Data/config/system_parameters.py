@@ -58,10 +58,21 @@ class SystemParameters:
     
 
     # Add validation method
-    def validate_mimo_dimensions(self):
-        """Ensure MIMO dimensions are valid"""
-        assert self.num_tx > 0, "Invalid number of transmit antennas"
-        assert self.num_rx > 0, "Invalid number of receive antennas"
+    def validate_modulation_scheme(self, mod_scheme: str) -> bool:
+        """
+        Validate modulation scheme
+        
+        Args:
+            mod_scheme: Modulation scheme to validate
+            
+        Returns:
+            True if valid
+        """
+        valid_schemes = {'BPSK', 'QPSK', '16QAM', '64QAM', '256QAM'}
+        
+        if mod_scheme.upper() not in valid_schemes:
+            raise ValueError(f"Invalid modulation scheme: {mod_scheme}")
+        
         return True
 
     def _initialize_hardware_parameters(self):
