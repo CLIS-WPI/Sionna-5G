@@ -218,32 +218,27 @@ def validate_tensor_shapes(tensors_dict):
                     f"   Expected shape: {expected_shape}\n"
                     f"   Actual shape: {actual_shape}"
                 )
-def verify_batch_consistency(tensors: Dict[str, tf.Tensor], batch_size: int) -> bool:
+def verify_batch_consistency(batch_tensors: Dict[str, tf.Tensor], batch_size: int) -> bool:
     """
-    Verify that all tensors in the dictionary have consistent batch size
-    
-    Args:
-        tensors: Dictionary of tensors to verify
-        batch_size: Expected batch size
-        
-    Returns:
-        bool: True if all tensors have consistent batch size
-        
-    Raises:
-        ValueError: If tensor shapes are inconsistent
+    Verify that all tensors have consistent batch size
     """
     try:
-        for name, tensor in tensors.items():
-            actual_batch = tf.shape(tensor)[0]
-            tf.debugging.assert_equal(
-                actual_batch, 
-                batch_size,
-                message=f"Batch size mismatch in {name}: expected {batch_size}, got {actual_batch}"
-            )
+        # Ensure batch_size is int32
+        batch_size = tf.cast(batch_size, tf.int32)
+        
+        for name, tensor in batch_tensors.items():
+            # Get the first dimension (batch size) and cast to int32
+            actual_batch = tf.cast(tf.shape(tensor)[0], tf.int32)
+            
+            # Compare batch sizes
+            if not tf.equal(actual_batch, batch_size):
+                print(f"Batch size mismatch in {name}: expected {batch_size}, got {actual_batch}")
+                return False
         return True
+        
     except Exception as e:
-        logging.error(f"Batch consistency verification failed: {str(e)}")
-        raise
+        print(f"Batch consistency verification failed: {str(e)}")
+        return False
                 
 # Example usage demonstrating utility functions
 def example_usage():
