@@ -3,22 +3,25 @@
 # Generates large-scale, configurable MIMO communication datasets with multiple modulation schemes
 # Supports advanced channel modeling, metrics calculation, and dataset verification
 
+# Standard library imports
 import os
+from datetime import datetime
+from typing import Dict
 import h5py
 import numpy as np
 import tensorflow as tf
 from tqdm import tqdm
-from datetime import datetime
-from typing import Dict
-# System configuration imports
 from config.system_parameters import SystemParameters
 from core.channel_model import ChannelModelManager
 from core.metrics_calculator import MetricsCalculator
 from core.path_loss_model import PathLossManager
 from utill.logging_config import LoggerManager
-from utill.tensor_shape_validator import validate_tensor_shapes
+from utill.tensor_shape_validator import (
+    validate_tensor_shapes,
+    validate_complex_tensor,
+    verify_batch_consistency
+)
 from integrity.dataset_integrity_checker import MIMODatasetIntegrityChecker
-from utill.tensor_shape_validator import verify_batch_consistency
 
 # Try to import psutil, set flag for availability
 try:
@@ -905,9 +908,10 @@ class MIMODatasetGenerator:
             self.logger.error(f"Dataset generation failed: {str(e)}")
             self.logger.error("Detailed error traceback:", exc_info=True)
         return False
+    
     def _process_batch(self, batch_size: int, mod_scheme: str) -> Dict[str, tf.Tensor]:
         """
-        Process a single batch of data
+        Process a single batch of data with enhanced validation and debugging
         
         Args:
             batch_size: Size of the batch to process
@@ -917,21 +921,84 @@ class MIMODatasetGenerator:
             Dictionary containing processed batch data
         """
         try:
-            # Generate channel data
-            channel_data = self.channel_model.generate_mimo_channel(
-                batch_size,
-                self.system_params.snr_range
-            )
+            self.logger.info(f"Starting batch processing with size {batch_size} and modulation {mod_scheme}")
             
-            # Calculate metrics
-            metrics = self.metrics_calculator.calculate_performance_metrics(
-                channel_data['perfect_channel'],
-                channel_data['tx_symbols'],
-                channel_data['rx_symbols'],
-                channel_data['snr_db']
-            )
+            # Validate batch size
+            batch_size = tf.cast(batch_size, tf.int32)
+            tf.debugging.assert_positive(batch_size, message="Batch size must be positive")
             
-            return {
+            # Generate QAM symbols first
+            tx_symbols = self.channel_model.generate_qam_symbols(batch_size, mod_scheme)
+            self.logger.debug(f"Generated TX symbols shape: {tx_symbols.shape}")
+            
+            # Generate SNR values
+            snr_db = tf.random.uniform(
+                [batch_size], 
+                minval=self.system_params.snr_range[0],
+                maxval=self.system_params.snr_range[1]
+            )
+            self.logger.debug(f"Generated SNR values shape: {snr_db.shape}")
+            
+            # Generate channel data with explicit shape checking
+            self.logger.debug("Generating channel data...")
+            channel_data = self.channel_model.generate_mimo_channel(batch_size, snr_db)
+            
+            # Validate channel data structure
+            required_keys = ['perfect_channel', 'noisy_channel']
+            for key in required_keys:
+                if key not in channel_data:
+                    raise KeyError(f"Missing required key in channel_data: {key}")
+            
+            # Log channel data shapes
+            self.logger.debug(f"Channel data shapes:")
+            for key, tensor in channel_data.items():
+                self.logger.debug(f"- {key}: {tensor.shape}")
+                
+            # Validate complex tensor
+            from utill.tensor_shape_validator import validate_complex_tensor
+            if not validate_complex_tensor(channel_data['perfect_channel']):
+                raise ValueError("Invalid complex channel response")
+                
+            # Verify tensor shapes before metrics calculation
+            expected_shapes = {
+                'perfect_channel': (batch_size, self.system_params.num_rx, self.system_params.num_tx),
+                'noisy_channel': (batch_size, self.system_params.num_rx, self.system_params.num_tx)
+            }
+            
+            for key, expected_shape in expected_shapes.items():
+                tf.debugging.assert_equal(
+                    tf.shape(channel_data[key]),
+                    expected_shape,
+                    message=f"Shape mismatch for {key}"
+                )
+                
+            # Calculate metrics with enhanced error handling
+            self.logger.debug("Calculating performance metrics...")
+            try:
+                metrics = self.metrics_calculator.calculate_performance_metrics(
+                    channel_data['perfect_channel'],
+                    tx_symbols,
+                    channel_data['noisy_channel'],
+                    snr_db
+                )
+                
+                # Validate metrics output
+                required_metrics = ['sinr', 'spectral_efficiency', 'effective_snr', 'eigenvalues']
+                for metric in required_metrics:
+                    if metric not in metrics:
+                        raise KeyError(f"Missing required metric: {metric}")
+                        
+                # Log metrics shapes
+                self.logger.debug(f"Metrics shapes:")
+                for key, value in metrics.items():
+                    self.logger.debug(f"- {key}: {value.shape}")
+                    
+            except Exception as metrics_error:
+                self.logger.error(f"Metrics calculation failed: {str(metrics_error)}")
+                raise
+                
+            # Prepare and validate output
+            output = {
                 'channel_response': channel_data['perfect_channel'],
                 'sinr': metrics['sinr'],
                 'spectral_efficiency': metrics['spectral_efficiency'],
@@ -939,8 +1006,22 @@ class MIMODatasetGenerator:
                 'eigenvalues': metrics['eigenvalues']
             }
             
+            # Verify batch consistency
+            from utill.tensor_shape_validator import verify_batch_consistency
+            if not verify_batch_consistency(output, batch_size):
+                raise ValueError("Batch size inconsistency in output tensors")
+                
+            self.logger.info("Batch processing completed successfully")
+            return output
+            
         except Exception as e:
             self.logger.error(f"Batch processing failed: {str(e)}")
+            self.logger.error(f"Batch size: {batch_size}, Modulation: {mod_scheme}")
+            # Log additional debug information
+            if 'channel_data' in locals():
+                self.logger.error(f"Channel data keys: {channel_data.keys()}")
+            if 'metrics' in locals():
+                self.logger.error(f"Metrics keys: {metrics.keys()}")
             raise
 
     def _get_dataset_units(self, dataset_name: str) -> str:

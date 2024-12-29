@@ -21,6 +21,15 @@ tf.config.set_soft_device_placement(True)
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # Use first GPU
 
+def clear_gpu_memory():
+    tf.keras.backend.clear_session()
+    gpus = tf.config.list_physical_devices('GPU')
+    for gpu in gpus:
+        try:
+            tf.config.experimental.reset_memory_stats(gpu)
+        except:
+            pass
+
 def configure_device():
     """
     Configure GPU devices with conservative memory settings
@@ -155,6 +164,7 @@ def main():
     Main entry point for MIMO dataset generation with enhanced GPU and memory management
     """
     try:
+        clear_gpu_memory()
         # Parse arguments first
         args = parse_arguments()
         

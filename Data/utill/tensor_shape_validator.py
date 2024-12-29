@@ -219,15 +219,12 @@ def validate_tensor_shapes(tensors_dict):
                     f"   Actual shape: {actual_shape}"
                 )
 def verify_batch_consistency(batch_tensors: Dict[str, tf.Tensor], batch_size: int) -> bool:
-    """
-    Verify that all tensors have consistent batch size
-    """
     try:
         # Ensure batch_size is int32
         batch_size = tf.cast(batch_size, tf.int32)
         
         for name, tensor in batch_tensors.items():
-            # Get the first dimension (batch size) and cast to int32
+            # Explicitly cast to int32
             actual_batch = tf.cast(tf.shape(tensor)[0], tf.int32)
             
             # Compare batch sizes
