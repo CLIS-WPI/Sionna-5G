@@ -3,6 +3,9 @@
 # MIMO Communication System Performance Metrics Calculator
 # Computes comprehensive performance metrics including SINR, spectral efficiency, and BER
 # Provides advanced signal processing and statistical analysis for communication system evaluation
+# Numerical Stability:
+# - Inputs and outputs must be free of NaN, Infinity, or extreme outliers.
+# - Replace invalid values with defaults and clip values to acceptable thresholds.
 
 import tensorflow as tf
 import numpy as np

@@ -2,8 +2,11 @@
 # Comprehensive MIMO Dataset Generation Framework
 # Generates large-scale, configurable MIMO communication datasets with multiple modulation schemes
 # Supports advanced channel modeling, metrics calculation, and dataset verification
+# Tensor Dimensionality:
+# - Ensure tensors match the expected shapes at all stages.
+# - Typical channel response shape: (Batch Size, Num RX Antennas, Num TX Antennas).
+# - Validate tensor dimensions before reshaping or matrix operations.
 
-# Standard library imports
 import os
 from datetime import datetime
 from typing import Dict

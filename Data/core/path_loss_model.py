@@ -3,6 +3,9 @@
 # Advanced Path Loss Modeling and Calculation
 # Implements multiple path loss scenarios with comprehensive statistical analysis
 # Provides flexible path loss computation for different wireless communication environments
+# Path Loss Constraints:
+# - Path loss values must be between 20 dB and 160 dB.
+# - Zero or invalid path loss indicates an error and must be corrected.
 
 import tensorflow as tf
 import numpy as np
