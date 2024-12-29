@@ -7,7 +7,6 @@ import sys
 import argparse
 import logging
 from datetime import datetime
-import os
 from config.system_parameters import SystemParameters
 from dataset_generator.mimo_dataset_generator import MIMODatasetGenerator
 from utill.logging_config import configure_logging, LoggerManager
@@ -15,42 +14,77 @@ from integrity.dataset_integrity_checker import MIMODatasetIntegrityChecker
 import h5py
 import tensorflow as tf
 from typing import Dict
-import tensorflow as tf
-tf.config.set_soft_device_placement(True)
-# Set conservative CUDA memory settings
-os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # Use first GPU
 
 def clear_gpu_memory():
-    tf.keras.backend.clear_session()
-    gpus = tf.config.list_physical_devices('GPU')
-    for gpu in gpus:
+    """Enhanced GPU memory cleanup"""
+    try:
+        # Clear TensorFlow session
+        tf.keras.backend.clear_session()
+        
+        # Reset GPU memory stats
+        gpus = tf.config.list_physical_devices('GPU')
+        for gpu in gpus:
+            try:
+                tf.config.experimental.reset_memory_stats(gpu)
+            except:
+                pass
+        
+        # Force garbage collection
+        import gc
+        gc.collect()
+        
+        # Clear PyTorch cache if available
         try:
-            tf.config.experimental.reset_memory_stats(gpu)
-        except:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
             pass
+            
+    except Exception as e:
+        print(f"Error during GPU memory cleanup: {e}")
 
+# At the very top of main.py, immediately after imports
 def configure_device():
     """
-    Configure GPU devices with conservative memory settings
+    Configure GPU devices with memory growth and multi-GPU support
     """
     try:
+        # Set environment variables first
+        os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+        os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'  # Enable both GPUs
+        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress TF logging
+        
+        # Get available GPUs
         gpus = tf.config.list_physical_devices('GPU')
+        
         if gpus:
             try:
-                # Set memory growth first, before any other configurations
+                # Configure memory growth for all GPUs
                 for gpu in gpus:
                     tf.config.experimental.set_memory_growth(gpu, True)
                 
-                # Remove the logical device configuration since it conflicts
-                # with memory growth setting
-                print(f"Found {len(gpus)} GPU(s). Using GPU for processing.")
+                # Enable soft device placement
+                tf.config.set_soft_device_placement(True)
+                
+                # Try to set memory limit (optional)
+                try:
+                    for gpu in gpus:
+                        tf.config.set_logical_device_configuration(
+                            gpu,
+                            [tf.config.LogicalDeviceConfiguration(memory_limit=1024*75)]  # 75GB limit
+                        )
+                except RuntimeError as e:
+                    print(f"Warning: Could not set memory limit: {e}")
+                
+                print(f"Found {len(gpus)} GPU(s). GPU configuration successful.")
                 return True
                 
             except RuntimeError as e:
                 print(f"GPU configuration error: {e}")
+                print("Falling back to CPU processing")
                 return False
-                
+        
         print("No GPU found. Using CPU for processing")
         return False
         
@@ -164,8 +198,13 @@ def main():
     Main entry point for MIMO dataset generation with enhanced GPU and memory management
     """
     try:
+        # Configure device first
+        device_config = configure_device()
+        
+        # Then clear GPU memory
         clear_gpu_memory()
-        # Parse arguments first
+        
+        # Parse arguments
         args = parse_arguments()
         
         # Initialize logger before any other operations
@@ -175,8 +214,6 @@ def main():
             log_format='%(asctime)s - %(name)s - %(levelname)s - %(message)s - [%(filename)s:%(lineno)d]'
         )
 
-        # Then configure device
-        device_config = configure_device()
         if not device_config:
             logger.warning("GPU configuration failed, falling back to CPU")
             
@@ -342,4 +379,25 @@ def main():
         return 1
     
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        # Set environment variables before any TF operations
+        os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+        os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
+        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+        
+        # Configure GPU first
+        gpu_available = configure_device()
+        
+        # Set random seeds for reproducibility
+        import numpy as np
+        import random
+        seed = 42
+        np.random.seed(seed)
+        random.seed(seed)
+        tf.random.set_seed(seed)
+        
+        # Run main
+        sys.exit(main())
+    except Exception as e:
+        print(f"Critical error: {e}")
+        sys.exit(1)
