@@ -519,27 +519,37 @@ class PathLossManager:
                 'mean': tf.reduce_mean(path_loss_db)
             }
             
+            # Set minimum path loss to ensure no zero values
+            min_path_loss = self.system_params.min_path_loss_db
+            max_path_loss = self.system_params.max_path_loss_db
+            
             # Count values outside physical bounds
-            too_low = tf.reduce_sum(tf.cast(path_loss_db < 20.0, tf.int32))
-            too_high = tf.reduce_sum(tf.cast(path_loss_db > 160.0, tf.int32))
+            too_low = tf.reduce_sum(tf.cast(path_loss_db < min_path_loss, tf.int32))
+            too_high = tf.reduce_sum(tf.cast(path_loss_db > max_path_loss, tf.int32))
             
-            # Clip values
-            path_loss_db = tf.clip_by_value(path_loss_db, 20.0, 160.0)
+            # Clip values with strict bounds
+            path_loss_db = tf.clip_by_value(path_loss_db, min_path_loss, max_path_loss)
             
+            # Verify no zero values
+            zero_values = tf.reduce_sum(tf.cast(tf.equal(path_loss_db, 0.0), tf.int32))
+            if zero_values > 0:
+                self.logger.error(f"Found {zero_values} zero values in path loss after clipping!")
+                raise ValueError("Zero path loss values detected")
+                
             # Log detailed statistics
             if too_low > 0 or too_high > 0:
                 self.logger.warning(
                     f"{source} path loss clipping stats:\n"
-                    f"Values < 20 dB: {too_low}\n"
-                    f"Values > 160 dB: {too_high}\n"
+                    f"Values < {min_path_loss} dB: {too_low}\n"
+                    f"Values > {max_path_loss} dB: {too_high}\n"
                     f"Original range: [{original_stats['min']:.2f}, {original_stats['max']:.2f}] dB"
                 )
                 
             return path_loss_db
-            
+                
         except Exception as e:
             self.logger.error(f"Path loss validation failed: {str(e)}")
-            raise    
+            raise  
         
 # Example usage
 def main():

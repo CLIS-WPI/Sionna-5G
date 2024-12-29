@@ -701,7 +701,7 @@ class MIMODatasetGenerator:
                                 f"\n - Zero values: {fspl_stats['zeros']}"
                             )
 
-                                                        # Add enhanced validation and safety checks
+                            # Add enhanced validation and safety checks
                             min_pl = 20.0
                             max_pl = 160.0
                             # Clip values with validation
@@ -1081,6 +1081,9 @@ class MIMODatasetGenerator:
             return 4000  # Safe default for H100
     
     def _check_batch_size_safety(self, batch_size: int) -> int:
+        """
+        Ensure batch size is compatible with tensor dimensions
+        """
         try:
             # Get max_batch_size from PathLossManager
             max_batch_size = getattr(self.path_loss_manager.system_params, 'max_batch_size', self.max_batch_size)
@@ -1093,28 +1096,28 @@ class MIMODatasetGenerator:
                     f"Batch size {batch_size} exceeds max allowed by PathLossManager ({max_batch_size}). "
                     f"Reducing to {max_batch_size}."
                 )
-                batch_size = int(max_batch_size)  # Ensure integer
-
-            # Calculate total elements needed
-            total_elements = batch_size * self.system_params.num_rx * self.system_params.num_tx
+                batch_size = int(max_batch_size)
             
-            # Adjust batch size to ensure it's compatible with tensor dimensions
-            if total_elements % (self.system_params.num_rx * self.system_params.num_tx) != 0:
-                adjusted_batch_size = total_elements // (self.system_params.num_rx * self.system_params.num_tx)
+            # Ensure batch size is compatible with MIMO dimensions
+            num_rx = self.system_params.num_rx
+            num_tx = self.system_params.num_tx
+            total_elements = batch_size * num_rx * num_tx
+            
+            # Adjust batch size if needed to ensure proper tensor dimensions
+            if total_elements % (num_rx * num_tx) != 0:
+                adjusted_batch_size = total_elements // (num_rx * num_tx)
                 self.logger.warning(
                     f"Adjusting batch size from {batch_size} to {adjusted_batch_size} "
-                    f"to match tensor dimensions"
+                    f"to match MIMO dimensions"
                 )
                 batch_size = adjusted_batch_size
-
-            # Final validation
-            batch_size = min(int(batch_size), int(max_batch_size))
+            
             self.logger.info(f"Final adjusted batch size: {batch_size}")
             return batch_size
-
+            
         except Exception as e:
-            self.logger.error(f"Error in batch size safety check: {e}. Falling back to conservative default.")
-            return min(1000, self.max_batch_size // 2)
+            self.logger.error(f"Error in batch size safety check: {e}")
+            return 1000  # Conservative fallback
 
     def generate_batch_data(self, batch_idx: int, batch_size: int):
         """
@@ -1188,6 +1191,25 @@ class MIMODatasetGenerator:
         except Exception as e:
             self.logger.error(f"Error generating channel samples: {str(e)}")
             raise
+
+    def _calculate_tensor_dimensions(self, batch_size: int) -> tuple:
+        """
+        Calculate correct tensor dimensions based on batch size and system parameters
+        
+        Args:
+            batch_size (int): Current batch size
+            
+        Returns:
+            tuple: Expected tensor dimensions
+        """
+        num_rx = self.system_params.num_rx
+        num_tx = self.system_params.num_tx
+        
+        # Calculate total elements
+        total_elements = batch_size * num_rx * num_tx
+        
+        # Return expected dimensions
+        return (batch_size, num_rx, num_tx)
 
 # Example usage
 def main():

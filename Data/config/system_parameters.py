@@ -52,10 +52,17 @@ class SystemParameters:
     random_seed: int = 42  # Seed for reproducible results
     
     # Dataset Generation Parameters
-    total_samples: int = 21_000_000 #900_000
+    total_samples: int = 21_000_000
     samples_per_modulation: int = None
     replay_buffer_size: int = 21_000_000  # Add replay buffer size (this is for gpu server runing)
-    # At the top of system_parameters.py
+    
+
+    # Add validation method
+    def validate_mimo_dimensions(self):
+        """Ensure MIMO dimensions are valid"""
+        assert self.num_tx > 0, "Invalid number of transmit antennas"
+        assert self.num_rx > 0, "Invalid number of receive antennas"
+        return True
 
     def _initialize_hardware_parameters(self):
         try:
