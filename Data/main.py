@@ -17,24 +17,15 @@ from typing import Dict
 import gc
 
 def configure_gpu_environment():
-    """
-    Combined function to clean GPU memory and configure devices with optimized settings
-    
-    Returns:
-        Tuple[bool, Dict]: (Success status, GPU configuration details)
-    """
     try:
         # Clear existing sessions and cache
         tf.keras.backend.clear_session()
-        
-        # Force garbage collection
-        import gc
         gc.collect()
         
         # Set environment variables
         os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
-        os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'  # Enable both H100s
-        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Reduce TF logging
+        os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
+        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
         
         # Get GPU devices
         gpus = tf.config.list_physical_devices('GPU')
@@ -46,27 +37,29 @@ def configure_gpu_environment():
             "memory_config": {}
         }
         
-        # Configure each GPU
+        # Configure each GPU with explicit memory limits
         for gpu_index, gpu in enumerate(gpus):
             try:
-                # Enable memory growth first
+                # Enable memory growth
                 tf.config.experimental.set_memory_growth(gpu, True)
+                
+                # Set memory limit to 90% of total memory (85.5GB for H100)
+                memory_limit = int(95830 * 0.9)  # 90% of 95830MiB
+                tf.config.set_logical_device_configuration(
+                    gpu,
+                    [tf.config.LogicalDeviceConfiguration(memory_limit=memory_limit)]
+                )
                 
                 # Get memory info
                 try:
                     memory_info = tf.config.experimental.get_memory_info(f'/device:GPU:{gpu_index}')
-                    available_memory = memory_info['current'] / 1e9  # Convert to GB
+                    available_memory = memory_info['current'] / 1e9
                 except:
-                    # Fallback if memory info not available
-                    available_memory = 80.0  # Default assumption for H100
+                    available_memory = 85.5  # 90% of H100's memory in GB
                 
-                # Calculate memory limit (95% of available memory)
-                memory_limit = available_memory * 0.95
-                
-                # Store configuration details
                 gpu_config["memory_config"][f"gpu_{gpu_index}"] = {
                     "available_memory_gb": available_memory,
-                    "memory_limit_gb": memory_limit,
+                    "memory_limit_gb": memory_limit / 1024,  # Convert MiB to GB
                     "growth_enabled": True
                 }
                 
@@ -74,26 +67,38 @@ def configure_gpu_environment():
                 print(f"Warning: Error configuring GPU {gpu_index}: {e}")
                 continue
         
-        # Enable mixed precision for H100s
+        # Enable mixed precision and XLA
         try:
             policy = tf.keras.mixed_precision.Policy('mixed_float16')
             tf.keras.mixed_precision.set_global_policy(policy)
             gpu_config["mixed_precision_enabled"] = True
+            
+            # Enable XLA optimization
+            tf.config.optimizer.set_jit(True)
         except Exception as e:
             print(f"Warning: Could not enable mixed precision: {e}")
             gpu_config["mixed_precision_enabled"] = False
         
-        # Calculate recommended batch size based on GPU count and memory
-        if gpu_config["num_gpus"] > 0:
-            # More conservative batch sizes to prevent OOM
-            if gpu_config["num_gpus"] > 1:
+        # Configure multi-GPU strategy
+        if len(gpus) > 1:
+            try:
+                strategy = tf.distribute.MirroredStrategy()
+                gpu_config["distribution_strategy"] = "MirroredStrategy"
                 gpu_config["recommended_batch_size"] = 128_000
-            else:
+            except Exception as e:
+                print(f"Warning: Could not configure MirroredStrategy: {e}")
+                gpu_config["distribution_strategy"] = "SingleGPU"
                 gpu_config["recommended_batch_size"] = 64_000
         else:
-            gpu_config["recommended_batch_size"] = 1_000  # CPU fallback
+            gpu_config["distribution_strategy"] = "SingleGPU"
+            gpu_config["recommended_batch_size"] = 64_000
             
         return True, gpu_config
+        
+    except Exception as e:
+        error_msg = f"Critical error during GPU configuration: {str(e)}"
+        print(error_msg)
+        return False, {"error": error_msg}
         
     except Exception as e:
         error_msg = f"Critical error during GPU configuration: {str(e)}"
