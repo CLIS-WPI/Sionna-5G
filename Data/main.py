@@ -264,8 +264,8 @@ def main():
             "recommended_batch_size": 32000 if success else 1000
         }
 
-        # Configure system and validate
-        system_params = configure_system_parameters(args)
+        # Configure system and validate - FIXED: Added gpu_config argument
+        system_params = configure_system_parameters(args, gpu_config)  # Pass gpu_config here
         system_params.replay_buffer_size = min(system_params.replay_buffer_size, 100000)
         
         if not validate_system_configuration(system_params, gpu_config, logger):
