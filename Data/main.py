@@ -96,8 +96,8 @@ def configure_gpu_environment():
             gpu_config["pytorch_cleanup"] = False
             
         # Calculate optimal batch size based on available memory
-        min_available_memory = min(cfg["available_memory_gb"] 
-                                for cfg in gpu_config["memory_config"].values())
+        min_available_memory = min(config["available_memory_gb"] 
+                                for config in gpu_config["memory_config"].values())
         
         if min_available_memory > 64.0:  # H100-level memory
             gpu_config["recommended_batch_size"] = 256_000
@@ -112,6 +112,16 @@ def configure_gpu_environment():
         error_msg = f"Critical error during GPU configuration: {str(e)}"
         print(error_msg)
         return False, {"error": error_msg}
+    
+def monitor_gpu_memory(logger, gpu_config):
+    """Monitor GPU memory usage"""
+    if gpu_config and gpu_config.get('num_gpus', 0) > 0:
+        for gpu_id in range(gpu_config['num_gpus']):
+            try:
+                memory_info = tf.config.experimental.get_memory_info(f'GPU:{gpu_id}')
+                logger.info(f"GPU:{gpu_id} memory usage: {memory_info['current'] / 1e9:.2f} GB")
+            except Exception as e:
+                logger.warning(f"Could not monitor GPU:{gpu_id} memory: {e}")
 
 def parse_arguments():
     """
@@ -214,6 +224,26 @@ def generate_output_path(base_path=None):
                 return path
             counter += 1
 
+def adjust_batch_size(current_batch_size, gpu_config, logger):
+    """Adjust batch size based on available GPU memory"""
+    if gpu_config and 'memory_config' in gpu_config:
+        try:
+            # Get current memory usage
+            memory_usage = max(
+                tf.config.experimental.get_memory_info(f'GPU:{i}')['current'] / 1e9
+                for i in range(gpu_config['num_gpus'])
+            )
+            
+            # If using more than 90% of available memory, reduce batch size
+            if memory_usage > 0.9 * gpu_config['memory_config']['gpu_0']['memory_limit_gb']:
+                new_batch_size = max(1000, current_batch_size // 2)
+                logger.warning(f"High memory usage detected. Reducing batch size from {current_batch_size} to {new_batch_size}")
+                return new_batch_size
+        except Exception as e:
+            logger.warning(f"Error during batch size adjustment: {e}")
+    
+    return current_batch_size
+
 def main():
     """
     Main entry point for MIMO dataset generation with enhanced GPU and memory management
@@ -289,10 +319,14 @@ def main():
         # Generate dataset with enhanced error handling
         logger.info("Starting dataset generation...")
         try:
+            # Monitor initial memory state
+            monitor_gpu_memory(logger, gpu_config)
+
             generator.generate_dataset(
                 num_samples=system_params.total_samples,
                 save_path=output_path
             )
+            monitor_gpu_memory(logger, gpu_config)
             logger.info("Dataset generation completed")
             
             # Verify output file
@@ -386,6 +420,11 @@ def main():
         
 if __name__ == "__main__":
     try:
+        # Set environment variables before any TF operations
+        os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+        os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
+        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+        
         # Set random seeds for reproducibility
         import numpy as np
         import random
