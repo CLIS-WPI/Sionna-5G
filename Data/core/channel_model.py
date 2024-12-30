@@ -198,6 +198,8 @@ class ChannelModelManager:
             noise_power = tf.maximum(noise_power, 1e-10)
             noise_power = tf.reshape(noise_power, [-1, 1, 1])
             
+            print(f"DEBUG - Before noise generation: batch_size={batch_size}")
+            
             # Generate noise with controlled variance
             noise_std = tf.sqrt(noise_power / 2.0)
             noise_real = tf.random.normal(tf.shape(h_normalized), mean=0.0, stddev=noise_std)
@@ -319,7 +321,7 @@ class ChannelModelManager:
             # Normalize and reshape SNR tensor
             snr_db = tf.cast(snr_db, tf.float32)
             snr_db = tf.reshape(snr_db, [batch_size])  # Ensure SNR has shape [batch_size]
-            
+            print(f"DEBUG - After SNR reshape: shape={tf.shape(snr_db)}, values={snr_db}")
             # Define channel dimensions
             h_shape = [
                 batch_size,
@@ -361,7 +363,7 @@ class ChannelModelManager:
             assert_tensor_shape(h, h_shape, "Channel matrix")
             assert_tensor_shape(snr_db, [batch_size], "SNR values")
             assert_tensor_shape(noisy_channel, h_shape, "Noisy channel")
-            
+            print(f"DEBUG - Channel matrix shape after validation: shape={tf.shape(h)}")
             print(f"Final channel shape: {tf.shape(h)}")
             print(f"Final noise shape: {tf.shape(noise)}")
             return {
