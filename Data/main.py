@@ -16,69 +16,102 @@ import tensorflow as tf
 from typing import Dict
 import gc
 
-def configure_device():
+def configure_gpu_environment():
+    """
+    Combined function to clean GPU memory and configure devices with optimized settings
+    
+    Returns:
+        Tuple[bool, Dict]: (Success status, GPU configuration details)
+    """
     try:
-        # Clear any existing configurations
+        # Clear existing sessions and cache
         tf.keras.backend.clear_session()
+        
+        # Force garbage collection
+        import gc
+        gc.collect()
         
         # Set environment variables
         os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
         os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'  # Enable both H100s
+        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Reduce TF logging
         
+        # Get GPU devices
         gpus = tf.config.list_physical_devices('GPU')
-        if gpus:
-            # Configure memory growth BEFORE any other GPU operations
-            for gpu in gpus:
-                try:
-                    tf.config.experimental.set_memory_growth(gpu, True)
-                except RuntimeError as e:
-                    print(f"Memory growth must be set before GPUs have been initialized: {e}")
+        if not gpus:
+            return False, {"error": "No GPUs available"}
             
-            # H100-specific configuration
+        gpu_config = {
+            "num_gpus": len(gpus),
+            "memory_config": {}
+        }
+        
+        # Clear and configure each GPU
+        for gpu_index, gpu in enumerate(gpus):
             try:
-                for gpu in gpus:
-                    tf.config.set_logical_device_configuration(
-                        gpu,
-                        [tf.config.LogicalDeviceConfiguration(memory_limit=1024*75)]  # 75GB per GPU
-                    )
-            except RuntimeError as e:
-                print(f"Failed to set memory limit: {e}")
+                # Reset memory stats
+                tf.config.experimental.reset_memory_stats(gpu)
                 
-            return True
+                # Enable memory growth
+                tf.config.experimental.set_memory_growth(gpu, True)
+                
+                # Get memory info after cleanup
+                memory_info = tf.config.experimental.get_memory_info(f'GPU:{gpu_index}')
+                available_memory = memory_info['current'] / 1e9  # Convert to GB
+                
+                # Configure memory limit based on available memory
+                memory_limit = int(available_memory * 0.95)  # Use 95% of available memory
+                tf.config.set_logical_device_configuration(
+                    gpu,
+                    [tf.config.LogicalDeviceConfiguration(memory_limit=1024*memory_limit)]
+                )
+                
+                # Store configuration details
+                gpu_config["memory_config"][f"gpu_{gpu_index}"] = {
+                    "available_memory_gb": available_memory,
+                    "memory_limit_gb": memory_limit,
+                    "growth_enabled": True
+                }
+                
+            except RuntimeError as e:
+                print(f"Warning: Error configuring GPU {gpu_index}: {e}")
+                continue
+                
+        # Enable mixed precision for H100s
+        try:
+            policy = tf.keras.mixed_precision.Policy('mixed_float16')
+            tf.keras.mixed_precision.set_global_policy(policy)
+            gpu_config["mixed_precision_enabled"] = True
+        except Exception as e:
+            print(f"Warning: Could not enable mixed precision: {e}")
+            gpu_config["mixed_precision_enabled"] = False
             
-        return False
-        
-    except Exception as e:
-        print(f"Error during device configuration: {e}")
-        return False
-    
-def clear_gpu_memory():
-    try:
-        # Clear TensorFlow session
-        tf.keras.backend.clear_session()
-        
-        # Force garbage collection
-        gc.collect()
-        
-        # Clear GPU memory if available
-        gpus = tf.config.list_physical_devices('GPU')
-        if gpus:
-            for gpu in gpus:
-                try:
-                    tf.config.experimental.reset_memory_stats(gpu)
-                except:
-                    pass
-                    
-        # Optional: PyTorch cleanup
+        # Optional: PyTorch cleanup if available
         try:
             import torch
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+                gpu_config["pytorch_cleanup"] = True
         except ImportError:
-            pass
+            gpu_config["pytorch_cleanup"] = False
             
+        # Calculate optimal batch size based on available memory
+        min_available_memory = min(cfg["available_memory_gb"] 
+                                for cfg in gpu_config["memory_config"].values())
+        
+        if min_available_memory > 64.0:  # H100-level memory
+            gpu_config["recommended_batch_size"] = 256_000
+        elif min_available_memory > 32.0:
+            gpu_config["recommended_batch_size"] = 128_000
+        else:
+            gpu_config["recommended_batch_size"] = 64_000
+            
+        return True, gpu_config
+        
     except Exception as e:
-        print(f"Error during GPU memory cleanup: {e}")
+        error_msg = f"Critical error during GPU configuration: {str(e)}"
+        print(error_msg)
+        return False, {"error": error_msg}
 
 def parse_arguments():
     """
@@ -186,11 +219,8 @@ def main():
     Main entry point for MIMO dataset generation with enhanced GPU and memory management
     """
     try:
-        # Configure device first
-        device_config = configure_device()
-        
-        # Then clear GPU memory
-        clear_gpu_memory()
+        # Configure GPU environment first and get configuration details
+        success, gpu_config = configure_gpu_environment()
         
         # Parse arguments
         args = parse_arguments()
@@ -202,27 +232,37 @@ def main():
             log_format='%(asctime)s - %(name)s - %(levelname)s - %(message)s - [%(filename)s:%(lineno)d]'
         )
 
-        if not device_config:
-            logger.warning("GPU configuration failed, falling back to CPU")
-            
-        # Clear GPU memory
-        logger.info("Clearing GPU memory and configuring device...")
-        tf.keras.backend.clear_session()
+        if not success:
+            logger.warning(f"GPU configuration failed: {gpu_config.get('error', 'Unknown error')}")
+            logger.warning("Falling back to CPU")
+        else:
+            logger.info("GPU Configuration successful:")
+            logger.info(f"Number of GPUs: {gpu_config['num_gpus']}")
+            logger.info(f"Mixed precision enabled: {gpu_config['mixed_precision_enabled']}")
+            for gpu_id, config in gpu_config['memory_config'].items():
+                logger.info(f"\n{gpu_id}:")
+                logger.info(f"  Available memory: {config['available_memory_gb']:.2f} GB")
+                logger.info(f"  Memory limit: {config['memory_limit_gb']:.2f} GB")
         
         # Configure system parameters
         system_params = configure_system_parameters(args)
         system_params.replay_buffer_size = min(system_params.replay_buffer_size, 100000)
         
-        # Set conservative batch size if not specified
+        # Set batch size based on GPU configuration if not specified
         if args.batch_size is None:
-            args.batch_size = 1000  # Start with a very conservative batch size
+            if success:
+                args.batch_size = gpu_config["recommended_batch_size"]
+                logger.info(f"Using GPU-optimized batch size: {args.batch_size}")
+            else:
+                args.batch_size = 1000  # Conservative batch size for CPU
+                logger.info(f"Using conservative batch size: {args.batch_size}")
         
         # Generate output path
         output_path = generate_output_path(args.output)
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         
         # Log configuration details
-        logger.info("=== Configuration Details ===")
+        logger.info("\n=== Configuration Details ===")
         logger.info(f"Total samples: {system_params.total_samples}")
         logger.info(f"TX Antennas: {system_params.num_tx}")
         logger.info(f"RX Antennas: {system_params.num_rx}")
@@ -230,30 +270,17 @@ def main():
         logger.info(f"Verification enabled: {args.verify}")
         logger.info(f"Batch size: {args.batch_size}")
 
-        # Configure device with enhanced error handling
-        device_config = configure_device()
-        logger.info("Device configuration completed")
-        
-        if isinstance(device_config, tf.distribute.Strategy):
-            logger.info("Using distributed strategy with multiple GPUs")
-        elif device_config:
-            logger.info("Using single GPU")
-        else:
-            logger.info("Using CPU")
-        
-        # Monitor GPU memory with enhanced error handling
-        if tf.config.list_physical_devices('GPU'):
-            try:
-                memory_info = tf.config.experimental.get_memory_info('GPU:0')
-                logger.info(f"Initial GPU memory usage: {memory_info['current'] / 1e9:.2f} GB")
-            except Exception as e:
-                logger.warning(f"GPU memory monitoring not available: {e}")
+        # Monitor GPU memory before dataset generation
+        if success:
+            for gpu_id in range(gpu_config['num_gpus']):
+                try:
+                    memory_info = tf.config.experimental.get_memory_info(f'GPU:{gpu_id}')
+                    logger.info(f"GPU:{gpu_id} initial memory usage: {memory_info['current'] / 1e9:.2f} GB")
+                except Exception as e:
+                    logger.warning(f"Could not monitor GPU:{gpu_id} memory: {e}")
 
-        # Create and configure dataset generator with memory cleanup
+        # Create and configure dataset generator
         logger.debug("Initializing dataset generator...")
-        import gc
-        gc.collect()  # Force garbage collection before creating generator
-        
         generator = MIMODatasetGenerator(
             system_params=system_params,
             logger=logger
@@ -288,9 +315,10 @@ def main():
         if args.verify:
             logger.info("Starting dataset verification...")
             try:
-                # Clear memory before verification
-                tf.keras.backend.clear_session()
-                gc.collect()
+                # Reconfigure GPU environment before verification
+                success, _ = configure_gpu_environment()
+                if not success:
+                    logger.warning("GPU reconfiguration failed before verification")
                 
                 if not os.path.exists(output_path):
                     logger.error("Dataset file does not exist")
@@ -304,7 +332,7 @@ def main():
                 logger.info(f"Dataset file size: {file_size / (1024*1024):.2f} MB")
                 
                 with MIMODatasetIntegrityChecker(output_path) as checker:
-                    # Log dataset structure with enhanced error handling
+                    # Log dataset structure
                     try:
                         with h5py.File(output_path, 'r') as f:
                             logger.debug("=== Dataset Structure ===")
@@ -358,14 +386,6 @@ def main():
         
 if __name__ == "__main__":
     try:
-        # Set environment variables before any TF operations
-        os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
-        os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
-        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-        
-        # Configure GPU first
-        gpu_available = configure_device()
-        
         # Set random seeds for reproducibility
         import numpy as np
         import random
