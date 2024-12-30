@@ -608,20 +608,35 @@ class MIMODatasetGenerator:
                             actual_elements = tf.size(h_perfect).numpy()
 
                             if actual_elements != expected_elements:
-                                self.logger.error(
-                                    f"Tensor size mismatch: expected {expected_elements} elements, "
-                                    f"but got {actual_elements}. Adjusting batch size or input parameters."
-                                )
-                                raise ValueError("Tensor size mismatch detected during reshaping.")
+                                # Calculate correct batch size
+                                correct_batch_size = actual_elements // (self.system_params.num_rx * self.system_params.num_tx)
                                 
-                            # Calculate correct batch size
-                            correct_batch_size = actual_elements // (self.system_params.num_rx * self.system_params.num_tx)
-                            self.logger.warning(f"Adjusting batch size from {self.batch_size} to {correct_batch_size}")
-                            self.batch_size = correct_batch_size
+                                # Check if the division results in a clean integer
+                                if correct_batch_size * self.system_params.num_rx * self.system_params.num_tx != actual_elements:
+                                    self.logger.error(
+                                        f"Cannot reshape tensor: actual elements ({actual_elements}) is not divisible by "
+                                        f"(num_rx ({self.system_params.num_rx}) * num_tx ({self.system_params.num_tx}))"
+                                    )
+                                    raise ValueError("Invalid tensor dimensions for MIMO reshaping")
+                                
+                                self.logger.warning(
+                                    f"Tensor size mismatch: expected {expected_elements} elements, "
+                                    f"but got {actual_elements}. Adjusting batch size from {self.batch_size} "
+                                    f"to {correct_batch_size}"
+                                )
+                                self.batch_size = correct_batch_size
 
-                            # Ensure correct shape [batch_size, num_rx, num_tx]
-                            h_perfect = tf.reshape(h_perfect, 
-                                                [self.batch_size, self.system_params.num_rx, self.system_params.num_tx])
+                            # Log shape information for debugging
+                            self.logger.debug(f"Reshaping tensor with {actual_elements} elements to shape: "
+                                            f"[{self.batch_size}, {self.system_params.num_rx}, {self.system_params.num_tx}]")
+
+                            try:
+                                # Ensure correct shape [batch_size, num_rx, num_tx]
+                                h_perfect = tf.reshape(h_perfect, 
+                                                    [self.batch_size, self.system_params.num_rx, self.system_params.num_tx])
+                            except tf.errors.InvalidArgumentError as e:
+                                self.logger.error(f"Failed to reshape tensor: {e}")
+                                raise ValueError("Failed to reshape tensor to required dimensions") from e
 
 
                             # Calculate and apply path loss
