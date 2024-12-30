@@ -16,154 +16,94 @@ import tensorflow as tf
 from typing import Dict
 import gc
 
-def configure_gpu_environment():
+def configure_gpu_environment(system_params=None):
+    """Enhanced GPU configuration with SystemParameters integration"""
     try:
-        # These need to be set before any TF operations
-        os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
-        os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
-        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-        
-        # Initialize GPUs first
+        # Basic GPU setup
         gpus = tf.config.list_physical_devices('GPU')
         if not gpus:
             return False, {"error": "No GPUs available"}
             
-        # Configure memory growth before any other GPU operations
+        # Configure memory fraction from system_params
+        memory_fraction = system_params.max_memory_fraction if system_params else 0.8
+        
         for gpu in gpus:
             try:
                 tf.config.experimental.set_memory_growth(gpu, True)
-            except RuntimeError as e:
-                print(f"GPU memory growth error: {e}")
-                
-        # Now clear session and collect garbage
-        tf.keras.backend.clear_session()
-        gc.collect()
-
-        # Initialize strategy here
-        strategy = tf.distribute.MirroredStrategy()
-        
-        gpu_config = {
-            "num_gpus": len(gpus),
-            "strategy": strategy,
-            "memory_config": {}
-        }
-        
-        # Configure each GPU with memory growth
-        for gpu_index, gpu in enumerate(gpus):
-            try:
-                # Enable memory growth
-                tf.config.experimental.set_memory_growth(gpu, True)
-                
-                # Configure memory limits for H100 (95GB per GPU with some buffer)
-                memory_limit = 90 * 1024  # 90GB in MB
+                # Calculate memory limit based on system_params
+                memory_limit = int(tf.config.experimental.get_memory_info(f'GPU:0')['total'] 
+                                 * memory_fraction)
                 tf.config.set_logical_device_configuration(
                     gpu,
                     [tf.config.LogicalDeviceConfiguration(memory_limit=memory_limit)]
                 )
-                
-                # Get memory info
-                try:
-                    memory_info = tf.config.experimental.get_memory_info(f'/device:GPU:{gpu_index}')
-                    available_memory = memory_info['current'] / 1e9
-                except:
-                    available_memory = 90.0  # Conservative estimate for H100
-                
-                gpu_config["memory_config"][f"gpu_{gpu_index}"] = {
-                    "available_memory_gb": available_memory,
-                    "memory_limit_gb": memory_limit / 1024,
-                    "growth_enabled": True
-                }
-                
             except RuntimeError as e:
-                print(f"Warning: Error configuring GPU {gpu_index}: {e}")
-                continue
-        
-        # Enable mixed precision for better performance
-        try:
-            policy = tf.keras.mixed_precision.Policy('mixed_float16')
-            tf.keras.mixed_precision.set_global_policy(policy)
-            gpu_config["mixed_precision_enabled"] = True
-        except Exception as e:
-            print(f"Warning: Could not enable mixed precision: {e}")
-            gpu_config["mixed_precision_enabled"] = False
-        
-        # Configure multi-GPU strategy
-        if len(gpus) > 1:
-            try:
-                # Create MirroredStrategy with cross-device ops configuration
-                strategy = tf.distribute.MirroredStrategy(
-                    cross_device_ops=tf.distribute.HierarchicalCopyAllReduce()
-                )
-                gpu_config["strategy"] = strategy
-                gpu_config["distribution_strategy"] = "MirroredStrategy"
+                print(f"GPU configuration error: {e}")
                 
-                # Calculate batch size based on available memory
-                total_memory = sum(
-                    config["available_memory_gb"] 
-                    for config in gpu_config["memory_config"].values()
-                )
-                # More aggressive batch size for H100s
-                gpu_config["recommended_batch_size"] = min(
-                    int(total_memory * 1000),  # Scale with total memory
-                    128000  # Maximum batch size cap
-                )
-                
-                print(f"Multi-GPU setup successful with {strategy.num_replicas_in_sync} devices")
-                
-            except Exception as e:
-                print(f"Warning: Could not configure MirroredStrategy: {e}")
-                gpu_config["distribution_strategy"] = "SingleGPU"
-                gpu_config["recommended_batch_size"] = 32000
-        else:
-            gpu_config["distribution_strategy"] = "SingleGPU"
-            gpu_config["recommended_batch_size"] = 32000
+        # Enhanced strategy configuration
+        strategy = tf.distribute.MirroredStrategy(
+            cross_device_ops=tf.distribute.HierarchicalCopyAllReduce()
+        )
         
-        # Add memory monitoring callback
-        def memory_monitoring_callback():
-            for gpu_index in range(len(gpus)):
-                try:
-                    memory_info = tf.config.experimental.get_memory_info(f'/device:GPU:{gpu_index}')
-                    current_usage = memory_info['current'] / 1e9
-                    print(f"GPU {gpu_index} memory usage: {current_usage:.2f} GB")
-                except:
-                    continue
+        # Configure mixed precision
+        policy = tf.keras.mixed_precision.Policy('mixed_float16')
+        tf.keras.mixed_precision.set_global_policy(policy)
         
-        gpu_config["memory_monitor"] = memory_monitoring_callback
-        
-        return True, gpu_config
-        
+        return True, {
+            "num_gpus": len(gpus),
+            "strategy": strategy,
+            "memory_fraction": memory_fraction,
+            "mixed_precision": True
+        }
     except Exception as e:
-        error_msg = f"Critical error during GPU configuration: {str(e)}"
-        print(error_msg)
-        return False, {"error": error_msg}
+        return False, {"error": str(e)}
     
 def validate_system_configuration(system_params, gpu_config, logger):
-    """Validate system configuration before starting dataset generation"""
+    """Enhanced validation with SystemParameters integration"""
     try:
-        # Check system parameters
+        # Validate basic parameters
         if system_params.total_samples <= 0:
             raise ValueError("Total samples must be positive")
             
-        # Validate GPU configuration if available
+        # Validate batch size against GPU memory
         if gpu_config and gpu_config.get('num_gpus', 0) > 0:
-            for gpu_id, config in gpu_config['memory_config'].items():
-                if config['available_memory_gb'] < 8.0:  # Minimum 8GB required
-                    logger.warning(f"Low memory on {gpu_id}: {config['available_memory_gb']:.2f} GB")
-                    
+            max_batch_size = system_params.max_batch_size
+            min_batch_size = system_params.min_batch_size
+            
+            if system_params.batch_size > max_batch_size:
+                logger.warning(f"Batch size {system_params.batch_size} exceeds maximum {max_batch_size}")
+                system_params.batch_size = max_batch_size
+                
+            if system_params.batch_size < min_batch_size:
+                logger.warning(f"Batch size {system_params.batch_size} below minimum {min_batch_size}")
+                system_params.batch_size = min_batch_size
+                
         return True
     except Exception as e:
-        logger.error(f"System configuration validation failed: {e}")
+        logger.error(f"Validation failed: {e}")
         return False
 
-def monitor_gpu_memory(logger, gpu_config):
-    """Monitor GPU memory usage"""
-    if gpu_config and gpu_config.get('num_gpus', 0) > 0:
-        for gpu_id in range(gpu_config['num_gpus']):
-            try:
-                memory_info = tf.config.experimental.get_memory_info(f'GPU:{gpu_id}')
-                logger.info(f"GPU:{gpu_id} memory usage: {memory_info['current'] / 1e9:.2f} GB")
-            except Exception as e:
-                logger.warning(f"Could not monitor GPU:{gpu_id} memory: {e}")
+def monitor_memory_usage(system_params, gpu_config, logger):
+    """Enhanced memory monitoring"""
+    try:
+        for gpu_id in range(gpu_config.get('num_gpus', 0)):
+            memory_info = tf.config.experimental.get_memory_info(f'GPU:{gpu_id}')
+            current_usage = memory_info['current'] / 1e9
+            total_memory = memory_info['total'] / 1e9
+            usage_percent = (current_usage / total_memory) * 100
+            
+            logger.info(f"GPU:{gpu_id} - Usage: {current_usage:.2f}GB/{total_memory:.2f}GB ({usage_percent:.1f}%)")
+            
+            # Adjust batch size if needed
+            if usage_percent > 90:
+                system_params.batch_size = max(
+                    system_params.min_batch_size,
+                    int(system_params.batch_size * 0.8)
+                )
+                logger.warning(f"Reducing batch size to {system_params.batch_size}")
+                
+    except Exception as e:
+        logger.warning(f"Memory monitoring failed: {e}")
 
 def parse_arguments():
     """
@@ -228,21 +168,33 @@ def parse_arguments():
     
     return parser.parse_args()
 
-def configure_system_parameters(args):
-    """
-    Configure system parameters based on command-line arguments
-    
-    Args:
-        args (argparse.Namespace): Parsed command-line arguments
-    
-    Returns:
-        SystemParameters: Configured system parameters
-    """
-    return SystemParameters(
-        num_tx=args.tx_antennas,
-        num_rx=args.rx_antennas,
-        total_samples=args.samples
-    )
+def configure_system_parameters(args, gpu_config):
+    """Enhanced system parameters configuration"""
+    try:
+        # Initialize with command line arguments
+        system_params = SystemParameters(
+            num_tx=args.tx_antennas,
+            num_rx=args.rx_antennas,
+            total_samples=args.samples
+        )
+        
+        # Adjust batch size based on GPU configuration
+        if gpu_config and gpu_config.get('num_gpus', 0) > 0:
+            recommended_batch_size = min(
+                system_params.max_batch_size,
+                gpu_config.get('recommended_batch_size', 32000)
+            )
+            system_params.batch_size = recommended_batch_size
+            
+        # Adjust replay buffer size based on available memory
+        system_params.replay_buffer_size = min(
+            system_params.replay_buffer_size,
+            100000 * gpu_config.get('num_gpus', 1)
+        )
+        
+        return system_params
+    except Exception as e:
+        raise RuntimeError(f"Failed to configure system parameters: {e}")
 
 def generate_output_path(base_path=None):
     """
