@@ -18,24 +18,34 @@ import gc
 
 def configure_gpu_environment():
     try:
-        # Clear existing sessions and cache
-        tf.keras.backend.clear_session()
-        gc.collect()
-        
-        # Set environment variables
+        # These need to be set before any TF operations
         os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
-        os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'  # Explicitly enable both GPUs
+        os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
         os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
         
-        # Get GPU devices
+        # Initialize GPUs first
         gpus = tf.config.list_physical_devices('GPU')
         if not gpus:
             return False, {"error": "No GPUs available"}
             
+        # Configure memory growth before any other GPU operations
+        for gpu in gpus:
+            try:
+                tf.config.experimental.set_memory_growth(gpu, True)
+            except RuntimeError as e:
+                print(f"GPU memory growth error: {e}")
+                
+        # Now clear session and collect garbage
+        tf.keras.backend.clear_session()
+        gc.collect()
+
+        # Initialize strategy here
+        strategy = tf.distribute.MirroredStrategy()
+        
         gpu_config = {
             "num_gpus": len(gpus),
-            "memory_config": {},
-            "strategy": None
+            "strategy": strategy,
+            "memory_config": {}
         }
         
         # Configure each GPU with memory growth
@@ -278,18 +288,52 @@ def adjust_batch_size(current_batch_size, gpu_config, logger):
 
 def main():
     try:
-        # Configure GPU environment first and get configuration details
-        success, gpu_config = configure_gpu_environment()
+        # GPU setup first
+        gpus = tf.config.list_physical_devices('GPU')
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        strategy = tf.distribute.MirroredStrategy()
         
-        # Parse arguments
+        # Parse args and initialize components
         args = parse_arguments()
-        
-        # Initialize logger before any other operations
         logger = configure_logging(
             log_level=args.log_level,
             log_file=f'logs/mimo_dataset_generation_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log',
             log_format='%(asctime)s - %(name)s - %(levelname)s - %(message)s - [%(filename)s:%(lineno)d]'
         )
+        
+        # Setup gpu_config
+        success = True if gpus else False
+        gpu_config = {
+            "num_gpus": len(gpus),
+            "strategy": strategy,
+            "mixed_precision_enabled": True,
+            "memory_config": {},
+            "recommended_batch_size": 32000 if success else 1000
+        }
+
+        # Configure system and validate
+        system_params = configure_system_parameters(args)
+        system_params.replay_buffer_size = min(system_params.replay_buffer_size, 100000)
+        
+        if not validate_system_configuration(system_params, gpu_config, logger):
+            logger.error("System configuration validation failed")
+            return 1
+
+        # Setup paths and batch size
+        output_path = generate_output_path(args.output)
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+        # Log configs and generate dataset within strategy scope
+        with strategy.scope():
+            generator = MIMODatasetGenerator(
+                system_params=system_params,
+                logger=logger
+            )
+            generator.generate_dataset(
+                num_samples=system_params.total_samples,
+                save_path=output_path
+            )
 
         if not success:
             logger.warning(f"GPU configuration failed: {gpu_config.get('error', 'Unknown error')}")

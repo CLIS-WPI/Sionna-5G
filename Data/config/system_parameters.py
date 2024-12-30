@@ -16,45 +16,50 @@ except ImportError:
 
 @dataclasses.dataclass
 class SystemParameters:
+    # Dataset Generation Parameters
+    total_samples: int = 21_000_000          # tot: Total number of samples to generate
+    batch_size: int = 32000                  # bs: Processing batch size
+    max_batch_size: int = 64000              # max_bs: Upper limit for batch size
+    min_batch_size: int = 16000              # min_bs: Lower limit for batch size
+    samples_per_modulation: int = None        # spm: Samples per modulation scheme
+    replay_buffer_size: int = 21_000_000      # buf: Size of replay buffer for GPU
+    
+    # GPU and Memory Configuration
+    max_memory_fraction: float = 0.8          # mem: Max GPU memory usage fraction
+    batch_size_scaling: float = 0.5           # scale: Batch size scaling factor
+    
     # Antenna Configuration
-    max_memory_fraction: float = 0.8  # Maximum fraction of GPU memory to use
-    batch_size_scaling: float = 0.5   # Conservative batch size scaling
-    num_tx: int = 4
-    num_rx: int = 4
-    num_streams: int = 4
-    element_spacing: float = 0.5
+    num_tx: int = 4                          # tx: Number of transmit antennas
+    num_rx: int = 4                          # rx: Number of receive antennas
+    num_streams: int = 4                     # strm: Number of data streams
+    element_spacing: float = 0.5             # esp: Antenna element spacing
     
     # Frequency Parameters
-    carrier_frequency: float = 3.5e9  # 3.5 GHz
+    carrier_frequency: float = 3.5e9         # fc: Carrier frequency in Hz
     
     # OFDM Parameters
-    num_subcarriers: int = 64
-    num_ofdm_symbols: int = 14
-    subcarrier_spacing: float = 30e3  # 30 kHz
+    num_subcarriers: int = 64               # sc: Number of subcarriers
+    num_ofdm_symbols: int = 14              # sym: OFDM symbols per frame
+    subcarrier_spacing: float = 30e3        # scs: Spacing between subcarriers
     
     # Channel Parameters
-    num_paths: int = 20 # before number of paths was :10
-    snr_range: Tuple[float, float] = (-20.0, 30.0)  # Using float values for precision
-    noise_floor: float = -174  # dBm/Hz
+    num_paths: int = 20                     # path: Number of propagation paths
+    snr_range: Tuple[float, float] = (-20.0, 30.0)  # snr: Signal-to-noise range
+    noise_floor: float = -174               # nf: Noise floor in dBm/Hz
     
     # Modulation Schemes
-    modulation_schemes: List[str] = dataclasses.field(
+    modulation_schemes: List[str] = dataclasses.field(  # mod: Available modulations
         default_factory=lambda: ['QPSK', '16QAM', '64QAM']
     )
     
     # Path Loss Configuration
-    path_loss_scenarios: List[str] = dataclasses.field(
+    path_loss_scenarios: List[str] = dataclasses.field(  # pl: Path loss scenarios
         default_factory=lambda: ['umi', 'uma']
     )
     
     # Static User and Reproducibility Configuration
-    user_mobility: bool = False  # Flag for static user scenario
-    random_seed: int = 42  # Seed for reproducible results
-    
-    # Dataset Generation Parameters
-    total_samples: int = 21_000_000
-    samples_per_modulation: int = None
-    replay_buffer_size: int = 21_000_000  # Add replay buffer size (this is for gpu server runing)
+    user_mobility: bool = False             # mob: User mobility flag
+    random_seed: int = 42                   # seed: Random number generator seed
     
 
     # Add validation method
