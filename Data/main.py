@@ -46,30 +46,23 @@ def configure_gpu_environment():
             "memory_config": {}
         }
         
-        # Clear and configure each GPU
+        # Configure each GPU
         for gpu_index, gpu in enumerate(gpus):
             try:
-                # Reset memory stats
-                tf.config.experimental.reset_memory_stats(gpu)
-                
-                # Enable memory growth
+                # Enable memory growth first
                 tf.config.experimental.set_memory_growth(gpu, True)
                 
-                # Get memory info after cleanup
-                memory_info = tf.config.experimental.get_memory_info(f'GPU:{gpu_index}')
-                available_memory = memory_info['current'] / 1e9  # Convert to GB
-                
-                # Configure memory limit based on available memory
-                memory_limit = int(available_memory * 0.95)  # Use 95% of available memory
-                tf.config.set_logical_device_configuration(
-                    gpu,
-                    [tf.config.LogicalDeviceConfiguration(memory_limit=1024*memory_limit)]
-                )
+                # Get memory info
+                try:
+                    memory_info = tf.config.experimental.get_memory_info(f'/device:GPU:{gpu_index}')
+                    available_memory = memory_info['current'] / 1e9  # Convert to GB
+                except:
+                    # Fallback if memory info not available
+                    available_memory = 80.0  # Default assumption for H100
                 
                 # Store configuration details
                 gpu_config["memory_config"][f"gpu_{gpu_index}"] = {
                     "available_memory_gb": available_memory,
-                    "memory_limit_gb": memory_limit,
                     "growth_enabled": True
                 }
                 
@@ -95,16 +88,15 @@ def configure_gpu_environment():
         except ImportError:
             gpu_config["pytorch_cleanup"] = False
             
-        # Calculate optimal batch size based on available memory
-        min_available_memory = min(config["available_memory_gb"] 
-                                for config in gpu_config["memory_config"].values())
-        
-        if min_available_memory > 64.0:  # H100-level memory
-            gpu_config["recommended_batch_size"] = 256_000
-        elif min_available_memory > 32.0:
-            gpu_config["recommended_batch_size"] = 128_000
+        # Calculate recommended batch size based on GPU count and memory
+        if gpu_config["num_gpus"] > 0:
+            # More conservative batch sizes to prevent OOM
+            if gpu_config["num_gpus"] > 1:
+                gpu_config["recommended_batch_size"] = 128_000
+            else:
+                gpu_config["recommended_batch_size"] = 64_000
         else:
-            gpu_config["recommended_batch_size"] = 64_000
+            gpu_config["recommended_batch_size"] = 1_000  # CPU fallback
             
         return True, gpu_config
         
