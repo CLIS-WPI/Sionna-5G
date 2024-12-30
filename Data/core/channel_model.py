@@ -307,48 +307,78 @@ class ChannelModelManager:
         batch_size: int,
         snr_db: tf.Tensor
     ) -> Dict[str, tf.Tensor]:
-        """Generate channel data with explicit shape control"""
-        try:
-            # Ensure proper types and shapes
-            batch_size = tf.cast(batch_size, tf.int32)
+        """
+        Generate MIMO channel data with explicit shape control and validation
+        
+        Args:
+            batch_size (int): Number of samples to generate
+            snr_db (tf.Tensor): Signal-to-noise ratio in dB
             
-            # Reshape and cast snr_db to ensure correct format
+        Returns:
+            Dict[str, tf.Tensor]: Dictionary containing channel information
+        """
+        try:
+            # Validate and adjust batch size
+            batch_size = tf.cast(batch_size, tf.int32)
+            batch_size = tf.minimum(batch_size, self.system_params.max_batch_size)
+            
+            # Normalize and reshape SNR tensor
             snr_db = tf.cast(snr_db, tf.float32)
             snr_db = tf.reshape(snr_db, [-1])  # Flatten to 1D
             
-            # Ensure snr_db matches batch size
+            # Match SNR tensor to batch size
             if tf.shape(snr_db)[0] != batch_size:
-                # If too large, slice it
                 if tf.shape(snr_db)[0] > batch_size:
-                    snr_db = tf.slice(snr_db, [0], [batch_size])
-                # If too small, pad it
+                    snr_db = snr_db[:batch_size]  # Slice using tensor indexing
                 else:
                     padding_size = batch_size - tf.shape(snr_db)[0]
-                    snr_db = tf.pad(snr_db, [[0, padding_size]], 
-                                constant_values=tf.reduce_mean(snr_db))
+                    mean_snr = tf.reduce_mean(snr_db)
+                    snr_db = tf.pad(snr_db, [[0, padding_size]], constant_values=mean_snr)
             
-            # Generate channel samples with controlled variance
-            h_shape = [batch_size, self.system_params.num_rx, self.system_params.num_tx]
-            std_dev = 1.0/np.sqrt(2.0 * self.system_params.num_tx)
+            # Define channel dimensions
+            h_shape = [
+                batch_size,
+                self.system_params.num_rx,
+                self.system_params.num_tx
+            ]
             
-            # Generate complex channel
+            # Calculate standard deviation for normalization
+            std_dev = tf.cast(1.0/tf.sqrt(2.0 * tf.cast(self.system_params.num_tx, tf.float32)), 
+                            tf.float32)
+            
+            # Generate complex channel matrix
             h_real = tf.random.normal(h_shape, mean=0.0, stddev=std_dev, dtype=tf.float32)
             h_imag = tf.random.normal(h_shape, mean=0.0, stddev=std_dev, dtype=tf.float32)
             h = tf.complex(h_real, h_imag)
             
-            # Verify shapes using dynamic assertions
-            tf.debugging.assert_equal(tf.shape(h)[0], batch_size, 
-                                    message="Channel batch size mismatch")
-            tf.debugging.assert_equal(tf.shape(h)[1], self.system_params.num_rx, 
-                                    message="Channel RX dimension mismatch")
-            tf.debugging.assert_equal(tf.shape(h)[2], self.system_params.num_tx, 
-                                    message="Channel TX dimension mismatch")
+            # Validate tensor shapes
+            assert_tensor_shape(h, h_shape, "Channel matrix")
+            assert_tensor_shape(snr_db, [batch_size], "SNR values")
             
+            # Calculate eigenvalues for channel quality assessment
+            h_conj = tf.transpose(h, conjugate=True, perm=[0, 2, 1])
+            h_matrix = tf.matmul(h, h_conj)
+            eigenvalues = tf.linalg.eigvalsh(h_matrix)
+            
+            # Normalize eigenvalues
+            eigenvalues = tf.abs(eigenvalues)
+            eigenvalues = tf.clip_by_value(eigenvalues, 1e-10, tf.float32.max)
+            
+            # Add noise to create noisy channel version
+            noise_power = tf.pow(10.0, -snr_db/10.0)
+            noise = tf.complex(
+                tf.random.normal(h_shape, mean=0.0, stddev=tf.sqrt(noise_power/2)),
+                tf.random.normal(h_shape, mean=0.0, stddev=tf.sqrt(noise_power/2))
+            )
+            noisy_channel = h + noise
+            
+            # Return channel information dictionary
             return {
                 'perfect_channel': h,
-                'noisy_channel': h,  # For now, return same channel
-                'eigenvalues': tf.ones([batch_size, self.system_params.num_rx]),
-                'snr_db': snr_db
+                'noisy_channel': noisy_channel,
+                'eigenvalues': eigenvalues,
+                'snr_db': snr_db,
+                'channel_quality': tf.reduce_mean(eigenvalues, axis=-1)
             }
                 
         except Exception as e:

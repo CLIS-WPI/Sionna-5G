@@ -82,7 +82,6 @@ class SystemParameters:
 
     def _initialize_hardware_parameters(self):
         try:
-            
             # Get system memory
             if PSUTIL_AVAILABLE:
                 system_memory_gb = psutil.virtual_memory().total / (1024**3)
@@ -93,33 +92,23 @@ class SystemParameters:
             # Check for GPU availability
             gpus = tf.config.list_physical_devices('GPU')
             if gpus:
-                # Force H100 configuration for your setup
-                self.batch_size = 32000  # Conservative batch size
-                self.memory_threshold = 40.0  # 40GB per GPU
-                self.max_batch_size = 6000  # Match with PathLossManager
-                self.min_batch_size = 1000  # Conservative minimum
-                
-                # Configure each GPU
-                for gpu in gpus:
-                    tf.config.experimental.set_memory_growth(gpu, True)
-                
-                if len(gpus) > 1:
-                    self.batch_size *= 1.5  # Slight increase for multi-GPU
-                    self.max_batch_size *= 1.5
-                    
-            else:
-                # CPU configuration
-                self.batch_size = 1000
-                self.memory_threshold = system_memory_gb * 0.2
+                self.batch_size = 1000  # Reduced batch size
+                self.memory_threshold = 40.0
                 self.max_batch_size = 2000
                 self.min_batch_size = 500
+            else:
+                # CPU configuration
+                self.batch_size = 500
+                self.memory_threshold = system_memory_gb * 0.2
+                self.max_batch_size = 1000
+                self.min_batch_size = 250
+                    
+                logging.info(f"Hardware Configuration:")
+                logging.info(f"- Batch size: {self.batch_size}")
+                logging.info(f"- Memory threshold: {self.memory_threshold:.1f} GB")
+                logging.info(f"- Max batch size: {self.max_batch_size}")
+                logging.info(f"- Min batch size: {self.min_batch_size}")
                 
-            logging.info(f"Hardware Configuration:")
-            logging.info(f"- Batch size: {self.batch_size}")
-            logging.info(f"- Memory threshold: {self.memory_threshold:.1f} GB")
-            logging.info(f"- Max batch size: {self.max_batch_size}")
-            logging.info(f"- Min batch size: {self.min_batch_size}")
-            
         except Exception as e:
             logging.warning(f"Hardware initialization error: {e}")
             # Conservative fallback settings
