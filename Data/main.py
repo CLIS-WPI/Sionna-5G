@@ -60,16 +60,20 @@ def configure_gpu_environment():
                     # Fallback if memory info not available
                     available_memory = 80.0  # Default assumption for H100
                 
+                # Calculate memory limit (95% of available memory)
+                memory_limit = available_memory * 0.95
+                
                 # Store configuration details
                 gpu_config["memory_config"][f"gpu_{gpu_index}"] = {
                     "available_memory_gb": available_memory,
+                    "memory_limit_gb": memory_limit,
                     "growth_enabled": True
                 }
                 
             except RuntimeError as e:
                 print(f"Warning: Error configuring GPU {gpu_index}: {e}")
                 continue
-                
+        
         # Enable mixed precision for H100s
         try:
             policy = tf.keras.mixed_precision.Policy('mixed_float16')
@@ -78,16 +82,7 @@ def configure_gpu_environment():
         except Exception as e:
             print(f"Warning: Could not enable mixed precision: {e}")
             gpu_config["mixed_precision_enabled"] = False
-            
-        # Optional: PyTorch cleanup if available
-        try:
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                gpu_config["pytorch_cleanup"] = True
-        except ImportError:
-            gpu_config["pytorch_cleanup"] = False
-            
+        
         # Calculate recommended batch size based on GPU count and memory
         if gpu_config["num_gpus"] > 0:
             # More conservative batch sizes to prevent OOM
@@ -255,9 +250,6 @@ def adjust_batch_size(current_batch_size, gpu_config, logger):
     return current_batch_size
 
 def main():
-    """
-    Main entry point for MIMO dataset generation with enhanced GPU and memory management
-    """
     try:
         # Configure GPU environment first and get configuration details
         success, gpu_config = configure_gpu_environment()
@@ -282,7 +274,11 @@ def main():
             for gpu_id, config in gpu_config['memory_config'].items():
                 logger.info(f"\n{gpu_id}:")
                 logger.info(f"  Available memory: {config['available_memory_gb']:.2f} GB")
-                logger.info(f"  Memory limit: {config['memory_limit_gb']:.2f} GB")
+                # Only log memory limit if it exists
+                if 'memory_limit_gb' in config:
+                    logger.info(f"  Memory limit: {config['memory_limit_gb']:.2f} GB")
+                else:
+                    logger.info(f"  Memory limit: Not set (using available memory)")
         
         # Configure system parameters
         system_params = configure_system_parameters(args)
