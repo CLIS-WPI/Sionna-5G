@@ -24,7 +24,7 @@ def configure_gpu_environment():
         
         # Set environment variables
         os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
-        os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
+        os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'  # Explicitly enable both GPUs
         os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
         
         # Get GPU devices
@@ -34,24 +34,33 @@ def configure_gpu_environment():
             
         gpu_config = {
             "num_gpus": len(gpus),
-            "memory_config": {}
+            "memory_config": {},
+            "strategy": None
         }
         
-        # Configure each GPU - Set memory growth BEFORE setting memory limits
+        # Configure each GPU with memory growth
         for gpu_index, gpu in enumerate(gpus):
             try:
-                # Enable memory growth first
+                # Enable memory growth
                 tf.config.experimental.set_memory_growth(gpu, True)
                 
-                # Get memory info after enabling growth
+                # Configure memory limits for H100 (95GB per GPU with some buffer)
+                memory_limit = 90 * 1024  # 90GB in MB
+                tf.config.set_logical_device_configuration(
+                    gpu,
+                    [tf.config.LogicalDeviceConfiguration(memory_limit=memory_limit)]
+                )
+                
+                # Get memory info
                 try:
                     memory_info = tf.config.experimental.get_memory_info(f'/device:GPU:{gpu_index}')
                     available_memory = memory_info['current'] / 1e9
                 except:
-                    available_memory = 85.5  # Default for H100
+                    available_memory = 90.0  # Conservative estimate for H100
                 
                 gpu_config["memory_config"][f"gpu_{gpu_index}"] = {
                     "available_memory_gb": available_memory,
+                    "memory_limit_gb": memory_limit / 1024,
                     "growth_enabled": True
                 }
                 
@@ -59,7 +68,7 @@ def configure_gpu_environment():
                 print(f"Warning: Error configuring GPU {gpu_index}: {e}")
                 continue
         
-        # Enable mixed precision
+        # Enable mixed precision for better performance
         try:
             policy = tf.keras.mixed_precision.Policy('mixed_float16')
             tf.keras.mixed_precision.set_global_policy(policy)
@@ -71,9 +80,26 @@ def configure_gpu_environment():
         # Configure multi-GPU strategy
         if len(gpus) > 1:
             try:
-                strategy = tf.distribute.MirroredStrategy()
+                # Create MirroredStrategy with cross-device ops configuration
+                strategy = tf.distribute.MirroredStrategy(
+                    cross_device_ops=tf.distribute.HierarchicalCopyAllReduce()
+                )
+                gpu_config["strategy"] = strategy
                 gpu_config["distribution_strategy"] = "MirroredStrategy"
-                gpu_config["recommended_batch_size"] = 64000  # Reduced from 128000
+                
+                # Calculate batch size based on available memory
+                total_memory = sum(
+                    config["available_memory_gb"] 
+                    for config in gpu_config["memory_config"].values()
+                )
+                # More aggressive batch size for H100s
+                gpu_config["recommended_batch_size"] = min(
+                    int(total_memory * 1000),  # Scale with total memory
+                    128000  # Maximum batch size cap
+                )
+                
+                print(f"Multi-GPU setup successful with {strategy.num_replicas_in_sync} devices")
+                
             except Exception as e:
                 print(f"Warning: Could not configure MirroredStrategy: {e}")
                 gpu_config["distribution_strategy"] = "SingleGPU"
@@ -81,7 +107,19 @@ def configure_gpu_environment():
         else:
             gpu_config["distribution_strategy"] = "SingleGPU"
             gpu_config["recommended_batch_size"] = 32000
-            
+        
+        # Add memory monitoring callback
+        def memory_monitoring_callback():
+            for gpu_index in range(len(gpus)):
+                try:
+                    memory_info = tf.config.experimental.get_memory_info(f'/device:GPU:{gpu_index}')
+                    current_usage = memory_info['current'] / 1e9
+                    print(f"GPU {gpu_index} memory usage: {current_usage:.2f} GB")
+                except:
+                    continue
+        
+        gpu_config["memory_monitor"] = memory_monitoring_callback
+        
         return True, gpu_config
         
     except Exception as e:
