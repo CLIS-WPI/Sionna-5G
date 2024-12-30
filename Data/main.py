@@ -354,13 +354,13 @@ def main():
         logger.info("Starting dataset generation...")
         try:
             # Monitor initial memory state
-            monitor_gpu_memory(logger, gpu_config)
+            monitor_memory_usage(system_params, gpu_config, logger)
 
             generator.generate_dataset(
                 num_samples=system_params.total_samples,
                 save_path=output_path
             )
-            monitor_gpu_memory(logger, gpu_config)
+            monitor_memory_usage(system_params, gpu_config, logger)
             logger.info("Dataset generation completed")
             
             # Verify output file

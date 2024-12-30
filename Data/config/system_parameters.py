@@ -17,12 +17,12 @@ except ImportError:
 @dataclasses.dataclass
 class SystemParameters:
     # Dataset Generation Parameters
-    total_samples: int = 21_000_000          # tot: Total number of samples to generate
+    total_samples: int = 1_000_000          # tot: Total number of samples to generate
     batch_size: int = 32000                  # bs: Processing batch size
     max_batch_size: int = 64000              # max_bs: Upper limit for batch size
     min_batch_size: int = 16000              # min_bs: Lower limit for batch size
     samples_per_modulation: int = None        # spm: Samples per modulation scheme
-    replay_buffer_size: int = 21_000_000      # buf: Size of replay buffer for GPU
+    replay_buffer_size: int = 1_000_000      # buf: Size of replay buffer for GPU
     
     # GPU and Memory Configuration
     max_memory_fraction: float = 0.8          # mem: Max GPU memory usage fraction
