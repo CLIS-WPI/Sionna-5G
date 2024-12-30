@@ -342,7 +342,7 @@ class ChannelModelManager:
             # Calculate noise power and reshape for broadcasting
             noise_power = tf.pow(10.0, -snr_db/10.0)  # Shape: [batch_size]
             noise_power = tf.reshape(noise_power, [batch_size, 1, 1])  # Shape: [batch_size, 1, 1]
-            
+            print(f"Noise power shape: {tf.shape(noise_power)}")
             # Generate noise with proper broadcasting
             noise = tf.complex(
                 tf.random.normal(h_shape, mean=0.0, stddev=tf.sqrt(noise_power/2)),
