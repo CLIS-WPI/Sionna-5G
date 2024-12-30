@@ -307,16 +307,6 @@ class ChannelModelManager:
         batch_size: int,
         snr_db: tf.Tensor
     ) -> Dict[str, tf.Tensor]:
-        """
-        Generate MIMO channel data with explicit shape control and validation
-        
-        Args:
-            batch_size (int): Number of samples to generate
-            snr_db (tf.Tensor): Signal-to-noise ratio in dB
-            
-        Returns:
-            Dict[str, tf.Tensor]: Dictionary containing channel information
-        """
         try:
             # Validate and adjust batch size
             batch_size = tf.cast(batch_size, tf.int32)
@@ -324,16 +314,7 @@ class ChannelModelManager:
             
             # Normalize and reshape SNR tensor
             snr_db = tf.cast(snr_db, tf.float32)
-            snr_db = tf.reshape(snr_db, [-1])  # Flatten to 1D
-            
-            # Match SNR tensor to batch size
-            if tf.shape(snr_db)[0] != batch_size:
-                if tf.shape(snr_db)[0] > batch_size:
-                    snr_db = snr_db[:batch_size]  # Slice using tensor indexing
-                else:
-                    padding_size = batch_size - tf.shape(snr_db)[0]
-                    mean_snr = tf.reduce_mean(snr_db)
-                    snr_db = tf.pad(snr_db, [[0, padding_size]], constant_values=mean_snr)
+            snr_db = tf.reshape(snr_db, [batch_size])  # Ensure SNR has shape [batch_size]
             
             # Define channel dimensions
             h_shape = [
@@ -351,40 +332,41 @@ class ChannelModelManager:
             h_imag = tf.random.normal(h_shape, mean=0.0, stddev=std_dev, dtype=tf.float32)
             h = tf.complex(h_real, h_imag)
             
-            # Validate tensor shapes
-            assert_tensor_shape(h, h_shape, "Channel matrix")
-            assert_tensor_shape(snr_db, [batch_size], "SNR values")
+            # Calculate noise power and reshape for broadcasting
+            noise_power = tf.pow(10.0, -snr_db/10.0)  # Shape: [batch_size]
+            noise_power = tf.reshape(noise_power, [batch_size, 1, 1])  # Shape: [batch_size, 1, 1]
+            
+            # Generate noise with proper broadcasting
+            noise = tf.complex(
+                tf.random.normal(h_shape, mean=0.0, stddev=tf.sqrt(noise_power/2)),
+                tf.random.normal(h_shape, mean=0.0, stddev=tf.sqrt(noise_power/2))
+            )
+            
+            # Add noise to create noisy channel version
+            noisy_channel = h + noise
             
             # Calculate eigenvalues for channel quality assessment
             h_conj = tf.transpose(h, conjugate=True, perm=[0, 2, 1])
             h_matrix = tf.matmul(h, h_conj)
             eigenvalues = tf.linalg.eigvalsh(h_matrix)
             
-            # Normalize eigenvalues
-            eigenvalues = tf.abs(eigenvalues)
-            eigenvalues = tf.clip_by_value(eigenvalues, 1e-10, tf.float32.max)
+            # Validate tensor shapes
+            assert_tensor_shape(h, h_shape, "Channel matrix")
+            assert_tensor_shape(snr_db, [batch_size], "SNR values")
+            assert_tensor_shape(noisy_channel, h_shape, "Noisy channel")
             
-            # Add noise to create noisy channel version
-            noise_power = tf.pow(10.0, -snr_db/10.0)
-            noise = tf.complex(
-                tf.random.normal(h_shape, mean=0.0, stddev=tf.sqrt(noise_power/2)),
-                tf.random.normal(h_shape, mean=0.0, stddev=tf.sqrt(noise_power/2))
-            )
-            noisy_channel = h + noise
-            
-            # Return channel information dictionary
             return {
                 'perfect_channel': h,
                 'noisy_channel': noisy_channel,
                 'eigenvalues': eigenvalues,
                 'snr_db': snr_db,
-                'channel_quality': tf.reduce_mean(eigenvalues, axis=-1)
+                'channel_quality': tf.reduce_mean(tf.abs(eigenvalues), axis=-1)
             }
                 
         except Exception as e:
             self.logger.error(f"Error generating MIMO channel: {str(e)}")
             raise
-    
+        
     def get_channel_statistics(
         self, 
         channel: tf.Tensor
