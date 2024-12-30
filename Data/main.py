@@ -113,6 +113,24 @@ def configure_gpu_environment():
         print(error_msg)
         return False, {"error": error_msg}
     
+def validate_system_configuration(system_params, gpu_config, logger):
+    """Validate system configuration before starting dataset generation"""
+    try:
+        # Check system parameters
+        if system_params.total_samples <= 0:
+            raise ValueError("Total samples must be positive")
+            
+        # Validate GPU configuration if available
+        if gpu_config and gpu_config.get('num_gpus', 0) > 0:
+            for gpu_id, config in gpu_config['memory_config'].items():
+                if config['available_memory_gb'] < 8.0:  # Minimum 8GB required
+                    logger.warning(f"Low memory on {gpu_id}: {config['available_memory_gb']:.2f} GB")
+                    
+        return True
+    except Exception as e:
+        logger.error(f"System configuration validation failed: {e}")
+        return False
+
 def monitor_gpu_memory(logger, gpu_config):
     """Monitor GPU memory usage"""
     if gpu_config and gpu_config.get('num_gpus', 0) > 0:
@@ -278,6 +296,11 @@ def main():
         system_params = configure_system_parameters(args)
         system_params.replay_buffer_size = min(system_params.replay_buffer_size, 100000)
         
+        # Add validation here - after system_params configuration but before dataset generation
+        if not validate_system_configuration(system_params, gpu_config, logger):
+            logger.error("System configuration validation failed")
+            return 1
+
         # Set batch size based on GPU configuration if not specified
         if args.batch_size is None:
             if success:
