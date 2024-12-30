@@ -16,6 +16,42 @@ import tensorflow as tf
 from typing import Dict
 import gc
 
+def configure_device():
+    try:
+        # Clear any existing configurations
+        tf.keras.backend.clear_session()
+        
+        # Set environment variables
+        os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+        os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'  # Enable both H100s
+        
+        gpus = tf.config.list_physical_devices('GPU')
+        if gpus:
+            # Configure memory growth BEFORE any other GPU operations
+            for gpu in gpus:
+                try:
+                    tf.config.experimental.set_memory_growth(gpu, True)
+                except RuntimeError as e:
+                    print(f"Memory growth must be set before GPUs have been initialized: {e}")
+            
+            # H100-specific configuration
+            try:
+                for gpu in gpus:
+                    tf.config.set_logical_device_configuration(
+                        gpu,
+                        [tf.config.LogicalDeviceConfiguration(memory_limit=1024*75)]  # 75GB per GPU
+                    )
+            except RuntimeError as e:
+                print(f"Failed to set memory limit: {e}")
+                
+            return True
+            
+        return False
+        
+    except Exception as e:
+        print(f"Error during device configuration: {e}")
+        return False
+    
 def clear_gpu_memory():
     try:
         # Clear TensorFlow session
@@ -44,54 +80,6 @@ def clear_gpu_memory():
     except Exception as e:
         print(f"Error during GPU memory cleanup: {e}")
 
-# At the very top of main.py, immediately after imports
-def configure_device():
-    """
-    Configure GPU devices with memory growth and multi-GPU support
-    """
-    try:
-        # Set environment variables first
-        os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
-        os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'  # Enable both GPUs
-        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress TF logging
-        
-        # Get available GPUs
-        gpus = tf.config.list_physical_devices('GPU')
-        
-        if gpus:
-            try:
-                # Configure memory growth for all GPUs
-                for gpu in gpus:
-                    tf.config.experimental.set_memory_growth(gpu, True)
-                
-                # Enable soft device placement
-                tf.config.set_soft_device_placement(True)
-                
-                # Try to set memory limit (optional)
-                try:
-                    for gpu in gpus:
-                        tf.config.set_logical_device_configuration(
-                            gpu,
-                            [tf.config.LogicalDeviceConfiguration(memory_limit=1024*75)]  # 75GB limit
-                        )
-                except RuntimeError as e:
-                    print(f"Warning: Could not set memory limit: {e}")
-                
-                print(f"Found {len(gpus)} GPU(s). GPU configuration successful.")
-                return True
-                
-            except RuntimeError as e:
-                print(f"GPU configuration error: {e}")
-                print("Falling back to CPU processing")
-                return False
-        
-        print("No GPU found. Using CPU for processing")
-        return False
-        
-    except Exception as e:
-        print(f"Error during device configuration: {e}")
-        return False
-    
 def parse_arguments():
     """
     Parse command-line arguments for dataset generation
