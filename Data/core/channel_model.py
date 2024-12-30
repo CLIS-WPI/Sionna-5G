@@ -308,6 +308,10 @@ class ChannelModelManager:
         snr_db: tf.Tensor
     ) -> Dict[str, tf.Tensor]:
         try:
+            print(f"\nDEBUG - generate_mimo_channel:")
+            print(f"Input batch_size: {batch_size}")
+            print(f"SNR shape: {tf.shape(snr_db)}")
+
             # Validate and adjust batch size
             batch_size = tf.cast(batch_size, tf.int32)
             batch_size = tf.minimum(batch_size, self.system_params.max_batch_size)
@@ -332,6 +336,9 @@ class ChannelModelManager:
             h_imag = tf.random.normal(h_shape, mean=0.0, stddev=std_dev, dtype=tf.float32)
             h = tf.complex(h_real, h_imag)
             
+            print(f"Channel matrix shape (h_real): {tf.shape(h_real)}")
+            print(f"Channel matrix shape (h_imag): {tf.shape(h_imag)}")
+
             # Calculate noise power and reshape for broadcasting
             noise_power = tf.pow(10.0, -snr_db/10.0)  # Shape: [batch_size]
             noise_power = tf.reshape(noise_power, [batch_size, 1, 1])  # Shape: [batch_size, 1, 1]
@@ -355,6 +362,8 @@ class ChannelModelManager:
             assert_tensor_shape(snr_db, [batch_size], "SNR values")
             assert_tensor_shape(noisy_channel, h_shape, "Noisy channel")
             
+            print(f"Final channel shape: {tf.shape(h)}")
+            print(f"Final noise shape: {tf.shape(noise)}")
             return {
                 'perfect_channel': h,
                 'noisy_channel': noisy_channel,

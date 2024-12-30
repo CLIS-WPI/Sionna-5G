@@ -217,6 +217,9 @@ class PathLossManager:
             tf.Tensor: Path loss in dB with shape [batch_size].
         """
         try:
+            print(f"\nDEBUG - We are in calculate_path_loss function:")
+            print(f"Distance tensor shape: {tf.shape(distance)}")
+            print(f"Scenario: {scenario}")
             # Ensure proper tensor shape and type
             if not isinstance(distance, tf.Tensor):
                 distance = tf.convert_to_tensor(distance, dtype=tf.float32)

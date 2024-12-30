@@ -924,6 +924,10 @@ class MIMODatasetGenerator:
             Dictionary containing processed batch data
         """
         try:
+            print(f"\nDEBUG - process_batch:")
+            print(f"Processing batch {batch_index} with size {batch_size}")
+            print(f"Start index: {batch_index * batch_size}")
+            print(f"End index: {min((batch_index + 1) * batch_size, self.samples_per_mod)}")
             self.logger.info(f"Starting batch processing with size {batch_size} and modulation {mod_scheme}")
             
             # Validate batch size
