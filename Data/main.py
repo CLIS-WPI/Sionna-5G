@@ -14,18 +14,26 @@ from integrity.dataset_integrity_checker import MIMODatasetIntegrityChecker
 import h5py
 import tensorflow as tf
 from typing import Dict
+import gc
 
 def clear_gpu_memory():
     try:
+        # Clear TensorFlow session
         tf.keras.backend.clear_session()
-        gpus = tf.config.list_physical_devices('GPU')
-        for gpu in gpus:
-            try:
-                tf.config.experimental.reset_memory_stats(gpu)
-            except:
-                pass
+        
+        # Force garbage collection
         gc.collect()
-        # PyTorch cleanup if available
+        
+        # Clear GPU memory if available
+        gpus = tf.config.list_physical_devices('GPU')
+        if gpus:
+            for gpu in gpus:
+                try:
+                    tf.config.experimental.reset_memory_stats(gpu)
+                except:
+                    pass
+                    
+        # Optional: PyTorch cleanup
         try:
             import torch
             if torch.cuda.is_available():
