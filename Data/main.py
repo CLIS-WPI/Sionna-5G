@@ -37,29 +37,21 @@ def configure_gpu_environment():
             "memory_config": {}
         }
         
-        # Configure each GPU with explicit memory limits
+        # Configure each GPU - Set memory growth BEFORE setting memory limits
         for gpu_index, gpu in enumerate(gpus):
             try:
-                # Enable memory growth
+                # Enable memory growth first
                 tf.config.experimental.set_memory_growth(gpu, True)
                 
-                # Set memory limit to 90% of total memory (85.5GB for H100)
-                memory_limit = int(95830 * 0.9)  # 90% of 95830MiB
-                tf.config.set_logical_device_configuration(
-                    gpu,
-                    [tf.config.LogicalDeviceConfiguration(memory_limit=memory_limit)]
-                )
-                
-                # Get memory info
+                # Get memory info after enabling growth
                 try:
                     memory_info = tf.config.experimental.get_memory_info(f'/device:GPU:{gpu_index}')
                     available_memory = memory_info['current'] / 1e9
                 except:
-                    available_memory = 85.5  # 90% of H100's memory in GB
+                    available_memory = 85.5  # Default for H100
                 
                 gpu_config["memory_config"][f"gpu_{gpu_index}"] = {
                     "available_memory_gb": available_memory,
-                    "memory_limit_gb": memory_limit / 1024,  # Convert MiB to GB
                     "growth_enabled": True
                 }
                 
@@ -67,14 +59,11 @@ def configure_gpu_environment():
                 print(f"Warning: Error configuring GPU {gpu_index}: {e}")
                 continue
         
-        # Enable mixed precision and XLA
+        # Enable mixed precision
         try:
             policy = tf.keras.mixed_precision.Policy('mixed_float16')
             tf.keras.mixed_precision.set_global_policy(policy)
             gpu_config["mixed_precision_enabled"] = True
-            
-            # Enable XLA optimization
-            tf.config.optimizer.set_jit(True)
         except Exception as e:
             print(f"Warning: Could not enable mixed precision: {e}")
             gpu_config["mixed_precision_enabled"] = False
@@ -84,21 +73,16 @@ def configure_gpu_environment():
             try:
                 strategy = tf.distribute.MirroredStrategy()
                 gpu_config["distribution_strategy"] = "MirroredStrategy"
-                gpu_config["recommended_batch_size"] = 128_000
+                gpu_config["recommended_batch_size"] = 64000  # Reduced from 128000
             except Exception as e:
                 print(f"Warning: Could not configure MirroredStrategy: {e}")
                 gpu_config["distribution_strategy"] = "SingleGPU"
-                gpu_config["recommended_batch_size"] = 64_000
+                gpu_config["recommended_batch_size"] = 32000
         else:
             gpu_config["distribution_strategy"] = "SingleGPU"
-            gpu_config["recommended_batch_size"] = 64_000
+            gpu_config["recommended_batch_size"] = 32000
             
         return True, gpu_config
-        
-    except Exception as e:
-        error_msg = f"Critical error during GPU configuration: {str(e)}"
-        print(error_msg)
-        return False, {"error": error_msg}
         
     except Exception as e:
         error_msg = f"Critical error during GPU configuration: {str(e)}"
