@@ -44,7 +44,7 @@ class SystemParameters:
     
     # Channel Parameters
     num_paths: int = 20                     # path: Number of propagation paths
-    snr_range: Tuple[float, float] = (-20.0, 30.0)  # snr: Signal-to-noise range
+    snr_range: Tuple[float, float] = (0.0, 30.0)  # snr: Signal-to-noise range
     noise_floor: float = -174               # nf: Noise floor in dBm/Hz
     
     # Modulation Schemes

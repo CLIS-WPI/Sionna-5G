@@ -193,13 +193,12 @@ class ChannelModelManager:
             eigenvalues = eigenvalues / tf.reduce_max(eigenvalues, axis=1, keepdims=True)
             
             # Clip SNR to valid range and calculate noise power
-            snr_db_clipped = tf.clip_by_value(snr_db, -20.0, 30.0)
+            snr_db_clipped = tf.clip_by_value(snr_db, 0.0, 30.0)
             noise_power = tf.pow(10.0, -snr_db_clipped / 10.0)
             noise_power = tf.maximum(noise_power, 1e-10)
             noise_power = tf.reshape(noise_power, [-1, 1, 1])
             
             print(f"DEBUG - Before noise generation: batch_size={batch_size}")
-            
             # Generate noise with controlled variance
             noise_std = tf.sqrt(noise_power / 2.0)
             noise_real = tf.random.normal(tf.shape(h_normalized), mean=0.0, stddev=noise_std)
