@@ -235,33 +235,34 @@ class PathLossManager:
 
             batch_size = tf.shape(distance)[0]
 
-            # Create location tensors
-            ut_locations = tf.stack([
+            # Create location tensors with explicit dtypes
+            ut_locations = tf.cast(tf.stack([
                 distance,
                 tf.zeros_like(distance),
                 tf.ones_like(distance) * 1.5  # UT height 1.5m
-            ], axis=1)
+            ], axis=1), dtype=tf.float32)
             
-            bs_locations = tf.zeros([batch_size, 3])
-            bs_height = 10.0 if scenario == 'umi' else 25.0
+            bs_locations = tf.zeros([batch_size, 3], dtype=tf.float32)
+            bs_height = tf.constant(10.0 if scenario == 'umi' else 25.0, dtype=tf.float32)
             bs_locations = tf.tensor_scatter_nd_update(
                 bs_locations,
                 [[i, 2] for i in range(batch_size)],
-                tf.ones([batch_size]) * bs_height
+                tf.ones([batch_size], dtype=tf.float32) * bs_height
             )
 
             # Select scenario
             scenario_obj = self.umi_scenario if scenario == 'umi' else self.uma_scenario
 
-            # Set topology
+            # Set topology with explicit dtypes
             scenario_obj.set_topology(
-                ut_loc=tf.expand_dims(ut_locations, axis=0),
-                bs_loc=tf.expand_dims(bs_locations, axis=0),
-                ut_orientations=tf.zeros([1, batch_size, 3]),
-                bs_orientations=tf.zeros([1, batch_size, 3]),
-                ut_velocities=tf.zeros([1, batch_size, 3]),
+                ut_loc=tf.cast(tf.expand_dims(ut_locations, axis=0), dtype=tf.float32),
+                bs_loc=tf.cast(tf.expand_dims(bs_locations, axis=0), dtype=tf.float32),
+                ut_orientations=tf.zeros([1, batch_size, 3], dtype=tf.float32),
+                bs_orientations=tf.zeros([1, batch_size, 3], dtype=tf.float32),
+                ut_velocities=tf.zeros([1, batch_size, 3], dtype=tf.float32),
                 in_state=tf.zeros([1, batch_size], dtype=tf.bool)
             )
+
 
             # Calculate path loss using the correct method
             los_probability = scenario_obj.los_probability
