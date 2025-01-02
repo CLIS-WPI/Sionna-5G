@@ -643,10 +643,18 @@ class MIMODatasetGenerator:
                             path_loss_db = self.path_loss_manager.calculate_path_loss(
                                 distances[:self.batch_size], 'umi'
                             )
-                            path_loss_db = tf.reshape(path_loss_db[:self.batch_size], [self.batch_size])
-                            path_loss_linear = tf.pow(10.0, -path_loss_db / 20.0)
-                            path_loss_shaped = tf.reshape(path_loss_linear, [self.batch_size, 1, 1])
-                            h_with_pl = h_perfect * tf.cast(path_loss_shaped, dtype=h_perfect.dtype)
+
+                            # Handle per-antenna path loss if available
+                            if len(path_loss_db.shape) == 3:  # Assume shape is [batch_size, num_rx, num_tx]
+                                path_loss_linear = tf.pow(10.0, -path_loss_db / 20.0)
+                                h_with_pl = h_perfect * tf.cast(path_loss_linear, dtype=h_perfect.dtype)
+                            else:  # Default case: single path loss value per user
+                                path_loss_db = tf.reshape(path_loss_db[:self.batch_size], [self.batch_size])
+                                path_loss_linear = tf.pow(10.0, -path_loss_db / 20.0)
+                                path_loss_shaped = tf.reshape(path_loss_linear, [self.batch_size, 1, 1])
+                                h_with_pl = h_perfect * tf.cast(path_loss_shaped, dtype=h_perfect.dtype)
+
+
                             
                             # Generate and process symbols
                             tx_symbols = self.channel_model.generate_qam_symbols(self.batch_size, mod_scheme)
@@ -800,8 +808,13 @@ class MIMODatasetGenerator:
                             pl_end_idx = path_loss_offset + end_idx
 
                             # Save path loss data with global indexing
-                            f['path_loss_data']['fspl'][pl_start_idx:pl_end_idx] = fspl.numpy()
-                            f['path_loss_data']['scenario_pathloss'][pl_start_idx:pl_end_idx] = scenario_pl.numpy()
+                            if len(fspl.shape) == 3:  # Per-antenna path loss
+                                f['path_loss_data']['fspl'][pl_start_idx:pl_end_idx, :, :] = fspl.numpy()
+                                f['path_loss_data']['scenario_pathloss'][pl_start_idx:pl_end_idx, :, :] = scenario_pl.numpy()
+                            else:  # Single value path loss
+                                f['path_loss_data']['fspl'][pl_start_idx:pl_end_idx] = fspl.numpy()
+                                f['path_loss_data']['scenario_pathloss'][pl_start_idx:pl_end_idx] = scenario_pl.numpy()
+
                             
                             # Add verification logging
                             self.logger.info(
