@@ -16,6 +16,7 @@ from utill.tensor_shape_validator import assert_tensor_shape, normalize_complex_
 from sionna.mimo import StreamManagement
 from utill.logging_config import LoggerManager
 from utill.tensor_shape_validator import normalize_complex_tensor
+from core.path_loss_model import PathLossManager
 class ChannelModelManager:
     """
     Advanced channel model management for MIMO communication systems
@@ -46,6 +47,9 @@ class ChannelModelManager:
         self._setup_antenna_arrays()
         self._setup_resource_grid()
         self._setup_channel_model()
+        
+        # Initialize Path Loss Manager
+        self.path_loss_manager = PathLossManager(self.system_params)
 
     def generate_qam_symbols(self, batch_size: int, mod_scheme: str) -> tf.Tensor:
         try:
@@ -153,8 +157,6 @@ class ChannelModelManager:
             dtype=tf.complex64
         )
     
-    
-    
     def generate_channel_samples(self, batch_size: int, snr_db: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
         """
         Generate MIMO channel samples with controlled scaling and normalization
@@ -170,61 +172,68 @@ class ChannelModelManager:
             batch_size = tf.cast(batch_size, tf.int32)
             h_shape = [batch_size, self.system_params.num_rx, self.system_params.num_tx]
             tf.debugging.assert_greater(batch_size, 0, message="Batch size must be positive")
+
             # Use controlled standard deviation for better stability
-            std_dev = 1.0/np.sqrt(2.0 * self.system_params.num_tx)
-            
+            std_dev = 1.0 / np.sqrt(2.0 * self.system_params.num_tx)
+
             # Generate channel components with controlled variance
             h_real = tf.random.normal(h_shape, mean=0.0, stddev=std_dev)
             h_imag = tf.random.normal(h_shape, mean=0.0, stddev=std_dev)
             h = tf.complex(h_real, h_imag)
-            
+
             # Validate and normalize channel matrix
             h = assert_tensor_shape(h, h_shape, 'channel_matrix')
             h_normalized = normalize_complex_tensor(h)
-            
+
             # Calculate eigenvalues with proper normalization
             h_hermitian = tf.matmul(
-                h_normalized, 
+                h_normalized,
                 tf.transpose(h_normalized, perm=[0, 2, 1], conjugate=True)
             )
             eigenvalues = tf.abs(tf.linalg.eigvals(h_hermitian))
-            
+
             # Normalize eigenvalues to [0, 1] range
             eigenvalues = eigenvalues / tf.reduce_max(eigenvalues, axis=1, keepdims=True)
-            
+
+            # Apply path loss per antenna
+            path_loss_per_antenna = self.path_loss_model.calculate_path_loss_per_antenna(h_normalized)
+            h_with_path_loss = h_normalized * tf.sqrt(path_loss_per_antenna)
+
             # Clip SNR to valid range and calculate noise power
             snr_db_clipped = tf.clip_by_value(snr_db, 0.0, 30.0)
             noise_power = tf.pow(10.0, -snr_db_clipped / 10.0)
             noise_power = tf.maximum(noise_power, 1e-10)
             noise_power = tf.reshape(noise_power, [-1, 1, 1])
-            
-            print(f"DEBUG - Before noise generation: batch_size={batch_size}")
+
             # Generate noise with controlled variance
             noise_std = tf.sqrt(noise_power / 2.0)
-            noise_real = tf.random.normal(tf.shape(h_normalized), mean=0.0, stddev=noise_std)
-            noise_imag = tf.random.normal(tf.shape(h_normalized), mean=0.0, stddev=noise_std)
+            noise_real = tf.random.normal(tf.shape(h_with_path_loss), mean=0.0, stddev=noise_std)
+            noise_imag = tf.random.normal(tf.shape(h_with_path_loss), mean=0.0, stddev=noise_std)
             noise = tf.complex(noise_real, noise_imag)
-            
+
             # Add noise to channel
-            noisy_channel = h_normalized + noise
-            
-            return h_normalized, noisy_channel, eigenvalues
-                
+            noisy_channel = h_with_path_loss + noise
+
+            return h_with_path_loss, noisy_channel, eigenvalues
+
         except Exception as e:
             self.logger.error(f"Error generating channel samples: {str(e)}")
             raise
 
-    def calculate_effective_snr(self, channel_response: tf.Tensor, snr_db: tf.Tensor) -> tf.Tensor:
+    def calculate_effective_snr(self, channel_response: tf.Tensor, snr_db: tf.Tensor, path_loss: tf.Tensor) -> tf.Tensor:
         """
-        Calculate effective SNR based on channel response and nominal SNR
+        Calculate effective SNR based on channel response, nominal SNR, and path loss.
         """
         try:
             # Convert SNR to linear scale
-            snr_linear = tf.pow(10.0, snr_db/10.0)
+            snr_linear = tf.pow(10.0, snr_db / 10.0)
+            
+            # Apply path loss scaling to channel response
+            scaled_channel_response = channel_response / tf.sqrt(path_loss)
             
             # Calculate channel gain (Frobenius norm squared)
             channel_gain = tf.reduce_sum(
-                tf.abs(channel_response)**2, 
+                tf.abs(scaled_channel_response) ** 2,
                 axis=[1, 2]
             ) / (self.system_params.num_rx * self.system_params.num_tx)
             
@@ -243,28 +252,31 @@ class ChannelModelManager:
             self.logger.error(f"Error calculating effective SNR: {str(e)}")
             raise
 
-    def calculate_spectral_efficiency(self, channel_response: tf.Tensor, snr_db: tf.Tensor) -> tf.Tensor:
+    def calculate_spectral_efficiency(self, channel_response: tf.Tensor, snr_db: tf.Tensor, path_loss: tf.Tensor) -> tf.Tensor:
         """
-        Calculate spectral efficiency with improved memory handling
+        Calculate spectral efficiency with path loss adjustment and improved memory handling.
         """
         try:
             # Ensure tensors are on the same device and have correct dtype
             channel_response = tf.cast(channel_response, tf.complex64)
             snr_db = tf.cast(snr_db, tf.float32)
             
+            # Apply path loss scaling to channel response
+            scaled_channel_response = channel_response / tf.sqrt(path_loss)
+            
             # Convert SNR to linear scale with safe casting
             snr_linear = tf.exp(tf.math.log(10.0) * snr_db / 10.0)
             snr_linear = tf.reshape(snr_linear, [-1, 1, 1])
             
             # Calculate channel correlation matrix in chunks if needed
-            batch_size = tf.shape(channel_response)[0]
+            batch_size = tf.shape(scaled_channel_response)[0]
             max_chunk_size = 1000  # Adjust based on your GPU memory
             
             spectral_efficiency_list = []
             
             for i in range(0, batch_size, max_chunk_size):
                 end_idx = tf.minimum(i + max_chunk_size, batch_size)
-                chunk_channel = channel_response[i:end_idx]
+                chunk_channel = scaled_channel_response[i:end_idx]
                 chunk_snr = snr_linear[i:end_idx]
                 
                 # Calculate correlation matrix for chunk
@@ -306,12 +318,25 @@ class ChannelModelManager:
     def generate_mimo_channel(
         self, 
         batch_size: int,
-        snr_db: tf.Tensor
+        snr_db: tf.Tensor,
+        path_loss: tf.Tensor
     ) -> Dict[str, tf.Tensor]:
+        """
+        Generate MIMO channel samples with path loss integration.
+        
+        Args:
+            batch_size (int): Number of channel samples to generate.
+            snr_db (tf.Tensor): Signal-to-Noise Ratio (SNR) in dB, shape [batch_size].
+            path_loss (tf.Tensor): Path loss values (linear scale), shape [batch_size, num_rx, num_tx].
+        
+        Returns:
+            Dict[str, tf.Tensor]: Dictionary containing channel matrices, eigenvalues, and other metadata.
+        """
         try:
             print(f"\nDEBUG - generate_mimo_channel:")
             print(f"Input batch_size: {batch_size}")
             print(f"SNR shape: {tf.shape(snr_db)}")
+            print(f"Path loss shape: {tf.shape(path_loss)}")
 
             # Validate and adjust batch size
             batch_size = tf.cast(batch_size, tf.int32)
@@ -321,6 +346,7 @@ class ChannelModelManager:
             snr_db = tf.cast(snr_db, tf.float32)
             snr_db = tf.reshape(snr_db, [batch_size])  # Ensure SNR has shape [batch_size]
             print(f"DEBUG - After SNR reshape: shape={tf.shape(snr_db)}, values={snr_db}")
+            
             # Define channel dimensions
             h_shape = [
                 batch_size,
@@ -329,8 +355,7 @@ class ChannelModelManager:
             ]
             
             # Calculate standard deviation for normalization
-            std_dev = tf.cast(1.0/tf.sqrt(2.0 * tf.cast(self.system_params.num_tx, tf.float32)), 
-                            tf.float32)
+            std_dev = tf.cast(1.0 / tf.sqrt(2.0 * tf.cast(self.system_params.num_tx, tf.float32)), tf.float32)
             
             # Generate complex channel matrix
             h_real = tf.random.normal(h_shape, mean=0.0, stddev=std_dev, dtype=tf.float32)
@@ -340,14 +365,20 @@ class ChannelModelManager:
             print(f"Channel matrix shape (h_real): {tf.shape(h_real)}")
             print(f"Channel matrix shape (h_imag): {tf.shape(h_imag)}")
 
+            # Apply path loss to the channel matrix
+            path_loss_scaled = tf.sqrt(path_loss)  # Convert path loss to scaling factor
+            h = h / path_loss_scaled
+            print(f"DEBUG - Applied path loss scaling to channel matrix.")
+
             # Calculate noise power and reshape for broadcasting
-            noise_power = tf.pow(10.0, -snr_db/10.0)  # Shape: [batch_size]
+            noise_power = tf.pow(10.0, -snr_db / 10.0)  # Shape: [batch_size]
             noise_power = tf.reshape(noise_power, [batch_size, 1, 1])  # Shape: [batch_size, 1, 1]
             print(f"Noise power shape: {tf.shape(noise_power)}")
+            
             # Generate noise with proper broadcasting
             noise = tf.complex(
-                tf.random.normal(h_shape, mean=0.0, stddev=tf.sqrt(noise_power/2)),
-                tf.random.normal(h_shape, mean=0.0, stddev=tf.sqrt(noise_power/2))
+                tf.random.normal(h_shape, mean=0.0, stddev=tf.sqrt(noise_power / 2)),
+                tf.random.normal(h_shape, mean=0.0, stddev=tf.sqrt(noise_power / 2))
             )
             
             # Add noise to create noisy channel version
@@ -365,6 +396,7 @@ class ChannelModelManager:
             print(f"DEBUG - Channel matrix shape after validation: shape={tf.shape(h)}")
             print(f"Final channel shape: {tf.shape(h)}")
             print(f"Final noise shape: {tf.shape(noise)}")
+            
             return {
                 'perfect_channel': h,
                 'noisy_channel': noisy_channel,
@@ -372,53 +404,85 @@ class ChannelModelManager:
                 'snr_db': snr_db,
                 'channel_quality': tf.reduce_mean(tf.abs(eigenvalues), axis=-1)
             }
-                
+                    
         except Exception as e:
             self.logger.error(f"Error generating MIMO channel: {str(e)}")
             raise
         
     def get_channel_statistics(
-        self, 
+        self,
         channel: tf.Tensor
     ) -> Dict[str, tf.Tensor]:
         """
-        Compute channel matrix statistics
+        Compute channel matrix statistics, considering path loss effects.
         
         Args:
-            channel (tf.Tensor): Input channel matrix
+            channel (tf.Tensor): Input channel matrix.
         
         Returns:
-            Dict[str, tf.Tensor]: Channel statistical properties
+            Dict[str, tf.Tensor]: Channel statistical properties.
         """
-        return {
-            'mean': tf.reduce_mean(channel),
-            'variance': tf.math.reduce_variance(channel),
-            'magnitude': tf.abs(channel),
-            'power': tf.reduce_mean(tf.abs(channel) ** 2)
-        }
+        try:
+            # Ensure channel is in correct dtype
+            channel = tf.cast(channel, tf.complex64)
+
+            # Calculate basic statistics
+            mean = tf.reduce_mean(channel)
+            variance = tf.math.reduce_variance(channel)
+            magnitude = tf.abs(channel)
+            power = tf.reduce_mean(magnitude ** 2)
+
+            # Optional advanced metrics
+            skewness = tf.reduce_mean((magnitude - mean) ** 3) / tf.pow(variance, 1.5)
+            kurtosis = tf.reduce_mean((magnitude - mean) ** 4) / tf.pow(variance, 2)
+
+            # Log calculated statistics
+            print(f"DEBUG - Channel statistics: mean={mean.numpy()}, variance={variance.numpy()}, power={power.numpy()}")
+            print(f"DEBUG - Additional metrics: skewness={skewness.numpy()}, kurtosis={kurtosis.numpy()}")
+
+            return {
+                'mean': mean,
+                'variance': variance,
+                'magnitude': magnitude,
+                'power': power,
+                'skewness': skewness,
+                'kurtosis': kurtosis
+            }
+        except Exception as e:
+            self.logger.error(f"Error calculating channel statistics: {str(e)}")
+            raise
+
     def get_bits_per_symbol(self, mod_scheme: str) -> int:
         """
-        Determine bits per symbol based on modulation scheme
+        Determine bits per symbol based on modulation scheme with validation.
         
         Args:
-            mod_scheme (str): Modulation scheme
+            mod_scheme (str): Modulation scheme.
         
         Returns:
-            int: Number of bits per symbol
+            int: Number of bits per symbol.
         """
-        modulation_bits = {
-            'QPSK': 2,
-            '16QAM': 4,
-            '64QAM': 6
-        }
-        return modulation_bits.get(mod_scheme, 2)  # Default to QPSK if not found
+        try:
+            # Define supported modulation schemes
+            modulation_bits = {
+                'BPSK': 1,
+                'QPSK': 2,
+                '16QAM': 4,
+                '64QAM': 6,
+                '256QAM': 8
+            }
+            
+            # Validate and return bits per symbol
+            bits_per_symbol = modulation_bits.get(mod_scheme.upper(), None)
+            if bits_per_symbol is None:
+                self.logger.warning(f"Unsupported modulation scheme '{mod_scheme}'. Defaulting to QPSK (2 bits/symbol).")
+                bits_per_symbol = modulation_bits['QPSK']
 
-    # Then in the methods where you generate symbols, you can use it like:
-    def generate_symbols(self, mod_scheme: str, batch_size: int):
-        bits_per_symbol = self.get_bits_per_symbol(mod_scheme)
-        return self.resource_grid.qam_source(num_bits_per_symbol=bits_per_symbol)(
-            [batch_size, self.system_params.num_tx, 1]
-        )
+            print(f"DEBUG - Modulation scheme: {mod_scheme}, Bits per symbol: {bits_per_symbol}")
+            return bits_per_symbol
+        except Exception as e:
+            self.logger.error(f"Error determining bits per symbol for modulation scheme '{mod_scheme}': {str(e)}")
+        raise
     
 # Example usage
 def main():
