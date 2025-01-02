@@ -366,7 +366,7 @@ class ChannelModelManager:
             print(f"Channel matrix shape (h_imag): {tf.shape(h_imag)}")
 
             # Apply path loss to the channel matrix
-            path_loss_scaled = tf.sqrt(path_loss)  # Convert path loss to scaling factor
+            path_loss_scaled = tf.cast(tf.sqrt(path_loss), tf.complex64)  # Cast to complex64
             h = h / path_loss_scaled
             print(f"DEBUG - Applied path loss scaling to channel matrix.")
 
@@ -376,9 +376,11 @@ class ChannelModelManager:
             print(f"Noise power shape: {tf.shape(noise_power)}")
             
             # Generate noise with proper broadcasting
+            # Generate noise with proper broadcasting and dtype matching
+            noise_power = tf.cast(noise_power, tf.float32)  # Ensure noise_power is float32
             noise = tf.complex(
-                tf.random.normal(h_shape, mean=0.0, stddev=tf.sqrt(noise_power / 2)),
-                tf.random.normal(h_shape, mean=0.0, stddev=tf.sqrt(noise_power / 2))
+                tf.random.normal(h_shape, mean=0.0, stddev=tf.sqrt(noise_power / 2), dtype=tf.float32),
+                tf.random.normal(h_shape, mean=0.0, stddev=tf.sqrt(noise_power / 2), dtype=tf.float32)
             )
             
             # Add noise to create noisy channel version
