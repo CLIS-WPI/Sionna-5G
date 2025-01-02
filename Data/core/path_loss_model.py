@@ -222,74 +222,110 @@ class PathLossManager:
         path_loss_params: Optional[dict] = None
     ) -> tf.Tensor:
         """
-        Calculate path loss for different scenarios.
+        Calculate path loss with comprehensive debugging.
         """
         try:
-            print(f"\nDEBUG - Entering calculate_path_loss:")
-            print(f"Distance tensor shape: {tf.shape(distance)}")
+            # Initial input validation and debugging
+            print("\n=== Path Loss Calculation Debug ===")
+            print(f"Input distance shape: {tf.shape(distance)}")
+            print(f"Input distance dtype: {distance.dtype}")
             print(f"Scenario: {scenario}")
-
-            # Ensure proper tensor shape and type
+            
+            # Shape assertions for input
+            tf.debugging.assert_rank(distance, 1, message="Distance tensor must be rank 1")
+            
+            # Convert and validate distance tensor
             if not isinstance(distance, tf.Tensor):
                 distance = tf.convert_to_tensor(distance, dtype=tf.float32)
-
+            print(f"Converted distance shape: {tf.shape(distance)}")
+            
+            # Get batch size and validate
             batch_size = tf.shape(distance)[0]
+            print(f"Batch size: {batch_size}")
+            tf.debugging.assert_positive(batch_size, message="Batch size must be positive")
 
-            # Get distances for path loss calculation directly from input distance
-            d_2d = distance  # Using horizontal distance
-            d_3d = tf.sqrt(distance**2 + (10.0 - 1.5)**2)  # Calculate 3D distance considering heights
+            # Calculate 2D and 3D distances with shape tracking
+            d_2d = distance
+            print(f"2D distance shape: {tf.shape(d_2d)}")
+            
+            d_3d = tf.sqrt(distance**2 + (10.0 - 1.5)**2)
+            print(f"3D distance shape: {tf.shape(d_3d)}")
 
-            # Calculate path loss based on 3GPP TR 38.901 formulas
+            # Path loss calculations with shape validation
             if scenario == 'umi':
+                print("\nCalculating UMi path loss...")
                 # UMi LOS path loss
                 pl_1 = 32.4 + 21.0 * tf.math.log(d_3d) / tf.math.log(10.0) + 20.0 * tf.math.log(self.carrier_frequency/1e9) / tf.math.log(10.0)
                 pl_2 = 32.4 + 40.0 * tf.math.log(d_3d) / tf.math.log(10.0) + 20.0 * tf.math.log(self.carrier_frequency/1e9) / tf.math.log(10.0)
-                los_pl = tf.where(d_2d <= 18.0, pl_1, pl_2)
-
-                # UMi NLOS path loss
-                nlos_pl = 35.3 * tf.math.log(d_3d) / tf.math.log(10.0) + 22.4 + 21.3 * tf.math.log(self.carrier_frequency/1e9) / tf.math.log(10.0) - 0.3 * (1.5)
-            else:
-                # UMa LOS path loss (simplified)
-                los_pl = 28.0 + 22.0 * tf.math.log(d_3d) / tf.math.log(10.0) + 20.0 * tf.math.log(self.carrier_frequency/1e9) / tf.math.log(10.0)
+                print(f"PL1 shape: {tf.shape(pl_1)}")
+                print(f"PL2 shape: {tf.shape(pl_2)}")
                 
-                # UMa NLOS path loss (simplified)
+                los_pl = tf.where(d_2d <= 18.0, pl_1, pl_2)
+                print(f"LOS PL shape: {tf.shape(los_pl)}")
+
+                nlos_pl = 35.3 * tf.math.log(d_3d) / tf.math.log(10.0) + 22.4 + 21.3 * tf.math.log(self.carrier_frequency/1e9) / tf.math.log(10.0) - 0.3 * (1.5)
+                print(f"NLOS PL shape: {tf.shape(nlos_pl)}")
+            else:
+                print("\nCalculating UMa path loss...")
+                los_pl = 28.0 + 22.0 * tf.math.log(d_3d) / tf.math.log(10.0) + 20.0 * tf.math.log(self.carrier_frequency/1e9) / tf.math.log(10.0)
                 nlos_pl = 32.4 + 30.0 * tf.math.log(d_3d) / tf.math.log(10.0) + 20.0 * tf.math.log(self.carrier_frequency/1e9) / tf.math.log(10.0)
 
-            # Generate LOS probability
-            los_probability = tf.minimum(
-                18.0/d_2d if scenario == 'umi' else 1.0,
-                1.0
-            )
+            # LOS probability calculation
+            los_probability = tf.minimum(18.0/d_2d if scenario == 'umi' else 1.0, 1.0)
             los_condition = tf.random.uniform([batch_size]) < los_probability
+            print(f"LOS condition shape: {tf.shape(los_condition)}")
 
-            # Combine LOS and NLOS path losses based on probability
+            # Combine path losses
             path_loss = tf.where(los_condition, los_pl, nlos_pl)
+            print(f"Combined path loss shape: {tf.shape(path_loss)}")
 
-            # Add shadow fading
+            # Shadow fading
             shadow_std = 4.0 if scenario == 'umi' else 6.0
-            shadow_fading = tf.random.normal(
-                [batch_size], 
-                mean=0.0, 
-                stddev=shadow_std, 
-                dtype=tf.float32
-            )
+            shadow_fading = tf.random.normal([batch_size], mean=0.0, stddev=shadow_std, dtype=tf.float32)
+            print(f"Shadow fading shape: {tf.shape(shadow_fading)}")
+
+            # Add shadow fading and clip
             path_loss += shadow_fading
-
-            # Clip values
             path_loss = tf.clip_by_value(path_loss, 20.0, 160.0)
+            print(f"Final path loss shape before reshape: {tf.shape(path_loss)}")
 
-            # Reshape for MIMO dimensions [batch_size, num_rx, num_tx]
+            # Reshape for MIMO dimensions with explicit shape checking
+            print("\n=== MIMO Reshaping Debug ===")
+            print(f"Num RX: {self.system_params.num_rx}")
+            print(f"Num TX: {self.system_params.num_tx}")
+            
+            # Verify tensor size before reshaping
+            expected_elements = batch_size * self.system_params.num_rx * self.system_params.num_tx
+            actual_elements = tf.size(path_loss)
+            print(f"Expected elements: {expected_elements}")
+            print(f"Actual elements: {actual_elements}")
+            
+            # Assert tensor size matches expected size
+            tf.debugging.assert_equal(
+                actual_elements,
+                batch_size,
+                message=f"Tensor size mismatch before reshape: expected {batch_size}, got {actual_elements}"
+            )
+
+            # Reshape and broadcast
             path_loss = tf.reshape(path_loss, [batch_size, 1, 1])
             path_loss = tf.broadcast_to(
                 path_loss,
                 [batch_size, self.system_params.num_rx, self.system_params.num_tx]
             )
+            
+            print(f"Final path loss shape after reshape: {tf.shape(path_loss)}")
+            print("=== Path Loss Calculation Complete ===\n")
 
-            print(f"Final path loss shape: {tf.shape(path_loss)}")
             return path_loss
 
         except Exception as e:
-            self.logger.error(f"Path loss calculation failed: {str(e)}")
+            print("\n=== Error in Path Loss Calculation ===")
+            print(f"Error type: {type(e).__name__}")
+            print(f"Error message: {str(e)}")
+            print("Stack trace:")
+            import traceback
+            traceback.print_exc()
             raise
 
     def apply_path_loss(
