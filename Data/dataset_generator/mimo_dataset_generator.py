@@ -1002,11 +1002,13 @@ class MIMODatasetGenerator:
                 scenario='umi'  # or whatever scenario you're using
             )
             self.logger.debug(f"Generated path loss shape: {path_loss.shape}")
-            
+
+            # Ensure path loss has correct shape before channel generation
+            path_loss = tf.reshape(path_loss, [batch_size, self.system_params.num_rx, self.system_params.num_tx])
+
             # Generate channel data with explicit shape checking
             self.logger.debug("Generating channel data...")
-            channel_data = self.channel_model.generate_mimo_channel(batch_size, snr_db, path_loss)
-            
+            channel_data = self.channel_model.generate_mimo_channel(batch_size=batch_size,snr_db=snr_db,path_loss=path_loss)          
             # Validate channel data structure
             required_keys = ['perfect_channel', 'noisy_channel']
             for key in required_keys:

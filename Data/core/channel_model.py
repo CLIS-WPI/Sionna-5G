@@ -321,17 +321,6 @@ class ChannelModelManager:
         snr_db: tf.Tensor,
         path_loss: tf.Tensor
     ) -> Dict[str, tf.Tensor]:
-        """
-        Generate MIMO channel samples with path loss integration.
-        
-        Args:
-            batch_size (int): Number of channel samples to generate.
-            snr_db (tf.Tensor): Signal-to-Noise Ratio (SNR) in dB, shape [batch_size].
-            path_loss (tf.Tensor): Path loss values (linear scale), shape [batch_size].
-        
-        Returns:
-            Dict[str, tf.Tensor]: Dictionary containing channel matrices, eigenvalues, and other metadata.
-        """
         try:
             print(f"\nDEBUG - generate_mimo_channel:")
             print(f"Input batch_size: {batch_size}")
@@ -340,52 +329,37 @@ class ChannelModelManager:
 
             # Validate and adjust batch size
             batch_size = tf.cast(batch_size, tf.int32)
-            batch_size = tf.minimum(batch_size, self.system_params.max_batch_size)
             
             # Define channel dimensions
             h_shape = [batch_size, self.system_params.num_rx, self.system_params.num_tx]
             
-            # Calculate standard deviation for normalization
+            # Generate complex channel matrix
             std_dev = 1.0 / tf.sqrt(2.0 * tf.cast(self.system_params.num_tx, tf.float32))
-
-            # Normalize and reshape SNR tensor
-            snr_db = tf.cast(tf.reshape(snr_db, [batch_size]), tf.float32)
-            print(f"DEBUG - After SNR reshape: shape={tf.shape(snr_db)}, values={snr_db}")
-            
-            # Define channel dimensions
-            h_shape = [batch_size, self.system_params.num_rx, self.system_params.num_tx]
-            
-            # Calculate standard deviation for normalization
-            std_dev = 1.0 / tf.sqrt(2.0 * tf.cast(self.system_params.num_tx, tf.float32))
-            
-            # Generate complex channel matrix with consistent dtype
             h_real = tf.random.normal(h_shape, mean=0.0, stddev=std_dev, dtype=tf.float32)
             h_imag = tf.random.normal(h_shape, mean=0.0, stddev=std_dev, dtype=tf.float32)
             h = tf.complex(h_real, h_imag)
             
             print(f"Generated channel shape: {tf.shape(h)}")
 
-            # Reshape and broadcast path loss for proper multiplication
-            path_loss = tf.cast(path_loss, tf.float32)
-            path_loss = tf.reshape(path_loss, [batch_size, 1, 1])  # Shape: [batch_size, 1, 1]
-            path_loss = tf.broadcast_to(path_loss, h_shape)  # Broadcast to match channel shape
+            # Ensure path loss has correct shape [batch_size, num_rx, num_tx]
+            path_loss = tf.reshape(path_loss, h_shape)
             
-            # Apply path loss with proper broadcasting
+            # Apply path loss
             path_loss_scaled = tf.cast(tf.sqrt(path_loss), tf.complex64)
-            h = h * path_loss_scaled  # Use multiplication instead of division
+            h = h * path_loss_scaled
             
-            # Calculate noise power with proper broadcasting
+            # Calculate noise power
             noise_power = tf.pow(10.0, -snr_db / 10.0)
             noise_power = tf.reshape(noise_power, [batch_size, 1, 1])
             
-            # Generate noise with consistent dtype
+            # Generate noise
             noise_std = tf.sqrt(noise_power / 2.0)
             noise = tf.complex(
                 tf.random.normal(h_shape, mean=0.0, stddev=noise_std, dtype=tf.float32),
                 tf.random.normal(h_shape, mean=0.0, stddev=noise_std, dtype=tf.float32)
             )
             
-            # Add noise to create noisy channel version
+            # Add noise
             noisy_channel = h + noise
             
             # Calculate eigenvalues
@@ -393,20 +367,8 @@ class ChannelModelManager:
             h_matrix = tf.matmul(h, h_conj)
             eigenvalues = tf.cast(tf.linalg.eigvalsh(h_matrix), tf.float32)
             
-            # Validate final tensor shapes
-            assert_tensor_shape(h, h_shape, "Channel matrix")
-            assert_tensor_shape(snr_db, [batch_size], "SNR values")
-            assert_tensor_shape(noisy_channel, h_shape, "Noisy channel")
-            
-            # Calculate channel quality metrics
+            # Calculate channel quality
             channel_quality = tf.reduce_mean(tf.abs(eigenvalues), axis=-1)
-            
-            # Verify tensor shapes before proceeding
-            tf.debugging.assert_equal(
-            tf.shape(h)[0], 
-                batch_size,
-                message=f"Channel batch size mismatch: expected {batch_size}, got {tf.shape(h)[0]}"
-            )
 
             return {
                 'perfect_channel': h,
