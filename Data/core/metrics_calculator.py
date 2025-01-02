@@ -251,7 +251,6 @@ class MetricsCalculator:
         except Exception as e:
             self.logger.error(f"Error in calculate_enhanced_metrics: {str(e)}")
             raise        
-
         
     def calculate_ber(
         self, 
