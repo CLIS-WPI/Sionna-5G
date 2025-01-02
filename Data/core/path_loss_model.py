@@ -263,8 +263,8 @@ class PathLossManager:
                 in_state=tf.zeros([1, batch_size], dtype=tf.bool)
             )
 
-            # Calculate path loss using the correct method
-            path_loss = scenario_obj.pathloss  # Changed to use the pathloss attribute
+            # Calculate path loss using the get_param method
+            path_loss = scenario_obj.get_param('pathloss')
             path_loss = tf.squeeze(path_loss)  # Remove unnecessary dimensions
 
             # Add frequency correction
@@ -298,6 +298,7 @@ class PathLossManager:
         except Exception as e:
             self.logger.error(f"Path loss calculation failed: {str(e)}")
             raise
+
     def apply_path_loss(
         self, 
         channel_response: tf.Tensor, 
