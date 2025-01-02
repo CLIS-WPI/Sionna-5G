@@ -268,7 +268,7 @@ def main():
         # Configure system and validate - FIXED: Added gpu_config argument
         system_params = configure_system_parameters(args, gpu_config)  # Pass gpu_config here
         system_params.replay_buffer_size = min(system_params.replay_buffer_size, 100000)
-        
+                
         if not validate_system_configuration(system_params, gpu_config, logger):
             logger.error("System configuration validation failed")
             return 1
@@ -277,12 +277,6 @@ def main():
         output_path = generate_output_path(args.output)
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-        # Log configs and generate dataset within strategy scope
-        with strategy.scope():
-            generator = MIMODatasetGenerator(
-                system_params=system_params,
-                logger=logger
-            )
         if not success:
             logger.warning(f"GPU configuration failed: {gpu_config.get('error', 'Unknown error')}")
             logger.warning("Falling back to CPU")
@@ -298,10 +292,6 @@ def main():
                     logger.info(f"  Memory limit: {config['memory_limit_gb']:.2f} GB")
                 else:
                     logger.info(f"  Memory limit: Not set (using available memory)")
-        
-        # Configure system parameters
-        system_params = configure_system_parameters(args)
-        system_params.replay_buffer_size = min(system_params.replay_buffer_size, 100000)
         
         # Add validation here - after system_params configuration but before dataset generation
         if not validate_system_configuration(system_params, gpu_config, logger):
@@ -348,6 +338,8 @@ def main():
         
         # Generate dataset with enhanced error handling
         logger.info("Starting dataset generation...")
+        # In main.py, replace the dataset generation section with:
+
         try:
             # Monitor initial memory state
             monitor_memory_usage(system_params, gpu_config, logger)
@@ -372,31 +364,20 @@ def main():
             # Create and configure dataset generator with path loss
             generator = MIMODatasetGenerator(
                 system_params=system_params,
-                logger=logger
+                logger=logger,
+                path_loss_manager=path_loss_manager  # Add path loss manager here
             )
             
-            # Generate dataset with path loss
+            # Generate dataset with path loss - no strategy scope needed here
             generator.generate_dataset(
                 num_samples=system_params.total_samples,
                 save_path=output_path,
-                path_loss=path_loss  # Add path loss parameter here
+                path_loss=path_loss
             )
 
             monitor_memory_usage(system_params, gpu_config, logger)
             logger.info("Dataset generation completed")
             
-            # Verify output file
-            if os.path.exists(output_path):
-                file_size = os.path.getsize(output_path)
-                logger.info(f"Generated file size: {file_size / (1024*1024):.2f} MB")
-                if file_size == 0:
-                    raise ValueError("Generated dataset file is empty")
-            else:
-                raise FileNotFoundError("Dataset file was not created")
-                
-        except tf.errors.ResourceExhaustedError:
-            logger.error("GPU memory exhausted. Try reducing batch size or total samples.")
-            return 1
         except Exception as e:
             logger.error(f"Dataset generation failed: {str(e)}", exc_info=True)
             return 1
