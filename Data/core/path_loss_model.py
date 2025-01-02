@@ -303,6 +303,13 @@ class PathLossManager:
                 expected_shape,
                 message=f"Path loss tensor size ({tf.size(path_loss)}) does not match batch size ({batch_size})"
             )
+            
+            # Add shape validation
+            tf.debugging.assert_equal(
+            tf.shape(path_loss),
+            [batch_size, self.system_params.num_rx, self.system_params.num_tx],
+                    message="Invalid path loss tensor shape"
+                )
 
             print("=== Path Loss Calculation Complete ===\n")
             return path_loss
