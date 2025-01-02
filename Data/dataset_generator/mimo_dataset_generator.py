@@ -582,9 +582,19 @@ class MIMODatasetGenerator:
                                 (snr_db, ('B',))
                             ], message="Input tensor shape mismatch")
 
-                            # Generate channel data with error handling
+                            # Calculate path loss first
+                            path_loss = self.path_loss_manager.calculate_path_loss(
+                                distances,
+                                scenario='umi'  # or whatever scenario you're using
+                            )
+
+                            # Generate channel data with error handling and path loss
                             try:
-                                channel_data = self.channel_model.generate_mimo_channel(self.batch_size, snr_db)
+                                channel_data = self.channel_model.generate_mimo_channel(
+                                    batch_size=self.batch_size,
+                                    snr_db=snr_db,
+                                    path_loss=path_loss  #  path loss parameter
+                                )
                                 h_perfect = channel_data['perfect_channel']
                                 h_noisy = channel_data['noisy_channel']
 
