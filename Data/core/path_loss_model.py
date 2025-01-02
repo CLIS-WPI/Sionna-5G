@@ -216,21 +216,13 @@ class PathLossManager:
             raise
 
     def calculate_path_loss(
-    self,
-    distance: tf.Tensor,
-    scenario: str = 'umi',
-    path_loss_params: Optional[dict] = None
-) -> tf.Tensor:
+        self,
+        distance: tf.Tensor,
+        scenario: str = 'umi',
+        path_loss_params: Optional[dict] = None
+    ) -> tf.Tensor:
         """
         Calculate path loss for different scenarios with per-antenna granularity.
-        
-        Args:
-            distance (tf.Tensor): Distance between transmitter and receiver in meters.
-            scenario (str): Path loss scenario ('umi' or 'uma').
-            path_loss_params (Optional[dict]): Optional override for default parameters.
-            
-        Returns:
-            tf.Tensor: Path loss in dB with shape [batch_size, num_rx, num_tx].
         """
         try:
             print(f"\nDEBUG - Entering calculate_path_loss:")
@@ -243,106 +235,65 @@ class PathLossManager:
 
             batch_size = tf.shape(distance)[0]
 
-            # Load default or override parameters
-            params = {
-                'min_distance': 1.0,
-                'max_distance': 5000.0,
-                'shadow_std_umi': 4.0,
-                'shadow_std_uma': 6.0,
-                'min_path_loss': 20.0,
-                'max_path_loss': 160.0,
-                'num_rx': self.system_params.num_rx,
-                'num_tx': self.system_params.num_tx,
-                'freq_scaling': 1.0,
-                'validation_thresholds': {
-                    'min_valid_path_loss': 20.0,
-                    'max_valid_path_loss': 160.0
-                }
-            }
-            if path_loss_params:
-                params.update(path_loss_params)
-
-            num_rx, num_tx = params['num_rx'], params['num_tx']
-
-            # Distance clipping and validation
-            distance = tf.clip_by_value(distance, params['min_distance'], params['max_distance'])
-
-            # Ensure correct shape for distances
-            distance = tf.reshape(distance, [batch_size])
-
-            # Scenario-specific settings
-            scenario = scenario.lower()
-            shadow_std = params['shadow_std_umi'] if scenario == 'umi' else params['shadow_std_uma']
-            bs_height = 10.0 if scenario == 'umi' else 25.0
-            ut_height = 1.5
-
             # Create location tensors
-            ut_locations = tf.stack([distance, tf.zeros_like(distance), tf.ones_like(distance) * ut_height], axis=1)
-            bs_locations = tf.tile(tf.constant([[0.0, 0.0, bs_height]], dtype=tf.float32), [batch_size, 1])
+            ut_locations = tf.stack([
+                distance,
+                tf.zeros_like(distance),
+                tf.ones_like(distance) * 1.5  # UT height 1.5m
+            ], axis=1)
+            
+            bs_locations = tf.zeros([batch_size, 3])
+            bs_height = 10.0 if scenario == 'umi' else 25.0
+            bs_locations = tf.tensor_scatter_nd_update(
+                bs_locations,
+                [[i, 2] for i in range(batch_size)],
+                tf.ones([batch_size]) * bs_height
+            )
 
-            # Initialize scenario object
+            # Select scenario
             scenario_obj = self.umi_scenario if scenario == 'umi' else self.uma_scenario
+
+            # Set topology
             scenario_obj.set_topology(
                 ut_loc=tf.expand_dims(ut_locations, axis=0),
                 bs_loc=tf.expand_dims(bs_locations, axis=0),
-                in_state=tf.zeros([1, batch_size], dtype=tf.bool),
-                ut_orientations=tf.zeros([1, batch_size, 3], dtype=tf.float32),
-                bs_orientations=tf.zeros([1, batch_size, 3], dtype=tf.float32),
-                ut_velocities=tf.zeros([1, batch_size, 3], dtype=tf.float32),
+                ut_orientations=tf.zeros([1, batch_size, 3]),
+                bs_orientations=tf.zeros([1, batch_size, 3]),
+                ut_velocities=tf.zeros([1, batch_size, 3]),
+                in_state=tf.zeros([1, batch_size], dtype=tf.bool)
             )
 
-            # Path loss tensor for each antenna pair
-            pl_tensor = tf.zeros([batch_size, num_rx, num_tx], dtype=tf.float32)
+            # Calculate path loss using the correct method
+            path_loss = scenario_obj.path_loss()  # Changed from compute_pathloss() to path_loss()
+            path_loss = tf.squeeze(path_loss)  # Remove unnecessary dimensions
 
-            # Compute path loss for each receiver-transmitter pair
-            for rx in range(num_rx):
-                for tx in range(num_tx):
-                    # Use the `pathloss` attribute from the scenario object
-                    path_loss = scenario_obj.pathloss[:, 0, 0]
-                    
-                    # Frequency correction
-                    freq_ghz = self.carrier_frequency / 1e9
-                    freq_correction = params['freq_scaling'] * (20.0 * tf.math.log(freq_ghz) / tf.math.log(10.0))
+            # Add frequency correction
+            freq_ghz = self.carrier_frequency / 1e9
+            freq_correction = 20.0 * tf.math.log(freq_ghz) / tf.math.log(10.0)
+            path_loss += freq_correction
 
-                    # Shadow fading (unique per link)
-                    shadow_fading = self._rng.normal(shape=[batch_size], mean=0.0, stddev=shadow_std, dtype=tf.float32)
-
-                    # Combine components
-                    total_path_loss = path_loss + freq_correction + shadow_fading
-
-                    # Clip to valid range
-                    total_path_loss = tf.clip_by_value(
-                        total_path_loss, params['min_path_loss'], params['max_path_loss']
-                    )
-
-                    # Assign to tensor
-                    pl_tensor = tf.tensor_scatter_nd_update(
-                        pl_tensor,
-                        indices=[[rx, tx]],
-                        updates=total_path_loss
-                    )
-
-            # Validation and logging
-            valid_mask = tf.logical_and(
-                pl_tensor >= params['validation_thresholds']['min_valid_path_loss'],
-                pl_tensor <= params['validation_thresholds']['max_valid_path_loss']
+            # Add shadow fading
+            shadow_std = 4.0 if scenario == 'umi' else 6.0
+            shadow_fading = tf.random.normal(
+                tf.shape(path_loss), 
+                mean=0.0, 
+                stddev=shadow_std, 
+                dtype=tf.float32
             )
-            if not tf.reduce_all(valid_mask):
-                invalid_count = tf.reduce_sum(tf.cast(~valid_mask, tf.int32))
-                self.logger.warning(f"{invalid_count.numpy()} path loss values outside validation thresholds.")
+            path_loss += shadow_fading
 
-            # Logging statistics
-            stats = {
-                'mean': tf.reduce_mean(pl_tensor),
-                'min': tf.reduce_min(pl_tensor),
-                'max': tf.reduce_max(pl_tensor),
-                'std': tf.math.reduce_std(pl_tensor)
-            }
-            self.logger.info("Path loss statistics:")
-            for key, value in stats.items():
-                self.logger.info(f"- {key}: {value:.2f} dB")
+            # Clip values
+            path_loss = tf.clip_by_value(path_loss, 20.0, 160.0)
 
-            return pl_tensor  # Shape [batch_size, num_rx, num_tx]
+            # Reshape for antenna dimensions if needed
+            if len(path_loss.shape) == 1:
+                path_loss = tf.expand_dims(tf.expand_dims(path_loss, axis=1), axis=2)
+                path_loss = tf.broadcast_to(
+                    path_loss, 
+                    [batch_size, self.system_params.num_rx, self.system_params.num_tx]
+                )
+
+            return path_loss
 
         except Exception as e:
             self.logger.error(f"Path loss calculation failed: {str(e)}")
