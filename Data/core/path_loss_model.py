@@ -235,42 +235,9 @@ class PathLossManager:
 
             batch_size = tf.shape(distance)[0]
 
-            # Create location tensors with explicit dtypes
-            ut_locations = tf.cast(tf.stack([
-                distance,
-                tf.zeros_like(distance),
-                tf.ones_like(distance) * 1.5  # UT height 1.5m
-            ], axis=1), dtype=tf.float32)
-            
-            bs_locations = tf.zeros([batch_size, 3], dtype=tf.float32)
-            bs_height = tf.constant(10.0 if scenario == 'umi' else 25.0, dtype=tf.float32)
-            bs_locations = tf.tensor_scatter_nd_update(
-                bs_locations,
-                [[i, 2] for i in range(batch_size)],
-                tf.ones([batch_size], dtype=tf.float32) * bs_height
-            )
-
-            # Select scenario
-            scenario_obj = self.umi_scenario if scenario == 'umi' else self.uma_scenario
-
-            # Set topology with explicit dtypes
-            scenario_obj.set_topology(
-                ut_loc=tf.cast(tf.expand_dims(ut_locations, axis=0), dtype=tf.float32),
-                bs_loc=tf.cast(tf.expand_dims(bs_locations, axis=0), dtype=tf.float32),
-                ut_orientations=tf.zeros([1, batch_size, 3], dtype=tf.float32),
-                bs_orientations=tf.zeros([1, batch_size, 3], dtype=tf.float32),
-                ut_velocities=tf.zeros([1, batch_size, 3], dtype=tf.float32),
-                in_state=tf.zeros([1, batch_size], dtype=tf.bool)
-            )
-
-
-            # Calculate path loss using the correct method
-            los_probability = scenario_obj.los_probability
-            los_condition = tf.random.uniform(tf.shape(los_probability)) < los_probability
-
-            # Get distances for path loss calculation
-            d_2d = tf.sqrt(tf.reduce_sum(tf.square(ut_locations[:, :2] - bs_locations[:, :2]), axis=1))
-            d_3d = tf.sqrt(tf.reduce_sum(tf.square(ut_locations - bs_locations), axis=1))
+            # Get distances for path loss calculation directly from input distance
+            d_2d = distance  # Using horizontal distance
+            d_3d = tf.sqrt(distance**2 + (10.0 - 1.5)**2)  # Calculate 3D distance considering heights
 
             # Calculate path loss based on 3GPP TR 38.901 formulas
             if scenario == 'umi':
@@ -280,7 +247,7 @@ class PathLossManager:
                 los_pl = tf.where(d_2d <= 18.0, pl_1, pl_2)
 
                 # UMi NLOS path loss
-                nlos_pl = 35.3 * tf.math.log(d_3d) / tf.math.log(10.0) + 22.4 + 21.3 * tf.math.log(self.carrier_frequency/1e9) / tf.math.log(10.0) - 0.3 * (1.5)  # 1.5 is UT height
+                nlos_pl = 35.3 * tf.math.log(d_3d) / tf.math.log(10.0) + 22.4 + 21.3 * tf.math.log(self.carrier_frequency/1e9) / tf.math.log(10.0) - 0.3 * (1.5)
             else:
                 # UMa LOS path loss (simplified)
                 los_pl = 28.0 + 22.0 * tf.math.log(d_3d) / tf.math.log(10.0) + 20.0 * tf.math.log(self.carrier_frequency/1e9) / tf.math.log(10.0)
@@ -288,13 +255,20 @@ class PathLossManager:
                 # UMa NLOS path loss (simplified)
                 nlos_pl = 32.4 + 30.0 * tf.math.log(d_3d) / tf.math.log(10.0) + 20.0 * tf.math.log(self.carrier_frequency/1e9) / tf.math.log(10.0)
 
+            # Generate LOS probability
+            los_probability = tf.minimum(
+                18.0/d_2d if scenario == 'umi' else 1.0,
+                1.0
+            )
+            los_condition = tf.random.uniform([batch_size]) < los_probability
+
             # Combine LOS and NLOS path losses based on probability
             path_loss = tf.where(los_condition, los_pl, nlos_pl)
 
             # Add shadow fading
             shadow_std = 4.0 if scenario == 'umi' else 6.0
             shadow_fading = tf.random.normal(
-                tf.shape(path_loss), 
+                [batch_size], 
                 mean=0.0, 
                 stddev=shadow_std, 
                 dtype=tf.float32
@@ -304,14 +278,14 @@ class PathLossManager:
             # Clip values
             path_loss = tf.clip_by_value(path_loss, 20.0, 160.0)
 
-            # Reshape for antenna dimensions if needed
-            if len(path_loss.shape) == 1:
-                path_loss = tf.expand_dims(tf.expand_dims(path_loss, axis=1), axis=2)
-                path_loss = tf.broadcast_to(
-                    path_loss, 
-                    [batch_size, self.system_params.num_rx, self.system_params.num_tx]
-                )
+            # Reshape for MIMO dimensions [batch_size, num_rx, num_tx]
+            path_loss = tf.reshape(path_loss, [batch_size, 1, 1])
+            path_loss = tf.broadcast_to(
+                path_loss,
+                [batch_size, self.system_params.num_rx, self.system_params.num_tx]
+            )
 
+            print(f"Final path loss shape: {tf.shape(path_loss)}")
             return path_loss
 
         except Exception as e:
