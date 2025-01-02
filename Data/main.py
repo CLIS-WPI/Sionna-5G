@@ -15,6 +15,7 @@ import h5py
 import tensorflow as tf
 from typing import Dict
 import gc
+from core.path_loss_model import PathLossManager
 
 def configure_gpu_environment(system_params=None):
     """Enhanced GPU configuration with SystemParameters integration"""
@@ -282,11 +283,6 @@ def main():
                 system_params=system_params,
                 logger=logger
             )
-            generator.generate_dataset(
-                num_samples=system_params.total_samples,
-                save_path=output_path
-            )
-
         if not success:
             logger.warning(f"GPU configuration failed: {gpu_config.get('error', 'Unknown error')}")
             logger.warning("Falling back to CPU")
@@ -356,10 +352,36 @@ def main():
             # Monitor initial memory state
             monitor_memory_usage(system_params, gpu_config, logger)
 
+            # Create path loss manager instance
+            path_loss_manager = PathLossManager(system_params)
+
+            # Generate distances for path loss calculation
+            distances = tf.random.uniform(
+                [system_params.batch_size],
+                minval=1.0,  # Minimum distance (1 meter)
+                maxval=500.0,  # Maximum distance (500 meters)
+                dtype=tf.float32
+            )
+
+            # Calculate path loss
+            path_loss = path_loss_manager.calculate_path_loss(
+                distances,
+                scenario='umi'  # or 'uma' based on your requirements
+            )
+
+            # Create and configure dataset generator with path loss
+            generator = MIMODatasetGenerator(
+                system_params=system_params,
+                logger=logger
+            )
+            
+            # Generate dataset with path loss
             generator.generate_dataset(
                 num_samples=system_params.total_samples,
-                save_path=output_path
+                save_path=output_path,
+                path_loss=path_loss  # Add path loss parameter here
             )
+
             monitor_memory_usage(system_params, gpu_config, logger)
             logger.info("Dataset generation completed")
             
