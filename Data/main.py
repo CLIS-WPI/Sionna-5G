@@ -322,18 +322,19 @@ def main():
                 scenario='umi'  # or 'uma' based on your requirements
             )
 
-            # Create and configure dataset generator with path loss
+            
             generator = MIMODatasetGenerator(
                 system_params=system_params,
                 logger=logger,
-                path_loss_manager=path_loss_manager
+                max_batch_size=args.batch_size
             )
             
-            # Generate dataset with path loss
+            generator.path_loss_manager = path_loss_manager
+
+            # generate_dataset call to include the path loss
             generator.generate_dataset(
                 num_samples=system_params.total_samples,
-                save_path=output_path,
-                path_loss=path_loss
+                save_path=output_path
             )
 
             monitor_memory_usage(system_params, gpu_config, logger)

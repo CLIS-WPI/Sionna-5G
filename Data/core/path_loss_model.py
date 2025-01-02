@@ -264,25 +264,31 @@ class PathLossManager:
             )
 
             # Calculate path loss using the correct method
-            los_path_loss = scenario_obj.compute_path_loss_los()
-            nlos_path_loss = scenario_obj.compute_path_loss_nlos()
-            
-            # Get LOS probabilities
-            los_probability = scenario_obj.compute_los_probability()
-            
-            # Combine LOS and NLOS path losses based on probability
-            path_loss = tf.where(
-                tf.random.uniform(tf.shape(los_probability)) < los_probability,
-                los_path_loss,
-                nlos_path_loss
-            )
-            
-            path_loss = tf.squeeze(path_loss)  # Remove unnecessary dimensions
+            los_probability = scenario_obj.los_probability
+            los_condition = tf.random.uniform(tf.shape(los_probability)) < los_probability
 
-            # Add frequency correction
-            freq_ghz = self.carrier_frequency / 1e9
-            freq_correction = 20.0 * tf.math.log(freq_ghz) / tf.math.log(10.0)
-            path_loss += freq_correction
+            # Get distances for path loss calculation
+            d_2d = tf.sqrt(tf.reduce_sum(tf.square(ut_locations[:, :2] - bs_locations[:, :2]), axis=1))
+            d_3d = tf.sqrt(tf.reduce_sum(tf.square(ut_locations - bs_locations), axis=1))
+
+            # Calculate path loss based on 3GPP TR 38.901 formulas
+            if scenario == 'umi':
+                # UMi LOS path loss
+                pl_1 = 32.4 + 21.0 * tf.math.log(d_3d) / tf.math.log(10.0) + 20.0 * tf.math.log(self.carrier_frequency/1e9) / tf.math.log(10.0)
+                pl_2 = 32.4 + 40.0 * tf.math.log(d_3d) / tf.math.log(10.0) + 20.0 * tf.math.log(self.carrier_frequency/1e9) / tf.math.log(10.0)
+                los_pl = tf.where(d_2d <= 18.0, pl_1, pl_2)
+
+                # UMi NLOS path loss
+                nlos_pl = 35.3 * tf.math.log(d_3d) / tf.math.log(10.0) + 22.4 + 21.3 * tf.math.log(self.carrier_frequency/1e9) / tf.math.log(10.0) - 0.3 * (1.5)  # 1.5 is UT height
+            else:
+                # UMa LOS path loss (simplified)
+                los_pl = 28.0 + 22.0 * tf.math.log(d_3d) / tf.math.log(10.0) + 20.0 * tf.math.log(self.carrier_frequency/1e9) / tf.math.log(10.0)
+                
+                # UMa NLOS path loss (simplified)
+                nlos_pl = 32.4 + 30.0 * tf.math.log(d_3d) / tf.math.log(10.0) + 20.0 * tf.math.log(self.carrier_frequency/1e9) / tf.math.log(10.0)
+
+            # Combine LOS and NLOS path losses based on probability
+            path_loss = tf.where(los_condition, los_pl, nlos_pl)
 
             # Add shadow fading
             shadow_std = 4.0 if scenario == 'umi' else 6.0
