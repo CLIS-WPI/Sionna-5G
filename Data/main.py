@@ -265,10 +265,10 @@ def main():
             "recommended_batch_size": 32000 if success else 1000
         }
 
-        # Configure system and validate - FIXED: Added gpu_config argument
-        system_params = configure_system_parameters(args, gpu_config)  # Pass gpu_config here
+        # Configure system and validate
+        system_params = configure_system_parameters(args, gpu_config)
         system_params.replay_buffer_size = min(system_params.replay_buffer_size, 100000)
-                
+        
         if not validate_system_configuration(system_params, gpu_config, logger):
             logger.error("System configuration validation failed")
             return 1
@@ -284,32 +284,11 @@ def main():
             logger.info("GPU Configuration successful:")
             logger.info(f"Number of GPUs: {gpu_config['num_gpus']}")
             logger.info(f"Mixed precision enabled: {gpu_config['mixed_precision_enabled']}")
-            for gpu_id, config in gpu_config['memory_config'].items():
-                logger.info(f"\n{gpu_id}:")
-                logger.info(f"  Available memory: {config['available_memory_gb']:.2f} GB")
-                # Only log memory limit if it exists
-                if 'memory_limit_gb' in config:
-                    logger.info(f"  Memory limit: {config['memory_limit_gb']:.2f} GB")
-                else:
-                    logger.info(f"  Memory limit: Not set (using available memory)")
-        
-        # Add validation here - after system_params configuration but before dataset generation
-        if not validate_system_configuration(system_params, gpu_config, logger):
-            logger.error("System configuration validation failed")
-            return 1
 
         # Set batch size based on GPU configuration if not specified
         if args.batch_size is None:
-            if success:
-                args.batch_size = gpu_config["recommended_batch_size"]
-                logger.info(f"Using GPU-optimized batch size: {args.batch_size}")
-            else:
-                args.batch_size = 1000  # Conservative batch size for CPU
-                logger.info(f"Using conservative batch size: {args.batch_size}")
-        
-        # Generate output path
-        output_path = generate_output_path(args.output)
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            args.batch_size = gpu_config["recommended_batch_size"] if success else 1000
+            logger.info(f"Using {'GPU-optimized' if success else 'conservative'} batch size: {args.batch_size}")
         
         # Log configuration details
         logger.info("\n=== Configuration Details ===")
@@ -320,26 +299,8 @@ def main():
         logger.info(f"Verification enabled: {args.verify}")
         logger.info(f"Batch size: {args.batch_size}")
 
-        # Monitor GPU memory before dataset generation
-        if success:
-            for gpu_id in range(gpu_config['num_gpus']):
-                try:
-                    memory_info = tf.config.experimental.get_memory_info(f'GPU:{gpu_id}')
-                    logger.info(f"GPU:{gpu_id} initial memory usage: {memory_info['current'] / 1e9:.2f} GB")
-                except Exception as e:
-                    logger.warning(f"Could not monitor GPU:{gpu_id} memory: {e}")
-
-        # Create and configure dataset generator
-        logger.debug("Initializing dataset generator...")
-        generator = MIMODatasetGenerator(
-            system_params=system_params,
-            logger=logger
-        )
-        
         # Generate dataset with enhanced error handling
         logger.info("Starting dataset generation...")
-        # In main.py, replace the dataset generation section with:
-
         try:
             # Monitor initial memory state
             monitor_memory_usage(system_params, gpu_config, logger)
@@ -365,10 +326,10 @@ def main():
             generator = MIMODatasetGenerator(
                 system_params=system_params,
                 logger=logger,
-                path_loss_manager=path_loss_manager  # Add path loss manager here
+                path_loss_manager=path_loss_manager
             )
             
-            # Generate dataset with path loss - no strategy scope needed here
+            # Generate dataset with path loss
             generator.generate_dataset(
                 num_samples=system_params.total_samples,
                 save_path=output_path,
@@ -382,52 +343,11 @@ def main():
             logger.error(f"Dataset generation failed: {str(e)}", exc_info=True)
             return 1
 
-        # Verification section with enhanced memory management
+        # Verification section (if enabled)
         if args.verify:
             logger.info("Starting dataset verification...")
             try:
-                # Reconfigure GPU environment before verification
-                success, _ = configure_gpu_environment()
-                if not success:
-                    logger.warning("GPU reconfiguration failed before verification")
-                
-                if not os.path.exists(output_path):
-                    logger.error("Dataset file does not exist")
-                    return 1
-                    
-                file_size = os.path.getsize(output_path)
-                if file_size == 0:
-                    logger.error("Dataset file is empty")
-                    return 1
-                    
-                logger.info(f"Dataset file size: {file_size / (1024*1024):.2f} MB")
-                
                 with MIMODatasetIntegrityChecker(output_path) as checker:
-                    # Log dataset structure
-                    try:
-                        with h5py.File(output_path, 'r') as f:
-                            logger.debug("=== Dataset Structure ===")
-                            logger.debug(f"Root groups: {list(f.keys())}")
-                            
-                            if 'modulation_data' in f:
-                                mod_schemes = list(f['modulation_data'].keys())
-                                logger.debug(f"Modulation schemes: {mod_schemes}")
-                                
-                                for scheme in mod_schemes:
-                                    scheme_group = f['modulation_data'][scheme]
-                                    logger.debug(f"\nModulation scheme: {scheme}")
-                                    logger.debug(f"Available datasets: {list(scheme_group.keys())}")
-                                    
-                                    for dataset_name in ['channel_response', 'sinr', 'spectral_efficiency']:
-                                        if dataset_name in scheme_group:
-                                            shape = scheme_group[dataset_name].shape
-                                            logger.debug(f"  {dataset_name} shape: {shape}")
-                    except Exception as e:
-                        logger.error(f"Error examining dataset structure: {str(e)}")
-                        return 1
-                    
-                    # Perform integrity checks
-                    logger.info("\nPerforming integrity checks...")
                     integrity_report = checker.check_dataset_integrity()
                     
                     if integrity_report.get('overall_status', False):
@@ -445,7 +365,6 @@ def main():
         return 0
 
     except Exception as e:
-        # Create a basic logger if the main logger hasn't been initialized
         if 'logger' not in locals():
             logger = logging.getLogger()
             logger.setLevel(logging.ERROR)
