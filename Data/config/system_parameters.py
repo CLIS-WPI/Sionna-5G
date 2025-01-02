@@ -18,7 +18,7 @@ except ImportError:
 class SystemParameters:
     # Dataset Generation Parameters
     total_samples: int = 1_320_000          # tot: Total number of samples to generate
-    batch_size: int = 32000                  # bs: Processing batch size
+    batch_size: int = 1000                  # bs: Processing batch size
     max_batch_size: int = 64000              # max_bs: Upper limit for batch size
     min_batch_size: int = 16000              # min_bs: Lower limit for batch size
     samples_per_modulation: int = None        # spm: Samples per modulation scheme
