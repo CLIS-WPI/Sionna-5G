@@ -988,6 +988,21 @@ class MIMODatasetGenerator:
             )
             self.logger.debug(f"Generated SNR values shape: {snr_db.shape}")
             
+            # Generate distances for path loss calculation
+            distances = tf.random.uniform(
+                [batch_size],
+                minval=1.0,  # Minimum distance (1 meter)
+                maxval=500.0,  # Maximum distance (500 meters)
+                dtype=tf.float32
+            )
+            
+            # Calculate path loss before channel generation
+            path_loss = self.path_loss_manager.calculate_path_loss(
+                distances,
+                scenario='umi'  # or whatever scenario you're using
+            )
+            self.logger.debug(f"Generated path loss shape: {path_loss.shape}")
+            
             # Generate channel data with explicit shape checking
             self.logger.debug("Generating channel data...")
             channel_data = self.channel_model.generate_mimo_channel(batch_size, snr_db, path_loss)
