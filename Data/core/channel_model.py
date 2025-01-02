@@ -342,6 +342,12 @@ class ChannelModelManager:
             batch_size = tf.cast(batch_size, tf.int32)
             batch_size = tf.minimum(batch_size, self.system_params.max_batch_size)
             
+            # Define channel dimensions
+            h_shape = [batch_size, self.system_params.num_rx, self.system_params.num_tx]
+            
+            # Calculate standard deviation for normalization
+            std_dev = 1.0 / tf.sqrt(2.0 * tf.cast(self.system_params.num_tx, tf.float32))
+
             # Normalize and reshape SNR tensor
             snr_db = tf.cast(tf.reshape(snr_db, [batch_size]), tf.float32)
             print(f"DEBUG - After SNR reshape: shape={tf.shape(snr_db)}, values={snr_db}")
@@ -357,6 +363,8 @@ class ChannelModelManager:
             h_imag = tf.random.normal(h_shape, mean=0.0, stddev=std_dev, dtype=tf.float32)
             h = tf.complex(h_real, h_imag)
             
+            print(f"Generated channel shape: {tf.shape(h)}")
+
             # Reshape and broadcast path loss for proper multiplication
             path_loss = tf.cast(path_loss, tf.float32)
             path_loss = tf.reshape(path_loss, [batch_size, 1, 1])  # Shape: [batch_size, 1, 1]
@@ -393,6 +401,13 @@ class ChannelModelManager:
             # Calculate channel quality metrics
             channel_quality = tf.reduce_mean(tf.abs(eigenvalues), axis=-1)
             
+            # Verify tensor shapes before proceeding
+            tf.debugging.assert_equal(
+            tf.shape(h)[0], 
+                batch_size,
+                message=f"Channel batch size mismatch: expected {batch_size}, got {tf.shape(h)[0]}"
+            )
+
             return {
                 'perfect_channel': h,
                 'noisy_channel': noisy_channel,

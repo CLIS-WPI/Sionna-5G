@@ -254,7 +254,6 @@ class PathLossManager:
             # Path loss calculations with shape validation
             if scenario == 'umi':
                 print("\nCalculating UMi path loss...")
-                # UMi LOS path loss
                 pl_1 = 32.4 + 21.0 * tf.math.log(d_3d) / tf.math.log(10.0) + 20.0 * tf.math.log(self.carrier_frequency/1e9) / tf.math.log(10.0)
                 pl_2 = 32.4 + 40.0 * tf.math.log(d_3d) / tf.math.log(10.0) + 20.0 * tf.math.log(self.carrier_frequency/1e9) / tf.math.log(10.0)
                 print(f"PL1 shape: {tf.shape(pl_1)}")
@@ -289,34 +288,23 @@ class PathLossManager:
             path_loss = tf.clip_by_value(path_loss, 20.0, 160.0)
             print(f"Final path loss shape before reshape: {tf.shape(path_loss)}")
 
-            # Reshape for MIMO dimensions with explicit shape checking
-            print("\n=== MIMO Reshaping Debug ===")
-            print(f"Num RX: {self.system_params.num_rx}")
-            print(f"Num TX: {self.system_params.num_tx}")
-            
-            # Verify tensor size before reshaping
-            expected_elements = batch_size * self.system_params.num_rx * self.system_params.num_tx
-            actual_elements = tf.size(path_loss)
-            print(f"Expected elements: {expected_elements}")
-            print(f"Actual elements: {actual_elements}")
-            
-            # Assert tensor size matches expected size
-            tf.debugging.assert_equal(
-                actual_elements,
-                batch_size,
-                message=f"Tensor size mismatch before reshape: expected {batch_size}, got {actual_elements}"
-            )
-
-            # Reshape and broadcast
+            # Reshape and broadcast for MIMO dimensions
             path_loss = tf.reshape(path_loss, [batch_size, 1, 1])
             path_loss = tf.broadcast_to(
                 path_loss,
                 [batch_size, self.system_params.num_rx, self.system_params.num_tx]
             )
-            
             print(f"Final path loss shape after reshape: {tf.shape(path_loss)}")
-            print("=== Path Loss Calculation Complete ===\n")
 
+            # Verify final tensor shape
+            expected_shape = [batch_size, self.system_params.num_rx, self.system_params.num_tx]
+            tf.debugging.assert_equal(
+                tf.shape(path_loss),
+                expected_shape,
+                message=f"Path loss tensor size ({tf.size(path_loss)}) does not match batch size ({batch_size})"
+            )
+
+            print("=== Path Loss Calculation Complete ===\n")
             return path_loss
 
         except Exception as e:
@@ -324,7 +312,6 @@ class PathLossManager:
             print(f"Error type: {type(e).__name__}")
             print(f"Error message: {str(e)}")
             print("Stack trace:")
-            import traceback
             traceback.print_exc()
             raise
 
