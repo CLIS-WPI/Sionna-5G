@@ -263,8 +263,20 @@ class PathLossManager:
                 in_state=tf.zeros([1, batch_size], dtype=tf.bool)
             )
 
-            # Calculate path loss using the get_param method
-            path_loss = scenario_obj.get_param('pathloss')
+            # Calculate path loss using the correct method
+            los_path_loss = scenario_obj.compute_path_loss_los()
+            nlos_path_loss = scenario_obj.compute_path_loss_nlos()
+            
+            # Get LOS probabilities
+            los_probability = scenario_obj.compute_los_probability()
+            
+            # Combine LOS and NLOS path losses based on probability
+            path_loss = tf.where(
+                tf.random.uniform(tf.shape(los_probability)) < los_probability,
+                los_path_loss,
+                nlos_path_loss
+            )
+            
             path_loss = tf.squeeze(path_loss)  # Remove unnecessary dimensions
 
             # Add frequency correction
