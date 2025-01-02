@@ -975,7 +975,7 @@ class MIMODatasetGenerator:
             
             # Generate channel data with explicit shape checking
             self.logger.debug("Generating channel data...")
-            channel_data = self.channel_model.generate_mimo_channel(batch_size, snr_db)
+            channel_data = self.channel_model.generate_mimo_channel(batch_size, snr_db, path_loss)
             
             # Validate channel data structure
             required_keys = ['perfect_channel', 'noisy_channel']
