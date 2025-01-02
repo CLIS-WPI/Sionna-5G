@@ -278,8 +278,13 @@ class PathLossManager:
             # Clip values
             path_loss = tf.clip_by_value(path_loss, 20.0, 160.0)
 
-            # Return path loss with shape [batch_size]
-            # Don't reshape for MIMO dimensions here
+            # Reshape for MIMO dimensions [batch_size, num_rx, num_tx]
+            path_loss = tf.reshape(path_loss, [batch_size, 1, 1])
+            path_loss = tf.broadcast_to(
+                path_loss,
+                [batch_size, self.system_params.num_rx, self.system_params.num_tx]
+            )
+
             print(f"Final path loss shape: {tf.shape(path_loss)}")
             return path_loss
 
