@@ -644,18 +644,23 @@ class MIMODatasetGenerator:
                                 distances[:self.batch_size], 'umi'
                             )
 
-                            # Handle per-antenna path loss if available
+                            # explicit validation for tensor shape [batch_size, num_rx, num_tx]
+                            expected_shape = [self.batch_size, self.system_params.num_rx, self.system_params.num_tx]
+                            tf.debugging.assert_equal(
+                                tf.shape(path_loss_db),
+                                expected_shape,
+                                message=f"Path loss tensor shape mismatch: Expected {expected_shape}, got {tf.shape(path_loss_db)}"
+                            )
+
                             if len(path_loss_db.shape) == 3:  # Assume shape is [batch_size, num_rx, num_tx]
                                 path_loss_linear = tf.pow(10.0, -path_loss_db / 20.0)
                                 h_with_pl = h_perfect * tf.cast(path_loss_linear, dtype=h_perfect.dtype)
-                            else:  # Default case: single path loss value per user
+                            else:
                                 path_loss_db = tf.reshape(path_loss_db[:self.batch_size], [self.batch_size])
                                 path_loss_linear = tf.pow(10.0, -path_loss_db / 20.0)
                                 path_loss_shaped = tf.reshape(path_loss_linear, [self.batch_size, 1, 1])
                                 h_with_pl = h_perfect * tf.cast(path_loss_shaped, dtype=h_perfect.dtype)
 
-
-                            
                             # Generate and process symbols
                             tx_symbols = self.channel_model.generate_qam_symbols(self.batch_size, mod_scheme)
                             tx_symbols = tf.reshape(tx_symbols, [self.batch_size, self.system_params.num_tx, 1])
