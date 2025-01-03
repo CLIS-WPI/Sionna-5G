@@ -145,21 +145,44 @@ class MIMODatasetGenerator:
 
     def _initialize_batch_size(self):
         """
-        Initialize batch size based on memory and system constraints.
+        Initialize batch size based on memory and system constraints with improved memory estimation.
         """
         try:
             if PSUTIL_AVAILABLE:
-                # Estimate memory available and set a safe batch size
-                available_memory = psutil.virtual_memory().available / (1024**3)  # Convert to GB
-                estimated_batch_size = int(available_memory / 0.5)  # Use half of the available memory
-                self.batch_size = min(4000, int(available_memory * 100))
+                # Get available system memory in GB
+                available_memory = psutil.virtual_memory().available / (1024**3)
+                
+                # Calculate memory requirements per sample
+                sample_memory = (
+                    self.system_params.num_rx * 
+                    self.system_params.num_tx * 
+                    8  # Complex64 = 8 bytes
+                ) / (1024**3)  # Convert to GB
+                
+                # Calculate safe batch size (using 70% of available memory)
+                safe_memory = available_memory * 0.7
+                calculated_batch_size = int(safe_memory / sample_memory)
+                
+                # Apply constraints
+                min_batch_size = 1000
+                max_batch_size = 32000
+                
+                self.batch_size = max(min_batch_size, 
+                                    min(calculated_batch_size, max_batch_size))
+                
+                self.logger.info(
+                    f"Memory-based batch size calculation:"
+                    f"\n - Available Memory: {available_memory:.2f} GB"
+                    f"\n - Sample Memory: {sample_memory:.6f} GB"
+                    f"\n - Calculated Batch Size: {self.batch_size}"
+                )
             else:
-                # Default to conservative batch size
-                self.batch_size = 4000
-            self.logger.info(f"Initialized batch size to: {self.batch_size}")
+                self.batch_size = 4000  # Default conservative batch size
+                self.logger.warning("psutil not available, using default batch size")
+                
         except Exception as e:
             self.logger.error(f"Error during batch size initialization: {str(e)}")
-            self.batch_size = 1000  # Fallback to a minimal batch size
+            self.batch_size = 1000  # Fallback to minimal batch size
 
 
     def _initialize_hardware_parameters(self):
@@ -331,34 +354,80 @@ class MIMODatasetGenerator:
 
     def _validate_batch_data(self, batch_data: dict) -> tuple[bool, list[str]]:
         """
-        Validate batch data against defined thresholds with preprocessing
+        Validate batch data against defined thresholds with enhanced validation and preprocessing.
+        
+        Args:
+            batch_data (dict): Dictionary containing batch data to validate
+            
+        Returns:
+            tuple[bool, list[str]]: Validation status and list of error messages
         """
         errors = []
         try:
-            # Preprocess data before validation
-            processed_data = {}
+            # Define validation thresholds if not already defined
+            self.validation_thresholds = {
+                'path_loss': {'min': 20.0, 'max': 160.0},
+                'sinr': {'min': -20.0, 'max': 30.0},
+                'spectral_efficiency': {'min': 0.0, 'max': 40.0},
+                'effective_snr': {'min': -10.0, 'max': 40.0},
+                'channel_response': {'min': -100.0, 'max': 100.0}
+            }
+
+            # Preprocess and validate data
             for key, data in batch_data.items():
                 if key in self.validation_thresholds:
-                    # Convert to numpy and flatten
-                    data_np = data.numpy().flatten()
-                    # Remove any invalid values
-                    data_np = data_np[np.isfinite(data_np)]
-                    processed_data[key] = data_np
+                    try:
+                        # Convert to numpy and handle complex data
+                        if tf.is_tensor(data):
+                            if data.dtype.is_complex:
+                                data_np = np.abs(data.numpy()).flatten()
+                            else:
+                                data_np = data.numpy().flatten()
+                        else:
+                            data_np = np.asarray(data).flatten()
 
-            # Perform validation on processed data
-            for key, threshold in self.validation_thresholds.items():
-                if key in processed_data:
-                    data = processed_data[key]
-                    if len(data) == 0 or np.any(~np.isfinite(data)):
-                        errors.append(f"{key}: contains invalid values")
-                    elif np.any(data < threshold['min']) or np.any(data > threshold['max']):
-                        errors.append(f"{key}: values outside threshold range [{threshold['min']}, {threshold['max']}]")
-                        
+                        # Basic data quality checks
+                        if len(data_np) == 0:
+                            errors.append(f"{key}: Empty data")
+                            continue
+
+                        if np.any(~np.isfinite(data_np)):
+                            errors.append(f"{key}: Contains NaN or Inf values")
+                            continue
+
+                        # Threshold validation
+                        threshold = self.validation_thresholds[key]
+                        stats = {
+                            'min': np.min(data_np),
+                            'max': np.max(data_np),
+                            'mean': np.mean(data_np),
+                            'std': np.std(data_np)
+                        }
+
+                        if stats['min'] < threshold['min'] or stats['max'] > threshold['max']:
+                            errors.append(
+                                f"{key}: Values outside threshold range "
+                                f"[{threshold['min']}, {threshold['max']}]. "
+                                f"Stats: {stats}"
+                            )
+
+                    except Exception as val_error:
+                        errors.append(f"{key}: Validation error - {str(val_error)}")
+
+            # Log validation results
+            if errors:
+                self.logger.warning(f"Batch validation failed with {len(errors)} errors")
+                for error in errors:
+                    self.logger.debug(f"Validation error: {error}")
+            else:
+                self.logger.debug("Batch validation successful")
+
             return len(errors) == 0, errors
+
         except Exception as e:
             self.logger.error(f"Batch validation error: {str(e)}")
-            return False, [str(e)]
-        
+            return False, [f"Critical validation error: {str(e)}"]
+            
     def _prepare_output_directory(self, save_path: str):
         """
         Prepare output directory for dataset
@@ -372,114 +441,110 @@ class MIMODatasetGenerator:
     
     def _create_dataset_structure(self, hdf5_file, num_samples: int):
         """
-        Create HDF5 dataset structure with comprehensive validation and documentation
+        Create HDF5 dataset structure with comprehensive validation and documentation.
+        
+        Args:
+            hdf5_file: HDF5 file object
+            num_samples (int): Total number of samples to generate
+            
+        Raises:
+            ValueError: If input parameters are invalid
         """
         try:
-            # Validate input parameters
-            if num_samples <= 0:
-                raise ValueError("Number of samples must be positive")
+            # Input validation with detailed messages
+            if not isinstance(num_samples, int) or num_samples <= 0:
+                raise ValueError(f"Invalid num_samples: {num_samples}. Must be positive integer.")
             
-            if len(self.system_params.modulation_schemes) == 0:
-                raise ValueError("No modulation schemes specified")
+            if not self.system_params.modulation_schemes:
+                raise ValueError("No modulation schemes specified in system parameters.")
 
-            # Calculate samples per modulation scheme
+            # Calculate samples distribution
             samples_per_mod = num_samples // len(self.system_params.modulation_schemes)
             if samples_per_mod * len(self.system_params.modulation_schemes) != num_samples:
                 self.logger.warning(
-                    f"Total samples {num_samples} not exactly divisible by number of "
-                    f"modulation schemes {len(self.system_params.modulation_schemes)}. "
-                    f"Using {samples_per_mod} samples per modulation."
+                    f"Adjusting total samples from {num_samples} to "
+                    f"{samples_per_mod * len(self.system_params.modulation_schemes)} "
+                    f"for even distribution across {len(self.system_params.modulation_schemes)} "
+                    "modulation schemes."
                 )
 
-            # Create main groups with descriptions
-            modulation_data = hdf5_file.create_group('modulation_data')
-            modulation_data.attrs['description'] = 'Contains data for different modulation schemes'
+            # Create main groups with enhanced metadata
+            groups = {
+                'modulation_data': 'MIMO channel and performance metrics for each modulation',
+                'path_loss_data': 'Path loss measurements and environmental factors',
+                'configuration': 'System configuration and dataset parameters',
+                'metadata': 'Dataset creation and validation information'
+            }
             
-            config_data = hdf5_file.create_group('configuration')
-            config_data.attrs['description'] = 'System configuration parameters'
+            created_groups = {
+                name: hdf5_file.create_group(name) for name in groups
+            }
             
-            # Create path loss data group at root level
-            path_loss_data = hdf5_file.create_group('path_loss_data')
-            path_loss_data.attrs['description'] = 'Path loss measurements and calculations'
-            
-            # Create path loss datasets at root level
-            for name in ['fspl', 'scenario_pathloss']:
-                dataset = path_loss_data.create_dataset(
-                    name,
-                    shape=(num_samples,),
-                    dtype=np.float32,
-                    chunks=True,
-                    compression='gzip',
-                    compression_opts=4
-                )
-                dataset.attrs['description'] = f'{name.upper()} measurements'
-                dataset.attrs['units'] = 'dB'
+            for name, group in created_groups.items():
+                group.attrs['description'] = groups[name]
+                group.attrs['creation_time'] = datetime.now().isoformat()
 
-            # Add metadata
-            config_data.attrs.update({
+            # Enhanced configuration metadata
+            config_metadata = {
                 'creation_date': datetime.now().isoformat(),
                 'total_samples': num_samples,
                 'samples_per_modulation': samples_per_mod,
                 'num_tx_antennas': self.system_params.num_tx,
-                'num_rx_antennas': self.system_params.num_rx
-            })
+                'num_rx_antennas': self.system_params.num_rx,
+                'carrier_frequency': self.system_params.carrier_frequency,
+                'bandwidth': self.system_params.bandwidth,
+                'snr_range': self.system_params.snr_range,
+                'modulation_schemes': list(self.system_params.modulation_schemes),
+                'dataset_version': '2.0',
+                'generator_version': self.__class__.__version__
+            }
+            
+            for key, value in config_metadata.items():
+                created_groups['configuration'].attrs[key] = value
 
-            # Define dataset descriptions
-            dataset_descriptions = {
-                'channel_response': 'Complex MIMO channel matrix response',
-                'sinr': 'Signal-to-Interference-plus-Noise Ratio in dB',
-                'spectral_efficiency': 'Spectral efficiency in bits/s/Hz',
-                'effective_snr': 'Effective Signal-to-Noise Ratio in dB',
-                'eigenvalues': 'Eigenvalues of the channel matrix',
-                'ber': 'Bit Error Rate',
-                'throughput': 'System throughput in bits/s',
-                'inference_time': 'Processing time for inference'
+            # Define dataset configurations with enhanced metadata
+            dataset_configs = {
+                'channel_response': {
+                    'shape': (samples_per_mod, self.system_params.num_rx, self.system_params.num_tx),
+                    'dtype': np.complex64,
+                    'description': 'Complex MIMO channel matrix response',
+                    'units': 'linear',
+                    'valid_range': [-100, 100]
+                },
+                'sinr': {
+                    'shape': (samples_per_mod,),
+                    'dtype': np.float32,
+                    'description': 'Signal-to-Interference-plus-Noise Ratio',
+                    'units': 'dB',
+                    'valid_range': [-20, 30]
+                },
+                'spectral_efficiency': {
+                    'shape': (samples_per_mod,),
+                    'dtype': np.float32,
+                    'description': 'Spectral efficiency',
+                    'units': 'bits/s/Hz',
+                    'valid_range': [0, 40]
+                },
+                'path_loss': {
+                    'shape': (samples_per_mod,),
+                    'dtype': np.float32,
+                    'description': 'Path loss including shadowing',
+                    'units': 'dB',
+                    'valid_range': [20, 160]
+                }
             }
 
-            # Create datasets for each modulation scheme
+            # Create datasets for each modulation scheme with enhanced structure
             for mod_scheme in self.system_params.modulation_schemes:
-                # Create modulation-specific group
-                mod_group = modulation_data.create_group(mod_scheme)
-                mod_group.attrs['description'] = f'Data for {mod_scheme} modulation'
+                mod_group = created_groups['modulation_data'].create_group(mod_scheme)
+                mod_group.attrs.update({
+                    'description': f'Data for {mod_scheme} modulation',
+                    'modulation_order': self._get_modulation_order(mod_scheme),
+                    'theoretical_max_spectral_efficiency': self._calculate_max_spectral_efficiency(mod_scheme)
+                })
 
-                # Define other datasets for this modulation
-                datasets = {
-                    'channel_response': {
-                        'shape': (samples_per_mod, self.system_params.num_rx, self.system_params.num_tx),
-                        'dtype': np.complex64
-                    },
-                    'sinr': {
-                        'shape': (samples_per_mod,),
-                        'dtype': np.float32
-                    },
-                    'spectral_efficiency': {
-                        'shape': (samples_per_mod,),
-                        'dtype': np.float32
-                    },
-                    'effective_snr': {
-                        'shape': (samples_per_mod,),
-                        'dtype': np.float32
-                    },
-                    'eigenvalues': {
-                        'shape': (samples_per_mod, self.system_params.num_rx),
-                        'dtype': np.float32
-                    },
-                    'ber': {
-                        'shape': (samples_per_mod,),
-                        'dtype': np.float32
-                    },
-                    'throughput': {
-                        'shape': (samples_per_mod,),
-                        'dtype': np.float32
-                    },
-                    'inference_time': {
-                        'shape': (samples_per_mod,),
-                        'dtype': np.float32
-                    }
-                }
-                
-                # Create datasets with descriptions and chunking
-                for name, config in datasets.items():
+                # Create datasets with enhanced metadata and validation
+                for name, config in dataset_configs.items():
                     dataset = mod_group.create_dataset(
                         name,
                         shape=config['shape'],
@@ -488,472 +553,167 @@ class MIMODatasetGenerator:
                         compression='gzip',
                         compression_opts=4
                     )
-                    dataset.attrs['description'] = dataset_descriptions[name]
-                    dataset.attrs['units'] = self._get_dataset_units(name)
+                    
+                    # Enhanced dataset attributes
+                    dataset.attrs.update({
+                        'description': config['description'],
+                        'units': config['units'],
+                        'valid_range': config['valid_range'],
+                        'creation_time': datetime.now().isoformat(),
+                        'statistics': {
+                            'mean': 0.0,
+                            'std': 0.0,
+                            'min': float('inf'),
+                            'max': float('-inf')
+                        }
+                    })
 
-            self.logger.info("Dataset structure created successfully")
-                
+            self.logger.info(
+                f"Created dataset structure with {len(self.system_params.modulation_schemes)} "
+                f"modulation schemes and {samples_per_mod} samples per modulation"
+            )
+            
         except Exception as e:
-            self.logger.error(f"Failed to create dataset structure: {str(e)}")
+            self.logger.error(f"Dataset structure creation failed: {str(e)}")
             raise
+
+    def _get_modulation_order(self, mod_scheme: str) -> int:
+        """Get modulation order for given scheme."""
+        modulation_orders = {
+            'BPSK': 2, 'QPSK': 4, '16QAM': 16, '64QAM': 64, '256QAM': 256
+        }
+        return modulation_orders.get(mod_scheme, 0)
+
+    def _calculate_max_spectral_efficiency(self, mod_scheme: str) -> float:
+        """Calculate theoretical maximum spectral efficiency."""
+        order = self._get_modulation_order(mod_scheme)
+        return self.system_params.num_tx * np.log2(order) if order > 0 else 0.0
 
     def generate_dataset(self, num_samples: int, save_path: str = 'dataset/mimo_dataset.h5'):
         """
-        Generate comprehensive MIMO dataset with enhanced shape validation and memory management
-        """
-        failed_batches = []  # Initialize the list for failed batches
-        try:
-
-            self._prepare_output_directory(save_path)
-
-            # Check and remove existing file
-            if os.path.exists(save_path):
-                try:
-                    os.remove(save_path)
-                    self.logger.info(f"Removed existing dataset file: {save_path}")
-                except OSError as e:
-                    self.logger.error(f"Error removing existing file: {e}")
-                    raise
-
-            # Initial batch size safety check
-            self.batch_size = self._check_batch_size_safety(self.batch_size)
-            self.logger.info(f"Initial batch size adjusted for memory safety: {self.batch_size}")
-
-            samples_per_mod = num_samples // len(self.system_params.modulation_schemes)
+        Generate comprehensive MIMO dataset with enhanced validation and monitoring
+        
+        Args:
+            num_samples (int): Total number of samples to generate
+            save_path (str): Path to save the HDF5 dataset
             
+        Returns:
+            bool: True if generation successful, False otherwise
+        """
+        generation_stats = {
+            'successful_batches': 0,
+            'failed_batches': 0,
+            'total_samples_generated': 0
+        }
+        
+        try:
+            # Prepare output directory and validate inputs
+            self._prepare_output_directory(save_path)
+            if os.path.exists(save_path):
+                os.remove(save_path)
+                self.logger.info(f"Removed existing dataset file: {save_path}")
+
+            # Calculate samples per modulation scheme
+            samples_per_mod = num_samples // len(self.system_params.modulation_schemes)
             if num_samples % len(self.system_params.modulation_schemes) != 0:
                 self.logger.warning(
-                    f"Total samples {num_samples} not exactly divisible by number of "
-                    f"modulation schemes {len(self.system_params.modulation_schemes)}. "
-                    f"Using {samples_per_mod} samples per modulation."
+                    f"Adjusting total samples from {num_samples} to "
+                    f"{samples_per_mod * len(self.system_params.modulation_schemes)}"
                 )
-            
-            # Open file in write mode after ensuring it doesn't exist
+
             with h5py.File(save_path, 'w') as f:
+                # Create dataset structure
                 self._create_dataset_structure(f, num_samples)
-                
-                # Initialize path loss offset counter
-                path_loss_offset = 0  
-                
-                total_progress = tqdm(total=num_samples, desc="Total Dataset Generation", unit="samples")
-                
-                for mod_scheme in self.system_params.modulation_schemes:
-                    mod_group = f['modulation_data'][mod_scheme]
-                    mod_progress = tqdm(
-                        total=samples_per_mod,
-                        desc=f"{mod_scheme} Generation",
-                        unit="samples",
-                        leave=False
-                    )
-                    
-                    batch_idx = 0
-                    while batch_idx < samples_per_mod // self.batch_size:
-                        try:
-                            start_idx = batch_idx * self.batch_size
-                            end_idx = start_idx + self.batch_size
-                            
-                            # Generate input data
-                            # Generate input data with physically meaningful minimum distance
-                            distances = tf.random.uniform(
-                                [self.batch_size], 
-                                minval=1.0,  # Minimum distance (1 meter)
-                                maxval=500.0,  # Maximum distance (500 meters)
-                                dtype=tf.float32
-)
-                            snr_db = tf.random.uniform(
-                                [self.batch_size],
-                                self.system_params.snr_range[0],
-                                self.system_params.snr_range[1],
-                                dtype=tf.float32
-                            )
+                path_loss_offset = 0
 
-                            #First tensor verification
-                            batch_tensors = {
-                                'distances': distances,
-                                'snr_db': snr_db
-                                }
-                                
-                            if not verify_batch_consistency(batch_tensors, self.batch_size):
-                                raise ValueError("Batch size inconsistency detected in input tensors")
-    
-                            # Verify tensor shapes before processing
-                            tf.debugging.assert_shapes([
-                                (distances, ('B',)),
-                                (snr_db, ('B',))
-                            ], message="Input tensor shape mismatch")
-
-                            # Calculate path loss first
-                            path_loss = self.path_loss_manager.calculate_path_loss(
-                                distances,
-                                scenario='umi'  # or whatever scenario you're using
-                            )
-
-                            # Generate channel data with error handling and path loss
-                            try:
-                                channel_data = self.channel_model.generate_mimo_channel(
-                                    batch_size=self.batch_size,
-                                    snr_db=snr_db,
-                                    path_loss=path_loss  #  path loss parameter
-                                )
-                                h_perfect = channel_data['perfect_channel']
-                                h_noisy = channel_data['noisy_channel']
-
-                                # ADD HERE: Channel data verification
-                                channel_tensors = {
-                                    'channel_response': h_perfect,
-                                    'noisy_channel': h_noisy
-                                }
-                                
-                                if not verify_batch_consistency(channel_tensors, self.batch_size):
-                                    raise ValueError("Batch size inconsistency detected in channel tensors")
-    
-                            except tf.errors.ResourceExhaustedError:
-                                self.batch_size = max(1000, self.batch_size // 2)
-                                self.logger.warning(f"OOM error in channel generation, reducing batch size to {self.batch_size}")
-                                self._manage_memory()
-                                continue
-
-                            # Validate tensor size before reshaping
-                            expected_elements = self.batch_size * self.system_params.num_rx * self.system_params.num_tx
-                            actual_elements = tf.size(h_perfect).numpy()
-
-                            if actual_elements != expected_elements:
-                                # Calculate correct batch size
-                                correct_batch_size = actual_elements // (self.system_params.num_rx * self.system_params.num_tx)
-                                
-                                # Check if the division results in a clean integer
-                                if correct_batch_size * self.system_params.num_rx * self.system_params.num_tx != actual_elements:
-                                    self.logger.error(
-                                        f"Cannot reshape tensor: actual elements ({actual_elements}) is not divisible by "
-                                        f"(num_rx ({self.system_params.num_rx}) * num_tx ({self.system_params.num_tx}))"
-                                    )
-                                    raise ValueError("Invalid tensor dimensions for MIMO reshaping")
-                                
-                                self.logger.warning(
-                                    f"Tensor size mismatch: expected {expected_elements} elements, "
-                                    f"but got {actual_elements}. Adjusting batch size from {self.batch_size} "
-                                    f"to {correct_batch_size}"
-                                )
-                                self.batch_size = correct_batch_size
-
-                            # Log shape information for debugging
-                            self.logger.debug(f"Reshaping tensor with {actual_elements} elements to shape: "
-                                            f"[{self.batch_size}, {self.system_params.num_rx}, {self.system_params.num_tx}]")
-
-                            try:
-                                # Ensure correct shape [batch_size, num_rx, num_tx]
-                                h_perfect = tf.reshape(h_perfect, 
-                                                    [self.batch_size, self.system_params.num_rx, self.system_params.num_tx])
-                            except tf.errors.InvalidArgumentError as e:
-                                self.logger.error(f"Failed to reshape tensor: {e}")
-                                raise ValueError("Failed to reshape tensor to required dimensions") from e
-
-
-                            # Calculate and apply path loss
-                            path_loss_db = self.path_loss_manager.calculate_path_loss(
-                                distances[:self.batch_size], 'umi'
-                            )
-
-                            # explicit validation for tensor shape [batch_size, num_rx, num_tx]
-                            expected_shape = [self.batch_size, self.system_params.num_rx, self.system_params.num_tx]
-                            tf.debugging.assert_equal(
-                                tf.shape(path_loss_db),
-                                expected_shape,
-                                message=f"Path loss tensor shape mismatch: Expected {expected_shape}, got {tf.shape(path_loss_db)}"
-                            )
-
-                            if len(path_loss_db.shape) == 3:  # Assume shape is [batch_size, num_rx, num_tx]
-                                path_loss_linear = tf.pow(10.0, -path_loss_db / 20.0)
-                                h_with_pl = h_perfect * tf.cast(path_loss_linear, dtype=h_perfect.dtype)
-                            else:
-                                path_loss_db = tf.reshape(path_loss_db[:self.batch_size], [self.batch_size])
-                                path_loss_linear = tf.pow(10.0, -path_loss_db / 20.0)
-                                path_loss_shaped = tf.reshape(path_loss_linear, [self.batch_size, 1, 1])
-                                h_with_pl = h_perfect * tf.cast(path_loss_shaped, dtype=h_perfect.dtype)
-
-                            # Generate and process symbols
-                            tx_symbols = self.channel_model.generate_qam_symbols(self.batch_size, mod_scheme)
-                            tx_symbols = tf.reshape(tx_symbols, [self.batch_size, self.system_params.num_tx, 1])
-                            rx_symbols = tf.matmul(h_with_pl, tx_symbols)
-                            
-                            # Calculate all metrics first
-                            metrics = self.metrics_calculator.calculate_performance_metrics(
-                                h_with_pl,
-                                tx_symbols,
-                                rx_symbols,
-                                snr_db
-                            )
-                            
-                            # Calculate enhanced metrics
-                            self.metrics_calculator.set_current_modulation(mod_scheme)
-                            enhanced_metrics = self.metrics_calculator.calculate_enhanced_metrics(
-                                h_with_pl, tx_symbols, rx_symbols, snr_db
-                            )
-                            
-                            # Process metrics with explicit shape control
-                            effective_snr = tf.reshape(tf.squeeze(metrics['effective_snr']), [self.batch_size])
-                            spectral_efficiency = tf.reshape(tf.squeeze(metrics['spectral_efficiency']), [self.batch_size])
-                            sinr = tf.reshape(tf.squeeze(metrics['sinr']), [self.batch_size])
-                            eigenvalues = metrics['eigenvalues']
-                            
-                            # Create batch data after all metrics are calculated
-                            batch_data = {
-                                'eigenvalues': eigenvalues,
-                                'effective_snr': effective_snr,
-                                'spectral_efficiency': spectral_efficiency,
-                                'sinr': sinr,
-                                'ber': enhanced_metrics['ber']
-                            }
-
-                            # Validate batch data
-                            MAX_RETRIES = 3
-                            retry_count = 0
-                            while retry_count < MAX_RETRIES:
-                                is_valid, validation_errors = self._validate_batch_data(batch_data)
-                                if is_valid:
-                                    break
-                                
-                                retry_count += 1
-                                self.logger.warning(f"Invalid batch at index {batch_idx} (attempt {retry_count}/{MAX_RETRIES}):")
-                                for error in validation_errors:
-                                    self.logger.warning(f"  - {error}")
-
-                            if retry_count == MAX_RETRIES:
-                                self.logger.error(f"Failed to generate valid batch after {MAX_RETRIES} attempts. Logging failed batch data.")
-                                failed_batches.append(batch_data)  # Maintain a list of failed batches
-                                continue
-
-                            # Before calculating path loss
-                            self.logger.info(f"\nProcessing batch for {mod_scheme}:")
-                            self.logger.info(f"Batch index: {batch_idx}, Range: {start_idx}-{end_idx}")
-                            self.logger.info(f"Distances shape: {distances.shape}")
-
-                            # Calculate path loss data
-                            # Align path loss dataset sizes with modulation datasets
-                            total_samples = len(f['modulation_data'][mod_scheme]['effective_snr'])  # Base size
-                            mod_data_size = f['modulation_data'][mod_scheme]['effective_snr'].shape[0]
-                            fspl = self.path_loss_manager.calculate_free_space_path_loss(distances[:mod_data_size])
-                            scenario_pl = self.path_loss_manager.calculate_path_loss(distances[:mod_data_size], 'umi')
-                            
-                            # Debug checks before saving
-                            fspl_stats = {
-                                'min': tf.reduce_min(fspl).numpy(),
-                                'max': tf.reduce_max(fspl).numpy(),
-                                'mean': tf.reduce_mean(fspl).numpy(),
-                                'zeros': tf.reduce_sum(tf.cast(tf.equal(fspl, 0.0), tf.int32)).numpy()
-                            }
-                            
-                            self.logger.info(
-                                f"\nPath Loss Stats before saving:"
-                                f"\n - FSPL range: [{fspl_stats['min']:.2f}, {fspl_stats['max']:.2f}] dB"
-                                f"\n - FSPL mean: {fspl_stats['mean']:.2f} dB"
-                                f"\n - Zero values: {fspl_stats['zeros']}"
-                            )
-
-                            # Add enhanced validation and safety checks
-                            min_pl = 20.0
-                            max_pl = 160.0
-                            # Clip values with validation
-                            fspl = tf.clip_by_value(fspl, min_pl, max_pl)
-                            scenario_pl = tf.clip_by_value(scenario_pl, min_pl, max_pl)
-
-                            # Add validation checks with detailed logging
-                            any_invalid_fspl = tf.math.logical_or(
-                                tf.math.less(fspl, min_pl),
-                                tf.math.greater(fspl, max_pl)
-                            )
-                            any_invalid_scenario = tf.math.logical_or(
-                                tf.math.less(scenario_pl, min_pl),
-                                tf.math.greater(scenario_pl, max_pl)
-                            )
-
-                            if tf.math.reduce_any(any_invalid_fspl):
-                                min_val = tf.reduce_min(fspl)
-                                max_val = tf.reduce_max(fspl)
-                                self.logger.warning(
-                                    f"FSPL values required clipping. Range before clip: [{min_val:.2f}, {max_val:.2f}] dB"
-                                )
-
-                            if tf.math.reduce_any(any_invalid_scenario):
-                                min_val = tf.reduce_min(scenario_pl)
-                                max_val = tf.reduce_max(scenario_pl)
-                                self.logger.warning(
-                                    f"Scenario path loss values required clipping. Range before clip: [{min_val:.2f}, {max_val:.2f}] dB"
-                                )
-
-                            # Ensure no NaN or infinite values
-                            fspl = tf.where(tf.math.is_finite(fspl), fspl, min_pl)
-                            scenario_pl = tf.where(tf.math.is_finite(scenario_pl), scenario_pl, min_pl)
-
-                            # Add logging for clipped values
-                            if tf.reduce_any(fspl < 20.0) or tf.reduce_any(fspl > 160.0):
-                                self.logger.warning("Some FSPL values were clipped to physical bounds")
-                            if tf.reduce_any(scenario_pl < 20.0) or tf.reduce_any(scenario_pl > 160.0):
-                                self.logger.warning("Some scenario path loss values were clipped to physical bounds")
-
-                            # Slice the tensors to match batch_size
-                            fspl = tf.slice(fspl, [0], [self.batch_size])
-                            scenario_pl = tf.slice(scenario_pl, [0], [self.batch_size])
-
-                            # ADD HERE: Final verification before saving
-                            output_tensors = {
-                                'channel_response': h_perfect,
-                                'sinr': sinr,
-                                'spectral_efficiency': spectral_efficiency,
-                                'effective_snr': effective_snr,
-                                'eigenvalues': eigenvalues,
-                                'ber': enhanced_metrics['ber'],
-                                'throughput': enhanced_metrics['throughput']
-                            }
-
-                            if not verify_batch_consistency(output_tensors, self.batch_size):
-                                raise ValueError("Batch size inconsistency detected in output tensors")
-
-                            # Save all data to HDF5
-                            mod_group['channel_response'][start_idx:end_idx] = h_perfect.numpy()
-                            mod_group['sinr'][start_idx:end_idx] = sinr.numpy()
-                            mod_group['spectral_efficiency'][start_idx:end_idx] = spectral_efficiency.numpy()
-                            mod_group['effective_snr'][start_idx:end_idx] = effective_snr.numpy()
-                            mod_group['eigenvalues'][start_idx:end_idx] = eigenvalues.numpy()
-                            mod_group['ber'][start_idx:end_idx] = enhanced_metrics['ber']
-                            mod_group['throughput'][start_idx:end_idx] = enhanced_metrics['throughput']
-                            
-                            # Calculate global indices for path loss data
-                            pl_start_idx = path_loss_offset + start_idx
-                            pl_end_idx = path_loss_offset + end_idx
-
-                            # Save path loss data with global indexing
-                            if len(fspl.shape) == 3:  # Per-antenna path loss
-                                f['path_loss_data']['fspl'][pl_start_idx:pl_end_idx, :, :] = fspl.numpy()
-                                f['path_loss_data']['scenario_pathloss'][pl_start_idx:pl_end_idx, :, :] = scenario_pl.numpy()
-                            else:  # Single value path loss
-                                f['path_loss_data']['fspl'][pl_start_idx:pl_end_idx] = fspl.numpy()
-                                f['path_loss_data']['scenario_pathloss'][pl_start_idx:pl_end_idx] = scenario_pl.numpy()
-
-                            
-                            # Add verification logging
-                            self.logger.info(
-                                f"\nVerification after save:"
-                                f"\n - Saved values range: [{np.min(f['path_loss_data']['fspl'][start_idx:end_idx]):.2f}, "
-                                f"{np.max(f['path_loss_data']['fspl'][start_idx:end_idx]):.2f}] dB"
-                                f"\n - Zero values in saved data: {np.sum(f['path_loss_data']['fspl'][start_idx:end_idx] == 0.0)}"
-                            )
-
-                            # Update progress
-                            mod_progress.update(self.batch_size)
-                            total_progress.update(self.batch_size)
-                            
-                            # Memory management
-                            self._manage_memory()
-                            
-                            # Validate the dataset consistency after saving the batch
-                            if not self.validate_consistency(f):
-                                self.logger.error(f"Dataset inconsistency detected after batch {batch_idx} for {mod_scheme}.")
-                                raise ValueError("Dataset inconsistency detected during generation.")
-
-                            batch_idx += 1
-                        except Exception as batch_error:
-                            self.logger.error(f"Error processing batch {batch_idx}: {str(batch_error)}")
-                            continue
-                            
-                        except tf.errors.ResourceExhaustedError as oom_error:
-                            self.batch_size = max(1000, self.batch_size // 2)
-                            self.logger.warning(f"OOM error detected, reducing batch size to {self.batch_size}")
-                            self._manage_memory()
-                            continue
-                            
-                        except Exception as batch_error:
-                            self.logger.error(f"Error processing batch {batch_idx}: {str(batch_error)}")
-                            if isinstance(batch_error, tf.errors.ResourceExhaustedError):
-                                self.batch_size = max(1000, self.batch_size // 2)
-                                self.logger.warning(f"Reducing batch size to {self.batch_size} due to memory constraints")
-                                continue
-                            else:
-                                raise
-                    
-                    path_loss_offset += end_idx - start_idx # Use actual processed range
-                    
-                    mod_progress.close()
-                
-                total_progress.close()
-
-                # Add final metadata
-                f.attrs['completion_date'] = datetime.now().isoformat()
-                f.attrs['total_samples_generated'] = num_samples
-                f.attrs['final_batch_size'] = self.batch_size
-                
-                # Verify dataset integrity with enhanced reporting
-                try:
-                    self.integrity_checker = MIMODatasetIntegrityChecker(save_path)
-                    with self.integrity_checker as checker:
-                        # Perform comprehensive validation
-                        integrity_report = checker.check_dataset_integrity()
+                # Progress tracking
+                with tqdm(total=num_samples, desc="Total Progress") as total_progress:
+                    for mod_scheme in self.system_params.modulation_schemes:
+                        mod_group = f['modulation_data'][mod_scheme]
                         
-                        if integrity_report['overall_status']:
-                            self.logger.info("✅ Dataset integrity verification passed")
+                        with tqdm(total=samples_per_mod, 
+                                desc=f"{mod_scheme}", 
+                                leave=False) as mod_progress:
                             
-                            # Log detailed statistics
-                            if 'validation_details' in integrity_report:
-                                self.logger.info("\nValidation Details:")
-                                for key, stats in integrity_report['validation_details'].items():
-                                    self.logger.info(f"\n{key}:")
-                                    for stat_name, value in stats.items():
-                                        self.logger.info(f"  {stat_name}: {value}")
-                            
-                            # Log modulation scheme statistics
-                            if 'modulation_schemes' in integrity_report:
-                                self.logger.info("\nModulation Scheme Details:")
-                                for mod_scheme, details in integrity_report['modulation_schemes'].items():
-                                    self.logger.info(f"\n{mod_scheme}:")
-                                    self.logger.info(f"  Samples: {details.get('samples', 0)}")
-                                    self.logger.info(f"  Status: {'✅ Valid' if details.get('integrity', False) else '❌ Invalid'}")
+                            batch_idx = 0
+                            while batch_idx * self.batch_size < samples_per_mod:
+                                try:
+                                    # Calculate indices
+                                    start_idx = batch_idx * self.batch_size
+                                    end_idx = min(start_idx + self.batch_size, samples_per_mod)
+                                    current_batch_size = end_idx - start_idx
+
+                                    # Generate batch data
+                                    batch_data = self._generate_batch_data(
+                                        current_batch_size,
+                                        mod_scheme
+                                    )
+
+                                    # Validate batch data
+                                    is_valid, validation_errors = self._validate_batch_data(batch_data)
+                                    if not is_valid:
+                                        raise ValueError(f"Batch validation failed: {validation_errors}")
+
+                                    # Save batch data to HDF5
+                                    self._save_batch_to_hdf5(
+                                        f,
+                                        mod_group,
+                                        batch_data,
+                                        start_idx,
+                                        end_idx,
+                                        path_loss_offset
+                                    )
+
+                                    # Update progress and stats
+                                    mod_progress.update(current_batch_size)
+                                    total_progress.update(current_batch_size)
+                                    generation_stats['successful_batches'] += 1
+                                    generation_stats['total_samples_generated'] += current_batch_size
+
+                                    # Memory management
+                                    if self.memory_callback:
+                                        self.memory_callback()
                                     
-                                    # Log dataset-specific statistics if available
-                                    if 'datasets' in details:
-                                        for dataset_name, dataset_stats in details['datasets'].items():
-                                            if dataset_stats.get('valid', False):
-                                                self.logger.info(f"  {dataset_name}: ✅ Valid")
-                                            else:
-                                                self.logger.warning(f"  {dataset_name}: ❌ Invalid")
-                            
-                            # Log any warnings
-                            if 'warnings' in integrity_report and integrity_report['warnings']:
-                                self.logger.warning("\nWarnings:")
-                                for warning in integrity_report['warnings']:
-                                    self.logger.warning(f"  • {warning}")
-                            
-                            self.logger.info(f"\nTotal samples verified: {integrity_report.get('total_samples', 0)}")
-                            return True
-                        else:
-                            self.logger.error("❌ Dataset integrity verification failed")
-                            
-                            # Log all errors
-                            if 'errors' in integrity_report:
-                                self.logger.error("\nErrors:")
-                                for error in integrity_report['errors']:
-                                    self.logger.error(f"  • {error}")
+                                    batch_idx += 1
+
+                                except tf.errors.ResourceExhaustedError:
+                                    self.batch_size = max(1000, self.batch_size // 2)
+                                    self.logger.warning(
+                                        f"Memory limit reached. Reducing batch size to {self.batch_size}"
+                                    )
+                                    continue
                                     
-                            # Log specific validation failures
-                            if 'validation_details' in integrity_report:
-                                self.logger.error("\nValidation Failures:")
-                                for key, stats in integrity_report['validation_details'].items():
-                                    if isinstance(stats, dict) and ('errors' in stats or 'failed' in stats):
-                                        self.logger.error(f"\n{key}:")
-                                        if 'errors' in stats:
-                                            for error in stats['errors']:
-                                                self.logger.error(f"  • {error}")
-                            
-                            return False
-                            
-                except Exception as e:
-                            self.logger.error(f"Critical error during integrity verification: {str(e)}")
-                            self.logger.error("Detailed error traceback:", exc_info=True)
-                return False
-            
+                                except Exception as e:
+                                    self.logger.error(f"Batch processing error: {str(e)}")
+                                    generation_stats['failed_batches'] += 1
+                                    continue
+
+                        path_loss_offset += samples_per_mod
+
+                # Add generation metadata
+                f.attrs.update({
+                    'completion_time': datetime.now().isoformat(),
+                    'total_samples': generation_stats['total_samples_generated'],
+                    'successful_batches': generation_stats['successful_batches'],
+                    'failed_batches': generation_stats['failed_batches']
+                })
+
+                # Verify dataset integrity
+                if not self.validate_consistency(f):
+                    raise ValueError("Dataset consistency check failed")
+
+                # Log generation statistics
+                self.logger.info("\nGeneration Statistics:")
+                self.logger.info(f"Total samples generated: {generation_stats['total_samples_generated']}")
+                self.logger.info(f"Successful batches: {generation_stats['successful_batches']}")
+                self.logger.info(f"Failed batches: {generation_stats['failed_batches']}")
+
+                return generation_stats['failed_batches'] == 0
+
         except Exception as e:
             self.logger.error(f"Dataset generation failed: {str(e)}")
             self.logger.error("Detailed error traceback:", exc_info=True)
-        return False
+            return False
     
     def _process_batch(self, batch_size: int, mod_scheme: str) -> Dict[str, tf.Tensor]:
         """
@@ -1521,7 +1281,7 @@ class MIMODatasetGenerator:
 # Example usage
 def main():
     generator = MIMODatasetGenerator()
-    generator.generate_dataset(num_samples=1_000_000)
+    generator.generate_dataset(num_samples=1_320_000)
     generator.verify_dataset('dataset/mimo_dataset.h5')
 
 if __name__ == "__main__":

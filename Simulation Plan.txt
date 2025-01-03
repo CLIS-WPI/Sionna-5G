@@ -57,5 +57,5 @@
 % Dataset Parameters
 % Antenna Heights: Fixed at 1.5m - Simulate typical fixed-user device height.
 % Noise Floor: -174 dBm/Hz - Thermal noise baseline for calculations.
-% Dataset Size (Samples): 1M - Balanced between computational complexity and training needs.
+% Dataset Size (Samples): 1320000 - Balanced between computational complexity and training needs.
 % Random Seed: Fixed for reproducibility - Ensure consistent dataset generation.
