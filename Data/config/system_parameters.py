@@ -61,7 +61,8 @@ class SystemParameters:
     user_mobility: bool = False             # mob: User mobility flag
     random_seed: int = 42                   # seed: Random number generator seed
     
-
+    bandwidth: float = 20e6  # Default 20 MHz bandwidth
+    
     # Add validation method
     def validate_modulation_scheme(self, mod_scheme: str) -> bool:
         """
