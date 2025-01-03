@@ -25,7 +25,7 @@
 % Number of Paths: 10 - For multipath simulation
 % Coherence Time: 1 slot - Block fading assumption
 % User: Static (RX devices like modem and etc) - RX devices like modem or fixed stations.
-% Path Loss Models: FSPL, ITU Urban Macro - Implement Free Space Path Loss (FSPL) or ITU-based models (e.g., Urban Macro, Urban Micro). Include distance-related signal degradation.
+% Path Loss Models: FSPL and basic urban scenarios
 % SNR Range: 0 to 30 dB - Testing range
 % Delay Spread: 0.1-1 µs - Simulate realistic channel time dispersion.
 % Doppler Shift: 0 Hz - Doppler shift set to 0 Hz, no mobility/time-variation in channel modeling.
