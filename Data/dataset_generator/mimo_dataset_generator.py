@@ -567,6 +567,68 @@ class MIMODatasetGenerator:
         except Exception as e:
             self.logger.error(f"Failed to save batch to HDF5: {str(e)}")
             raise
+    def _generate_batch_data(self, batch_size: int, mod_scheme: str) -> Dict[str, tf.Tensor]:
+        """
+        Generate a batch of MIMO channel data and calculate performance metrics
+        
+        Args:
+            batch_size (int): Size of the batch to generate
+            mod_scheme (str): Modulation scheme to use
+            
+        Returns:
+            Dict[str, tf.Tensor]: Dictionary containing generated data including:
+                - channel_response: Complex MIMO channel matrix
+                - sinr: Signal-to-Interference-plus-Noise Ratio
+                - spectral_efficiency: Achieved spectral efficiency
+                - effective_snr: Effective SNR after processing
+                - path_loss: Path loss values
+        """
+        try:
+            # Generate distances for path loss calculation
+            distances = tf.random.uniform(
+                [batch_size],
+                minval=1.0,  # Minimum distance (1 meter)
+                maxval=500.0,  # Maximum distance (500 meters)
+                dtype=tf.float32
+            )
+
+            # Calculate path loss using the path loss manager
+            path_loss = self.path_loss_manager.calculate_path_loss(
+                distances,
+                scenario='umi'  # Urban Micro scenario
+            )
+
+            # Generate MIMO channel response using the channel model
+            channel_response = self.channel_model.generate_channel_matrix(
+                batch_size=batch_size,
+                path_loss=path_loss
+            )
+
+            # Calculate performance metrics using the metrics calculator
+            metrics = self.metrics_calculator.calculate_metrics(
+                channel_response=channel_response,
+                modulation_scheme=mod_scheme,
+                path_loss=path_loss
+            )
+
+            # Combine all data into a single dictionary
+            batch_data = {
+                'channel_response': channel_response,
+                'path_loss': path_loss,
+                'distances': distances,
+                **metrics  # Unpack metrics dictionary (includes sinr, spectral_efficiency, etc.)
+            }
+
+            # Validate the generated batch data
+            is_valid, validation_errors = self._validate_batch_data(batch_data)
+            if not is_valid:
+                raise ValueError(f"Generated batch data validation failed: {validation_errors}")
+
+            return batch_data
+
+        except Exception as e:
+            self.logger.error(f"Batch data generation failed: {str(e)}")
+            raise
 
     def generate_dataset(self, num_samples: int, save_path: str = 'dataset/mimo_dataset.h5'):
         """
