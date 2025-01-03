@@ -35,6 +35,7 @@ except ImportError:
     print("Warning: psutil not available. System memory monitoring will be limited.")
 
 class MIMODatasetGenerator:
+    __version__ = '2.0.0'
     """
     Comprehensive MIMO dataset generation framework
     """
@@ -589,6 +590,20 @@ class MIMODatasetGenerator:
         order = self._get_modulation_order(mod_scheme)
         return self.system_params.num_tx * np.log2(order) if order > 0 else 0.0
 
+    def _save_batch_to_hdf5(self, f, mod_group, batch_data, start_idx, end_idx, path_loss_offset):
+        """Save batch data to HDF5 file"""
+        try:
+            for key, data in batch_data.items():
+                if key in mod_group:
+                    mod_group[key][start_idx:end_idx] = data.numpy()
+                elif key in ['path_loss', 'distances']:
+                    pl_start = path_loss_offset + start_idx
+                    pl_end = path_loss_offset + end_idx
+                    f['path_loss_data'][key][pl_start:pl_end] = data.numpy()
+        except Exception as e:
+            self.logger.error(f"Failed to save batch to HDF5: {str(e)}")
+            raise
+
     def generate_dataset(self, num_samples: int, save_path: str = 'dataset/mimo_dataset.h5'):
         """
         Generate comprehensive MIMO dataset with enhanced validation and monitoring
@@ -1006,43 +1021,137 @@ class MIMODatasetGenerator:
     # In mimo_dataset_generator.py, enhance memory management:
     def _manage_memory(self):
         """
-        Enhanced memory management for H100 GPUs
+        Enhanced memory management for H100 GPUs with periodic monitoring and adaptive thresholds
         """
         try:
+            # Check if monitoring interval has elapsed
+            current_time = datetime.now()
+            if hasattr(self, '_last_memory_check'):
+                if (current_time - self._last_memory_check).seconds < 300:  # 5 minute interval
+                    return
+            self._last_memory_check = current_time
+
             gpus = tf.config.list_physical_devices('GPU')
             if not gpus:
                 return
-                
-            # Monitor each GPU
+
+            total_memory_usage = 0
+            gpu_states = []
+
+            # Monitor each GPU with enhanced metrics
             for gpu_idx, gpu in enumerate(gpus):
                 try:
                     memory_info = tf.config.experimental.get_memory_info(f'GPU:{gpu_idx}')
-                    current_usage = memory_info['current'] / 1e9
-                    self.logger.info(f"GPU:{gpu_idx} memory usage: {current_usage:.2f} GB")
+                    current_usage = memory_info['current'] / 1e9  # GB
+                    peak_usage = memory_info.get('peak', memory_info['current']) / 1e9  # GB
                     
-                    # Adjust batch size based on memory usage
-                    if current_usage > self.memory_threshold * 0.9:  # Over 90% threshold
+                    # Calculate memory utilization percentage
+                    memory_utilization = current_usage / self.memory_threshold if hasattr(self, 'memory_threshold') else 0.0
+                    
+                    gpu_states.append({
+                        'index': gpu_idx,
+                        'current_usage': current_usage,
+                        'peak_usage': peak_usage,
+                        'utilization': memory_utilization
+                    })
+                    
+                    total_memory_usage += current_usage
+                    
+                    # Log detailed memory statistics
+                    self.logger.info(
+                        f"GPU:{gpu_idx} Memory Stats:\n"
+                        f"  - Current Usage: {current_usage:.2f} GB\n"
+                        f"  - Peak Usage: {peak_usage:.2f} GB\n"
+                        f"  - Utilization: {memory_utilization:.2%}"
+                    )
+
+                    # Progressive memory management thresholds
+                    warning_threshold = 0.75  # 75% utilization
+                    critical_threshold = 0.9   # 90% utilization
+                    
+                    if memory_utilization > critical_threshold:
+                        # Critical memory situation - aggressive reduction
                         new_batch_size = max(self.min_batch_size, self.batch_size // 2)
-                        if new_batch_size != self.batch_size:
-                            self.logger.warning(f"High memory usage. Reducing batch size from {self.batch_size} to {new_batch_size}")
-                            self.batch_size = new_batch_size
-                            self.stable_iterations = 0
-                            
-                            # Force cleanup
-                            tf.keras.backend.clear_session()
-                            import gc
-                            gc.collect()
-                            
+                        self.logger.warning(
+                            f"CRITICAL: Memory utilization {memory_utilization:.2%} exceeds {critical_threshold:.2%}. "
+                            f"Reducing batch size from {self.batch_size} to {new_batch_size}"
+                        )
+                        self.batch_size = new_batch_size
+                        self.stable_iterations = 0
+                        
+                        # Force immediate cleanup
+                        self._force_memory_cleanup()
+                        
+                    elif memory_utilization > warning_threshold:
+                        # Warning level - moderate reduction
+                        new_batch_size = max(self.min_batch_size, int(self.batch_size * 0.75))
+                        self.logger.warning(
+                            f"WARNING: Memory utilization {memory_utilization:.2%} exceeds {warning_threshold:.2%}. "
+                            f"Reducing batch size from {self.batch_size} to {new_batch_size}"
+                        )
+                        self.batch_size = new_batch_size
+                        self.stable_iterations = 0
+
                 except Exception as e:
                     self.logger.warning(f"Error monitoring GPU:{gpu_idx} - {str(e)}")
+                    continue
+
+            # Update memory usage history
+            if not hasattr(self, '_memory_history'):
+                self._memory_history = []
+            self._memory_history.append({
+                'timestamp': current_time,
+                'total_usage': total_memory_usage,
+                'gpu_states': gpu_states
+            })
             
-            # Try to grow batch size if conditions are good
-            self.safe_memory_growth()
-                
+            # Keep only last 10 memory measurements
+            self._memory_history = self._memory_history[-10:]
+
+            # Check if memory usage is stable and try to grow batch size
+            if self._is_memory_stable():
+                self.safe_memory_growth()
+
         except Exception as e:
             self.logger.error(f"Memory management failed: {str(e)}")
-            # Fall back to conservative batch size
             self.batch_size = self.min_batch_size
+            self._force_memory_cleanup()
+
+    def _force_memory_cleanup(self):
+        """Force cleanup of memory resources"""
+        try:
+            # Clear TensorFlow session
+            tf.keras.backend.clear_session()
+            
+            # Force garbage collection
+            import gc
+            gc.collect()
+            
+            # Clear any cached tensors
+            tf.debugging.set_log_device_placement(False)
+            
+            # Optional: Clear CUDA cache if available
+            try:
+                torch.cuda.empty_cache()  # If PyTorch is available
+            except:
+                pass
+                
+            self.logger.info("Forced memory cleanup completed")
+            
+        except Exception as e:
+            self.logger.warning(f"Memory cleanup failed: {str(e)}")
+
+    def _is_memory_stable(self) -> bool:
+        """Check if memory usage has been stable for recent history"""
+        if len(self._memory_history) < 5:  # Need at least 5 measurements
+            return False
+            
+        recent_usage = [state['total_usage'] for state in self._memory_history[-5:]]
+        mean_usage = sum(recent_usage) / len(recent_usage)
+        max_deviation = max(abs(usage - mean_usage) for usage in recent_usage)
+        
+        # Consider stable if max deviation is less than 5% of mean
+        return max_deviation < (mean_usage * 0.05)
 
 
     def _check_memory_requirements(self, batch_size: int) -> bool:
