@@ -35,7 +35,7 @@
 
 % Training Parameters
 % Model: Soft Actor-Critic (SAC) - Actor Network (Policy Network | Critic Network (Twin Q-networks)
-% Channel Realizations: 1M - Initial training set
+% Channel Realizations: 1,320,000 - Initial training set
 % Validation Set Size: 100K - For performance validation
 % Test Set Size: 100K - For final evaluation
 % Number of Episodes: 100K - Total training episodes
