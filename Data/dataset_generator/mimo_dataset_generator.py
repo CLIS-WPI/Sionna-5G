@@ -440,36 +440,13 @@ class MIMODatasetGenerator:
         else:
             self.logger.info(f"Using existing output directory: {directory}")
     
-    def _create_dataset_structure(self, hdf5_file, num_samples: int):
-        """
-        Create HDF5 dataset structure with comprehensive validation and documentation.
-        
-        Args:
-            hdf5_file: HDF5 file object
-            num_samples (int): Total number of samples to generate
-            
-        Raises:
-            ValueError: If input parameters are invalid
-        """
+    def _create_dataset_structure(self, hdf5_file, num_samples):
+        """Create HDF5 dataset structure with proper data types"""
         try:
-            # Input validation with detailed messages
-            if not isinstance(num_samples, int) or num_samples <= 0:
-                raise ValueError(f"Invalid num_samples: {num_samples}. Must be positive integer.")
-            
-            if not self.system_params.modulation_schemes:
-                raise ValueError("No modulation schemes specified in system parameters.")
-
-            # Calculate samples distribution
+            # Calculate samples per modulation
             samples_per_mod = num_samples // len(self.system_params.modulation_schemes)
-            if samples_per_mod * len(self.system_params.modulation_schemes) != num_samples:
-                self.logger.warning(
-                    f"Adjusting total samples from {num_samples} to "
-                    f"{samples_per_mod * len(self.system_params.modulation_schemes)} "
-                    f"for even distribution across {len(self.system_params.modulation_schemes)} "
-                    "modulation schemes."
-                )
-
-            # Create main groups with enhanced metadata
+            
+            # Create main groups
             groups = {
                 'modulation_data': 'MIMO channel and performance metrics for each modulation',
                 'path_loss_data': 'Path loss measurements and environmental factors',
@@ -480,104 +457,91 @@ class MIMODatasetGenerator:
             created_groups = {
                 name: hdf5_file.create_group(name) for name in groups
             }
-            
-            for name, group in created_groups.items():
-                group.attrs['description'] = groups[name]
-                group.attrs['creation_time'] = datetime.now().isoformat()
 
-            # Enhanced configuration metadata
+            # Store configuration as simple types
             config_metadata = {
-                'creation_date': datetime.now().isoformat(),
-                'total_samples': num_samples,
-                'samples_per_modulation': samples_per_mod,
-                'num_tx_antennas': self.system_params.num_tx,
-                'num_rx_antennas': self.system_params.num_rx,
-                'carrier_frequency': self.system_params.carrier_frequency,
-                'bandwidth': self.system_params.bandwidth,
-                'snr_range': self.system_params.snr_range,
-                'modulation_schemes': list(self.system_params.modulation_schemes),
-                'dataset_version': '2.0',
-                'generator_version': self.__class__.__version__
+                'creation_date': str(datetime.now().isoformat()),
+                'total_samples': int(num_samples),
+                'samples_per_modulation': int(samples_per_mod),
+                'num_tx_antennas': int(self.system_params.num_tx),
+                'num_rx_antennas': int(self.system_params.num_rx),
+                'carrier_frequency': float(self.system_params.carrier_frequency),
+                'modulation_schemes': [str(mod) for mod in self.system_params.modulation_schemes],
+                'dataset_version': str('2.0'),
+                'generator_version': str(self.__class__.__version__)
             }
             
+            # Store configuration
+            config_group = created_groups['configuration']
             for key, value in config_metadata.items():
-                created_groups['configuration'].attrs[key] = value
+                if isinstance(value, list):
+                    # Store lists as comma-separated strings
+                    config_group.attrs[key] = ','.join(map(str, value))
+                else:
+                    config_group.attrs[key] = value
 
+            # Create datasets with proper dtypes
             # Define dataset configurations with enhanced metadata
-            dataset_configs = {
-                'channel_response': {
-                    'shape': (samples_per_mod, self.system_params.num_rx, self.system_params.num_tx),
-                    'dtype': np.complex64,
-                    'description': 'Complex MIMO channel matrix response',
-                    'units': 'linear',
-                    'valid_range': [-100, 100]
-                },
-                'sinr': {
-                    'shape': (samples_per_mod,),
-                    'dtype': np.float32,
-                    'description': 'Signal-to-Interference-plus-Noise Ratio',
-                    'units': 'dB',
-                    'valid_range': [-20, 30]
-                },
-                'spectral_efficiency': {
-                    'shape': (samples_per_mod,),
-                    'dtype': np.float32,
-                    'description': 'Spectral efficiency',
-                    'units': 'bits/s/Hz',
-                    'valid_range': [0, 40]
-                },
-                'path_loss': {
-                    'shape': (samples_per_mod,),
-                    'dtype': np.float32,
-                    'description': 'Path loss including shadowing',
-                    'units': 'dB',
-                    'valid_range': [20, 160]
+                dataset_configs = {
+                    'channel_response': {
+                        'shape': (samples_per_mod, self.system_params.num_rx, self.system_params.num_tx),
+                        'dtype': np.complex64,
+                        'description': 'Complex MIMO channel matrix response',
+                        'units': 'linear',
+                        'valid_range': [-100, 100]
+                    },
+                    'sinr': {
+                        'shape': (samples_per_mod,),
+                        'dtype': np.float32,
+                        'description': 'Signal-to-Interference-plus-Noise Ratio',
+                        'units': 'dB',
+                        'valid_range': [-20, 30]
+                    },
+                    'spectral_efficiency': {
+                        'shape': (samples_per_mod,),
+                        'dtype': np.float32,
+                        'description': 'Spectral efficiency',
+                        'units': 'bits/s/Hz',
+                        'valid_range': [0, 40]
+                    },
+                    'path_loss': {
+                        'shape': (samples_per_mod,),
+                        'dtype': np.float32,
+                        'description': 'Path loss including shadowing',
+                        'units': 'dB',
+                        'valid_range': [20, 160]
+                    }
                 }
-            }
 
-            # Create datasets for each modulation scheme with enhanced structure
+            # Create datasets
             for mod_scheme in self.system_params.modulation_schemes:
                 mod_group = created_groups['modulation_data'].create_group(mod_scheme)
-                mod_group.attrs.update({
-                    'description': f'Data for {mod_scheme} modulation',
-                    'modulation_order': self._get_modulation_order(mod_scheme),
-                    'theoretical_max_spectral_efficiency': self._calculate_max_spectral_efficiency(mod_scheme)
-                })
-
-                # Create datasets with enhanced metadata and validation
+                
                 for name, config in dataset_configs.items():
                     dataset = mod_group.create_dataset(
                         name,
                         shape=config['shape'],
                         dtype=config['dtype'],
                         chunks=True,
-                        compression='gzip',
-                        compression_opts=4
+                        compression='gzip'
                     )
                     
-                    # Enhanced dataset attributes
-                    dataset.attrs.update({
-                        'description': config['description'],
-                        'units': config['units'],
-                        'valid_range': config['valid_range'],
-                        'creation_time': datetime.now().isoformat(),
-                        'statistics': {
-                            'mean': 0.0,
-                            'std': 0.0,
-                            'min': float('inf'),
-                            'max': float('-inf')
-                        }
-                    })
+                    # Store attributes as simple types
+                    dataset.attrs['description'] = str(config['description'])
+                    dataset.attrs['units'] = str(config['units'])
+                    dataset.attrs['valid_range_min'] = float(config['valid_range'][0])
+                    dataset.attrs['valid_range_max'] = float(config['valid_range'][1])
+                    dataset.attrs['creation_time'] = str(datetime.now().isoformat())
 
             self.logger.info(
                 f"Created dataset structure with {len(self.system_params.modulation_schemes)} "
                 f"modulation schemes and {samples_per_mod} samples per modulation"
             )
-            
+                
         except Exception as e:
             self.logger.error(f"Dataset structure creation failed: {str(e)}")
             raise
-
+        
     def _get_modulation_order(self, mod_scheme: str) -> int:
         """Get modulation order for given scheme."""
         modulation_orders = {
