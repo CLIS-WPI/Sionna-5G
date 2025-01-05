@@ -16,7 +16,7 @@ The **MIMO Dataset Generator** is a specialized tool designed to create datasets
 
 ### Channel and Path Loss Modeling
 - Incorporates realistic channel models (e.g., **Rayleigh block fading**).
-- Supports path loss calculations for **Free Space Path Loss (FSPL)**, **Urban Micro (UMi)**, and **Urban Macro (UMa)** scenarios.
+- The path loss model used in this study is Free Space Path Loss (FSPL), chosen for its simplicity and suitability for static, line-of-sight scenarios. This choice allows for a focused evaluation of beamforming optimization. Future work may explore more complex models like Urban Micro (UMi) or Urban Macro (UMa) for extended scenarios.
 - Includes **SNR customization** (0 to 30 dB) for varied environmental conditions.
 
 ### Robust Dataset Generation
