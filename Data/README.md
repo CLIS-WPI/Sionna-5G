@@ -51,18 +51,69 @@ The **MIMO Dataset Generator** is a specialized tool designed to create datasets
 The **MIMO Dataset Generator** is focused solely on **dataset generation** for reinforcement learning and related tasks. Advanced metrics calculation, secondary utilities, and extended validation steps are deliberately excluded to maintain simplicity and practicality.
 
 ## Dataset Generation Workflow
-### Input Parameters
-- Configure MIMO setup: Define number of antennas (e.g., 4x4), modulation order, and SNR range.
-- Specify channel parameters: Number of paths, coherence time, Doppler shift, and path loss models.
-- Include polarization options and array orientation for diverse scenarios.
+### Dataset Generation Workflow
 
-### Validation
-- Check tensor shapes, dimensions, and integrity of generated datasets.
-- Ensure no negative or invalid values in critical parameters (e.g., FSPL, SNR).
+#### Input Parameters
+- **MIMO Configuration**:
+  - Define the number of transmit (`num_tx`) and receive antennas (`num_rx`) (e.g., 4x4 MIMO).
+  - Specify the number of streams (`num_streams`) and element spacing (`element_spacing`) for antenna arrays.
+  - Configure carrier frequency (`carrier_frequency`), ensuring it falls within realistic ranges (e.g., 3.5 GHz).
 
-### Output
-- Dataset files saved in `.h5` format.
-- Metadata embedded for clarity and reproducibility.
+- **Resource Grid Setup**:
+  - Number of subcarriers (`num_subcarriers`) and OFDM symbols (`num_ofdm_symbols`) per frame.
+  - Subcarrier spacing (`subcarrier_spacing`) based on 5G NR numerology.
+
+- **Channel Parameters**:
+  - Number of paths (`num_paths`) for multipath modeling.
+  - Signal-to-Noise Ratio (`snr_range`) for varying environmental conditions.
+  - Doppler shift and coherence time for realistic channel dynamics.
+  - Path loss models (`path_loss_scenarios`) such as Free Space Path Loss (FSPL) or urban scenarios (UMi, UMa).
+
+- **Modulation and Noise**:
+  - Choose modulation schemes (`modulation_schemes`) from options like QPSK, 16QAM, or 64QAM.
+  - Configure noise floor (`noise_floor`) for accurate signal modeling.
+
+#### Validation
+- **Tensor Shapes and Dimensions**:
+  - Validate tensor shapes to ensure compatibility with the configured MIMO system (e.g., antenna arrays, streams, and channel responses).
+  - Automatically log and resolve shape mismatches during generation.
+
+- **Critical Parameter Integrity**:
+  - Ensure no negative or invalid values in critical parameters such as FSPL, SNR, and path loss.
+  - Include boundary checks to validate input ranges (`assert` statements for constraints like SNR ≥ 0).
+
+- **Reproducibility**:
+  - Set a fixed random seed (`random_seed`) for consistent and reproducible dataset generation.
+  - Log seed details in the metadata for reference.
+
+#### Output
+- **Dataset Files**:
+  - Save generated datasets in `.h5` format, optimized for storage and quick access.
+  - Include metadata in each file detailing MIMO configurations, channel parameters, and generation settings.
+
+- **Metadata**:
+  - Comprehensive metadata to document input parameters, validation results, and random seed for reproducibility.
+
+#### Example Configuration in `system_parameters.py`
+Below is an example configuration snippet:
+```python
+from system_parameters import SystemParameters
+
+# Example configuration
+config = SystemParameters(
+    num_tx=4,
+    num_rx=4,
+    carrier_frequency=3.5e9,
+    num_subcarriers=64,
+    num_ofdm_symbols=14,
+    snr_range=(0.0, 30.0),
+    modulation_schemes=['QPSK', '16QAM', '64QAM'],
+    path_loss_scenarios=['fspl'],
+    random_seed=42
+)
+
+print(config.get_config_dict())
+
 
 ##  Use Case
 - Train reinforcement learning models (e.g., **Soft Actor-Critic**) for optimizing beamforming in adaptive MIMO systems.
