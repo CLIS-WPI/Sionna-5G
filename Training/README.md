@@ -1,70 +1,129 @@
-# Purpose of Training and Expected Results
+# MIMO Dataset Generator
 
-This project focuses on developing a Reinforcement Learning (RL)-based model using the **Soft Actor-Critic (SAC)** algorithm to optimize beamforming decisions in a **Multiple-Input Multiple-Output (MIMO)** communication system. The model is trained on a dataset generated using **Sionna**, a simulation library for wireless communication systems, and a custom **Dataset Generator**. 
+## Overview
+The **MIMO Dataset Generator** is a specialized tool designed to create datasets for training and evaluating AI models in **MIMO (Multiple-Input Multiple-Output)** communication systems. Leveraging the **Sionna library by NVIDIA**, this generator ensures realistic channel modeling, accurate path loss computations, and reliable inputs for reinforcement learning and optimization tasks in wireless communication research.
 
-The dataset includes key information such as:
-- **Channel States**: Representing the environment.
-- **Actions**: Beamforming configurations.
-- **Rewards**: Performance metrics such as spectral efficiency, throughput, and SINR.
+## Goals
+- Generate datasets tailored for **explainable AI-driven beamforming optimization** in MIMO systems.
+- Simplify dataset creation by focusing on essential components, ensuring practicality and ease of use.
+- Produce high-quality datasets that balance computational efficiency with accurate training inputs.
+- Facilitate integration into reinforcement learning pipelines with standardized dataset formats.
 
-The goal of this training is to maximize the efficiency and reliability of wireless communication in a **static MIMO environment** by dynamically selecting the best beamforming parameters. 
+## Features
+### Configurable MIMO Setup
+- Flexible configurations (e.g., 4x4 MIMO).
+- Support for **Uniform Linear Array (ULA)** and realistic antenna parameters (e.g., gain, spacing, orientation).
 
-## Key Performance Indicators (KPIs)
+### Channel and Path Loss Modeling
+- Incorporates realistic channel models (e.g., **Rayleigh block fading**).
+- The path loss model used in this study is Free Space Path Loss (FSPL), chosen for its simplicity and suitability for static, line-of-sight scenarios. This choice allows for a focused evaluation of beamforming optimization. Future work may explore more complex models like Urban Micro (UMi) or Urban Macro (UMa) for extended scenarios.
+- Includes **SNR customization** (0 to 30 dB) for varied environmental conditions.
 
-The success of the training process and model performance is evaluated using the following KPIs:
+### Robust Dataset Generation
+- Outputs channel realizations with critical parameters like delay spread, coherence time, and Doppler shift.
+- Generates large-scale datasets with metadata for easy analysis and validation.
 
-1. **Spectral Efficiency (bits/s/Hz)**:
-   - Measures the efficient utilization of the available bandwidth.
-   - A higher spectral efficiency indicates optimal resource usage.
+### Validation
+- **Tensor Shapes and Dimensions**:
+  - Validate that tensor shapes and dimensions align with the specified MIMO configurations (e.g., antenna numbers, subcarriers, and channel paths).
+  - Include assertions in the code to automatically check and log mismatches during dataset generation.
 
-2. **Throughput (Mbps)**:
-   - Represents the actual data transfer rate achieved by the system.
-   - The model is trained to maximize throughput under varying channel conditions.
+- **Critical Parameter Validation**:
+  - Ensure all critical parameters, such as **FSPL**, **SNR**, and **path loss**, are within valid and realistic ranges.
+  - Apply boundary checks during computation to prevent negative or invalid values (e.g., `assert FSPL >= 0` or `0 <= SNR <= 30 dB`).
 
-3. **Signal-to-Interference-Plus-Noise Ratio (SINR) (dB)**:
-   - Reflects the quality of the communication signal compared to interference and noise.
-   - Higher SINR values ensure better communication quality.
+- **Integrity Checks**:
+  - Verify the dataset for inconsistencies, such as missing or corrupted entries.
+  - Log warnings or errors if any anomalies are detected, and discard invalid samples to maintain dataset reliability.
 
-4. **Average Reward**:
-   - Tracks the mean reward obtained by the RL agent per training episode.
-   - Serves as a direct measure of the model’s ability to optimize the reward structure.
+- **Reproducibility**:
+  - Set and document a fixed random seed (e.g., `np.random.seed(seed_value)`) to ensure consistent and reproducible dataset generation across runs.
 
-5. **Policy Entropy**:
-   - Monitors the exploration behavior of the RL agent during training.
-   - High entropy ensures diverse strategies are explored, contributing to robust performance.
+- **Final Verification**:
+  - Conduct a small-scale test run with a subset of configurations to confirm that the dataset meets expectations before generating the full dataset.
 
-6. **Validation Average Reward**:
-   - Evaluates the model’s generalization ability using a validation dataset.
-   - Ensures the model is not overfitting and performs well on unseen data.
 
-## Expected Results
+### Efficient Output Format
+- Saves datasets in `.h5` format for efficient storage and integration into AI workflows.
+- Metadata includes MIMO configurations, channel parameters, and dataset size.
 
-At the conclusion of the training process, the RL agent is expected to:
-1. **Learn Optimal Beamforming Policies**: Dynamically select beamforming parameters that maximize spectral efficiency and throughput for different channel conditions.
-2. **Enhance Communication Performance**: Demonstrate improved performance compared to traditional beamforming methods like fixed or random strategies.
-3. **Converge on Key Metrics**: Show stability in metrics such as average reward, spectral efficiency, and SINR.
-4. **Generalize Across Scenarios**: Maintain strong performance on unseen validation data, showcasing robustness and adaptability.
+## Scope
+The **MIMO Dataset Generator** is focused solely on **dataset generation** for reinforcement learning and related tasks. Advanced metrics calculation, secondary utilities, and extended validation steps are deliberately excluded to maintain simplicity and practicality.
 
-## Features of the Training Pipeline
+## Dataset Generation Workflow
 
-1. **Dataset**:
-   - The dataset used for training is generated using the **Sionna** library and includes 2.8 GB of data representing static MIMO environments.
-   - Invalid samples (e.g., with FSPL < 20 dB) are filtered out during preprocessing to maintain data quality.
+#### Input Parameters
+- **MIMO Configuration**:
+  - Define the number of transmit (`num_tx`) and receive antennas (`num_rx`) (e.g., 4x4 MIMO).
+  - Specify the number of streams (`num_streams`) and element spacing (`element_spacing`) for antenna arrays.
+  - Configure carrier frequency (`carrier_frequency`), ensuring it falls within realistic ranges (e.g., 3.5 GHz).
 
-2. **Validation**:
-   - The dataset is split into **training** (80%) and **validation** (20%) sets to evaluate the model’s ability to generalize beyond the training data.
+- **Resource Grid Setup**:
+  - Number of subcarriers (`num_subcarriers`) and OFDM symbols (`num_ofdm_symbols`) per frame.
+  - Subcarrier spacing (`subcarrier_spacing`) based on 5G NR numerology.
 
-3. **Logging and Monitoring**:
-   - Training metrics such as actor loss, critic loss, average reward, and policy entropy are logged using TensorBoard.
-   - Validation performance is checked periodically (every 5000 episodes) to ensure generalization.
+- **Channel Parameters**:
+  - Number of paths (`num_paths`) for multipath modeling.
+  - Signal-to-Noise Ratio (`snr_range`) for varying environmental conditions.
+  - Doppler shift and coherence time for realistic channel dynamics.
+  - Path loss models (`path_loss_scenarios`) such as Free Space Path Loss (FSPL) or urban scenarios (UMi, UMa).
 
-4. **Scalability**:
-   - Designed to handle large-scale datasets and leverage **GPU acceleration (2* H100 GPU)** for efficient training.
-   - Mixed precision is enabled for better performance on supported GPUs.
+- **Modulation and Noise**:
+  - Choose modulation schemes (`modulation_schemes`) from options like QPSK, 16QAM, or 64QAM.
+  - Configure noise floor (`noise_floor`) for accurate signal modeling.
 
-5. **Model Saving**:
-   - The model checkpoints are saved periodically during training to allow for resumption and further fine-tuning.
+#### Validation
+- **Tensor Shapes and Dimensions**:
+  - Validate tensor shapes to ensure compatibility with the configured MIMO system (e.g., antenna arrays, streams, and channel responses).
+  - Automatically log and resolve shape mismatches during generation.
 
-## Why This Project Matters
+- **Critical Parameter Integrity**:
+  - Ensure no negative or invalid values in critical parameters such as FSPL, SNR, and path loss.
+  - Include boundary checks to validate input ranges (`assert` statements for constraints like SNR ≥ 0).
 
-This project provides a robust framework for integrating **Reinforcement Learning** into 5G ireless communication systems. By optimizing beamforming decisions, the trained model offers a practical solution to improve network performance, reliability, and resource utilization in real-world wireless communication scenarios.
+- **Reproducibility**:
+  - Set a fixed random seed (`random_seed`) for consistent and reproducible dataset generation.
+  - Log seed details in the metadata for reference.
+
+#### Output
+- **Dataset Files**:
+  - Save generated datasets in `.h5` format, optimized for storage and quick access.
+  - Include metadata in each file detailing MIMO configurations, channel parameters, and generation settings.
+
+- **Metadata**:
+  - Comprehensive metadata to document input parameters, validation results, and random seed for reproducibility.
+  - 
+####  Use Case
+- Train reinforcement learning models (e.g., **Soft Actor-Critic**) for optimizing beamforming in adaptive MIMO systems.
+- Use generated datasets to evaluate performance under static user scenarios, focusing on **spectral efficiency**, **SINR**, and **throughput**.
+
+#### Requirements
+- **Python**: 3.8–3.11
+- **Operating System**: Ubuntu 22.04 (recommended)
+- **Libraries**:
+  - TensorFlow (tested with TensorFlow 2.12)
+  - Numpy
+  - h5py
+  - **Sionna library by NVIDIA**
+
+#### Example Configuration in `system_parameters.py`
+Below is an example configuration snippet:
+```python
+from system_parameters import SystemParameters
+
+# Example configuration
+config = SystemParameters(
+    num_tx=4,
+    num_rx=4,
+    carrier_frequency=3.5e9,
+    num_subcarriers=64,
+    num_ofdm_symbols=14,
+    snr_range=(0.0, 30.0),
+    modulation_schemes=['QPSK', '16QAM', '64QAM'],
+    path_loss_scenarios=['fspl'],
+    random_seed=42
+)
+
+print(config.get_config_dict())
+
+

@@ -12,3 +12,4 @@ __pycache__/
 *.h5
 *.log
 *.xlsx  # Ignore all Excel files
+.codegpt
