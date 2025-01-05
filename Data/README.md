@@ -41,8 +41,3 @@ This tool is focused solely on **dataset generation** for training reinforcement
   - h5py
   - **Sionna library from NVIDIA**
 
-## Installation
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/mimo-dataset-generator.git
-   cd mimo-dataset-generator
