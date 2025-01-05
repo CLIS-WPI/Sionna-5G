@@ -92,6 +92,19 @@ The **MIMO Dataset Generator** is focused solely on **dataset generation** for r
 
 - **Metadata**:
   - Comprehensive metadata to document input parameters, validation results, and random seed for reproducibility.
+  - 
+####  Use Case
+- Train reinforcement learning models (e.g., **Soft Actor-Critic**) for optimizing beamforming in adaptive MIMO systems.
+- Use generated datasets to evaluate performance under static user scenarios, focusing on **spectral efficiency**, **SINR**, and **throughput**.
+
+#### Requirements
+- **Python**: 3.8–3.11
+- **Operating System**: Ubuntu 22.04 (recommended)
+- **Libraries**:
+  - TensorFlow (tested with TensorFlow 2.12)
+  - Numpy
+  - h5py
+  - **Sionna library by NVIDIA**
 
 #### Example Configuration in `system_parameters.py`
 Below is an example configuration snippet:
@@ -113,16 +126,4 @@ config = SystemParameters(
 
 print(config.get_config_dict())
 
-####  Use Case
-- Train reinforcement learning models (e.g., **Soft Actor-Critic**) for optimizing beamforming in adaptive MIMO systems.
-- Use generated datasets to evaluate performance under static user scenarios, focusing on **spectral efficiency**, **SINR**, and **throughput**.
-
-#### Requirements
-- **Python**: 3.8–3.11
-- **Operating System**: Ubuntu 22.04 (recommended)
-- **Libraries**:
-  - TensorFlow (tested with TensorFlow 2.12)
-  - Numpy
-  - h5py
-  - **Sionna library by NVIDIA**
 
