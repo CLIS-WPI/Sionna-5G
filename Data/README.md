@@ -51,7 +51,6 @@ The **MIMO Dataset Generator** is a specialized tool designed to create datasets
 The **MIMO Dataset Generator** is focused solely on **dataset generation** for reinforcement learning and related tasks. Advanced metrics calculation, secondary utilities, and extended validation steps are deliberately excluded to maintain simplicity and practicality.
 
 ## Dataset Generation Workflow
-### Dataset Generation Workflow
 
 #### Input Parameters
 - **MIMO Configuration**:
