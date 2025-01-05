@@ -49,7 +49,7 @@ The **MIMO Dataset Generator** is focused solely on **dataset generation** for r
 - Dataset files saved in `.h5` format.
 - Metadata embedded for clarity and reproducibility.
 
-## Example Use Case
+##  Use Case
 - Train reinforcement learning models (e.g., **Soft Actor-Critic**) for optimizing beamforming in adaptive MIMO systems.
 - Use generated datasets to evaluate performance under static user scenarios, focusing on **spectral efficiency**, **SINR**, and **throughput**.
 
