@@ -1,43 +1,63 @@
 # MIMO Dataset Generator
 
 ## Overview
-The **MIMO Dataset Generator** this part is designed to create datasets tailored for training and evaluating AI models in **MIMO (Multiple-Input Multiple-Output)** communication systems. Built with the **Sionna library from NVIDIA**, this tool ensures realistic channel modeling and accurate path loss calculations, providing reliable input for reinforcement learning and optimization in wireless communication research.
+The **MIMO Dataset Generator** is a specialized tool designed to create datasets for training and evaluating AI models in **MIMO (Multiple-Input Multiple-Output)** communication systems. Leveraging the **Sionna library by NVIDIA**, this generator ensures realistic channel modeling, accurate path loss computations, and reliable inputs for reinforcement learning and optimization tasks in wireless communication research.
 
 ## Goals
-- Provide datasets that support explainable AI-driven optimization in beamforming for MIMO systems.
-- Simplify dataset generation by focusing on essential components without overcomplicating the implementation.
-- Maintain high-quality datasets for efficient and accurate training while ensuring ease of integration into the broader training pipeline.
+- Generate datasets tailored for **explainable AI-driven beamforming optimization** in MIMO systems.
+- Simplify dataset creation by focusing on essential components, ensuring practicality and ease of use.
+- Produce high-quality datasets that balance computational efficiency with accurate training inputs.
+- Facilitate integration into reinforcement learning pipelines with standardized dataset formats.
 
 ## Features
-- **Configurable MIMO Setup**: Supports flexible configurations (e.g., 4x4 MIMO) with realistic antenna and channel models.
-- **Path Loss Modeling**: Implements path loss calculations aligned with basic urban scenarios (e.g., Free Space Path Loss (FSPL), UMi, UMa) using the **Sionna library**.
-- **Realistic Channel Responses**: Generates datasets with channel realizations based on Rayleigh block fading and defined SNR ranges.
-- **Error and Integrity Validation**: Ensures dataset reliability through dimension checks, tensor validations, and no negative values for key parameters.
-- **Reproducibility**: Supports fixed random seeds for consistent dataset generation.
+### Configurable MIMO Setup
+- Flexible configurations (e.g., 4x4 MIMO).
+- Support for **Uniform Linear Array (ULA)** and realistic antenna parameters (e.g., gain, spacing, orientation).
+
+### Channel and Path Loss Modeling
+- Incorporates realistic channel models (e.g., **Rayleigh block fading**).
+- Supports path loss calculations for **Free Space Path Loss (FSPL)**, **Urban Micro (UMi)**, and **Urban Macro (UMa)** scenarios.
+- Includes **SNR customization** (0 to 30 dB) for varied environmental conditions.
+
+### Robust Dataset Generation
+- Outputs channel realizations with critical parameters like delay spread, coherence time, and Doppler shift.
+- Generates large-scale datasets with metadata for easy analysis and validation.
+
+### Validation and Reproducibility
+- Ensures tensor shapes and dimensions match the specified MIMO configurations.
+- Validates integrity to prevent invalid entries (e.g., negative SNR values).
+- **Fixed random seed support** for reproducible datasets.
+
+### Efficient Output Format
+- Saves datasets in `.h5` format for efficient storage and integration into AI workflows.
+- Metadata includes MIMO configurations, channel parameters, and dataset size.
 
 ## Scope
-This tool is focused solely on **dataset generation** for training reinforcement learning models. Advanced metrics calculation, secondary utilities, and extended verification steps are excluded to avoid over-engineering. The generated dataset will serve as a foundation for training models with optimal quality and simplicity.
+The **MIMO Dataset Generator** is focused solely on **dataset generation** for reinforcement learning and related tasks. Advanced metrics calculation, secondary utilities, and extended validation steps are deliberately excluded to maintain simplicity and practicality.
 
-## Dataset Generation Steps
-1. **Input Parameters**:
-   - Define MIMO setup: Antenna configurations, modulation order, and SNR range.
-   - Specify path loss model: Basic urban scenarios or FSPL.
-   - Configure channel parameters: Number of paths, coherence time, and Doppler shift.
+## Dataset Generation Workflow
+### Input Parameters
+- Configure MIMO setup: Define number of antennas (e.g., 4x4), modulation order, and SNR range.
+- Specify channel parameters: Number of paths, coherence time, Doppler shift, and path loss models.
+- Include polarization options and array orientation for diverse scenarios.
 
-2. **Validation**:
-   - Ensure tensor shapes and dimensions match expected MIMO configurations.
-   - Prevent negative or invalid values in parameters like FSPL and SNR.
+### Validation
+- Check tensor shapes, dimensions, and integrity of generated datasets.
+- Ensure no negative or invalid values in critical parameters (e.g., FSPL, SNR).
 
-3. **Output**:
-   - Generate dataset files in `.h5` format.
-   - Include metadata for MIMO configuration, channel parameters, and dataset size.
+### Output
+- Dataset files saved in `.h5` format.
+- Metadata embedded for clarity and reproducibility.
+
+## Example Use Case
+- Train reinforcement learning models (e.g., **Soft Actor-Critic**) for optimizing beamforming in adaptive MIMO systems.
+- Use generated datasets to evaluate performance under static user scenarios, focusing on **spectral efficiency**, **SINR**, and **throughput**.
 
 ## Requirements
-- Python 3.8–3.11
-- Recommended OS: Ubuntu 22.04
-- Libraries:
+- **Python**: 3.8–3.11
+- **Operating System**: Ubuntu 22.04 (recommended)
+- **Libraries**:
   - TensorFlow (tested with TensorFlow 2.12)
   - Numpy
   - h5py
-  - **Sionna library from NVIDIA**
-
+  - **Sionna library by NVIDIA**
