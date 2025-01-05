@@ -23,10 +23,25 @@ The **MIMO Dataset Generator** is a specialized tool designed to create datasets
 - Outputs channel realizations with critical parameters like delay spread, coherence time, and Doppler shift.
 - Generates large-scale datasets with metadata for easy analysis and validation.
 
-### Validation and Reproducibility
-- Ensures tensor shapes and dimensions match the specified MIMO configurations.
-- Validates integrity to prevent invalid entries (e.g., negative SNR values).
-- **Fixed random seed support** for reproducible datasets.
+### Validation
+- **Tensor Shapes and Dimensions**:
+  - Validate that tensor shapes and dimensions align with the specified MIMO configurations (e.g., antenna numbers, subcarriers, and channel paths).
+  - Include assertions in the code to automatically check and log mismatches during dataset generation.
+
+- **Critical Parameter Validation**:
+  - Ensure all critical parameters, such as **FSPL**, **SNR**, and **path loss**, are within valid and realistic ranges.
+  - Apply boundary checks during computation to prevent negative or invalid values (e.g., `assert FSPL >= 0` or `0 <= SNR <= 30 dB`).
+
+- **Integrity Checks**:
+  - Verify the dataset for inconsistencies, such as missing or corrupted entries.
+  - Log warnings or errors if any anomalies are detected, and discard invalid samples to maintain dataset reliability.
+
+- **Reproducibility**:
+  - Set and document a fixed random seed (e.g., `np.random.seed(seed_value)`) to ensure consistent and reproducible dataset generation across runs.
+
+- **Final Verification**:
+  - Conduct a small-scale test run with a subset of configurations to confirm that the dataset meets expectations before generating the full dataset.
+
 
 ### Efficient Output Format
 - Saves datasets in `.h5` format for efficient storage and integration into AI workflows.
