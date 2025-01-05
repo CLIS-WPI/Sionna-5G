@@ -113,12 +113,11 @@ config = SystemParameters(
 
 print(config.get_config_dict())
 
-
-##  Use Case
+###  Use Case
 - Train reinforcement learning models (e.g., **Soft Actor-Critic**) for optimizing beamforming in adaptive MIMO systems.
 - Use generated datasets to evaluate performance under static user scenarios, focusing on **spectral efficiency**, **SINR**, and **throughput**.
 
-## Requirements
+### Requirements
 - **Python**: 3.8–3.11
 - **Operating System**: Ubuntu 22.04 (recommended)
 - **Libraries**:
@@ -126,3 +125,4 @@ print(config.get_config_dict())
   - Numpy
   - h5py
   - **Sionna library by NVIDIA**
+
