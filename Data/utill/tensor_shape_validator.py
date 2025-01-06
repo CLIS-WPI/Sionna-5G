@@ -3,7 +3,7 @@
 # Provides robust shape checking, broadcasting, and normalization for complex tensors
 # Ensures tensor compatibility and provides detailed error reporting for machine learning workflows
 
-# Add these imports
+import tensorflow as tf
 import sionna
 from sionna.mimo import StreamManagement
 from typing import Dict, List, Union, Any, Optional, Tuple
