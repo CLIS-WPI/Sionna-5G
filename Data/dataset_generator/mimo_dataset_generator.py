@@ -78,7 +78,7 @@ class MIMODatasetGenerator:
             # Setup antenna arrays
             self.tx_array = AntennaArray(
                 polarization="single",        
-                polarization_type="V",        # Changed to "V" for vertical polarization
+                polarization_type="V",        
                 antenna_pattern="omni",       
                 num_rows=1,                   
                 num_cols=self.system_params.num_tx_antennas,
@@ -88,7 +88,7 @@ class MIMODatasetGenerator:
             
             self.rx_array = AntennaArray(
                 polarization="single",        
-                polarization_type="V",        # Changed to "V" for vertical polarization
+                polarization_type="V",        
                 antenna_pattern="omni",       
                 num_rows=1,                   
                 num_cols=self.system_params.num_rx_antennas,
@@ -96,17 +96,17 @@ class MIMODatasetGenerator:
                 horizontal_spacing=self.system_params.element_spacing
             )
 
-            # Setup channel model - removed num_time_steps parameter
+            # Setup channel model - using positional arguments
             if self.system_params.channel_model.lower() == "rayleigh":
                 self.channel_model = sn.channel.RayleighBlockFading(
-                    num_rx=self.system_params.num_rx_antennas,
-                    num_tx=self.system_params.num_tx_antennas
+                    self.system_params.num_rx_antennas,  # First positional argument: num_rx_ant
+                    self.system_params.num_tx_antennas   # Second positional argument: num_tx_ant
                 )
             else:
                 raise ValueError(f"Unsupported channel model: {self.system_params.channel_model}")
-                
+                    
             self.logger.info("Sionna components initialized successfully")
-            
+                
         except Exception as e:
             self.logger.error(f"Failed to setup Sionna components: {str(e)}")
             raise
