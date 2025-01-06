@@ -12,7 +12,6 @@ import h5py
 import tensorflow as tf
 import numpy as np
 import random
-from core.path_loss_model import PathLossManager
 
 def configure_gpu_environment():
     """Configure GPU environment with memory growth and mixed precision."""
@@ -50,8 +49,12 @@ def parse_arguments():
                         help="Number of transmit antennas (default: 4)")
     parser.add_argument('--rx-antennas', type=int, default=4,
                         help="Number of receive antennas (default: 4)")
-    parser.add_argument('--batch-size', type=int, default=None,
-                        help="Batch size for dataset generation")
+    parser.add_argument('--batch-size', type=int, default=1000,
+                        help="Batch size for dataset generation (default: 1000)")
+    parser.add_argument('--carrier-freq', type=float, default=3.5e9,
+                        help="Carrier frequency in Hz (default: 3.5GHz)")
+    parser.add_argument('--num-streams', type=int, default=4,
+                        help="Number of data streams (default: 4)")
 
     return parser.parse_args()
 
@@ -82,12 +85,13 @@ def main():
 
     # Configure system parameters
     system_params = SystemParameters(
-        num_tx=args.tx_antennas,
-        num_rx=args.rx_antennas,
-        total_samples=args.samples
+        total_samples=args.samples,
+        batch_size=args.batch_size,
+        num_tx_antennas=args.tx_antennas,
+        num_rx_antennas=args.rx_antennas,
+        num_streams=args.num_streams,
+        carrier_frequency=args.carrier_freq
     )
-    if args.batch_size:
-        system_params.batch_size = args.batch_size
 
     # Generate dataset
     output_path = generate_output_path(args.output)
@@ -97,15 +101,15 @@ def main():
         logger.info("Initializing MIMO Dataset Generator...")
         generator = MIMODatasetGenerator(
             system_params=system_params,
-            logger=logger,
-            max_batch_size=system_params.batch_size
+            logger=logger
         )
 
         logger.info(f"Generating dataset with {system_params.total_samples} samples...")
-        generator.generate_dataset(
-            num_samples=system_params.total_samples,
-            save_path=output_path
-        )
+        success = generator.generate_dataset(save_path=output_path)
+        
+        if not success:
+            logger.error("Dataset generation failed")
+            sys.exit(1)
 
         logger.info(f"Dataset saved to {output_path}")
 
