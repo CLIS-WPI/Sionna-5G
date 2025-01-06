@@ -14,7 +14,7 @@ from typing import Dict, List, Any, Optional
 from utill.logging_config import LoggerManager
 from config.system_parameters import SystemParameters
 from utill.tensor_shape_validator import validate_mimo_tensor_shapes
-
+import logging
 class MetricsCalculator:
     """Metrics calculator for MIMO dataset generation"""
     
@@ -55,6 +55,11 @@ class MetricsCalculator:
             logging.error(f"Tensor shape assertion failed: {str(e)}")
             return False
         
+    def validate_tensor_types(self, channel_response: tf.Tensor) -> None:
+        """Validate tensor types before computation"""
+        if channel_response.dtype != tf.complex64:
+            raise TypeError(f"Channel response must be complex64, got {channel_response.dtype}")
+        
     def calculate_mimo_metrics(
         self,
         channel_response: tf.Tensor,
@@ -70,6 +75,12 @@ class MetricsCalculator:
         Returns:
             Dictionary containing calculated metrics
         """
+        self.validate_tensor_types(channel_response)
+        # Ensure float32 for SNR calculations
+        snr_db = tf.cast(snr_db, tf.float32)
+        # Calculate channel matrix properties
+        H = tf.cast(channel_response, tf.complex64)
+        H_H = tf.transpose(H, perm=[0, 2, 1], conjugate=True)
         try:
             # Validate input shapes
             batch_size = tf.shape(channel_response)[0]
