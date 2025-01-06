@@ -59,6 +59,19 @@ class MetricsCalculator:
         }
         return modulation_bits.get(mod_scheme.upper(), 2)  # Default to QPSK if not found
 
+    def calculate_mimo_performance_metrics(
+        self,
+        channel_response: tf.Tensor,
+        tx_symbols: tf.Tensor,
+        rx_symbols: tf.Tensor,
+        snr_db: tf.Tensor
+    ) -> Dict[str, tf.Tensor]:
+        """
+        Calculate MIMO-specific performance metrics
+        """
+        # Implementation using Sionna's channel models
+        pass
+
     def set_current_modulation(self, mod_scheme: str) -> None:
         """
         Set the current modulation scheme

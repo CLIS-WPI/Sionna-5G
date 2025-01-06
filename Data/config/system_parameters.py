@@ -40,14 +40,14 @@ class SystemParameters:
     samples_per_modulation: int = None       # Samples per modulation scheme
 
     # Antenna Configuration
-    num_tx: int = 4                          # Number of transmit antennas
-    num_rx: int = 4                          # Number of receive antennas
+    num_tx_antennas: int = 4                 # Number of transmit antennas
+    num_rx_antennas: int = 4                          # Number of receive antennas
     num_streams: int = 4                     # Number of data streams
     element_spacing: float = 0.5             # Antenna element spacing (wavelengths)
-
+    channel_model: str = "rayleigh"          # Channel model type
     # Frequency Parameters
     carrier_frequency: float = 3.5e9         # Carrier frequency in Hz
-
+    polarization: str = "single"             # Antenna polarization type
     # OFDM Parameters
     num_subcarriers: int = 64                # Number of subcarriers
     num_ofdm_symbols: int = 14               # OFDM symbols per slot
