@@ -77,14 +77,20 @@ class MIMODatasetGenerator:
         try:
             # Setup antenna arrays
             self.tx_array = AntennaArray(
-                "single",  # First positional argument for polarization
+                polarization="single",        # First positional argument
+                polarization_type="single",   # Second positional argument
+                antenna_pattern="omni",       # Third positional argument
+                num_rows=1,                   # Single row for ULA
                 num_cols=self.system_params.num_tx_antennas,
                 carrier_frequency=self.system_params.carrier_frequency,
                 horizontal_spacing=self.system_params.element_spacing
             )
             
             self.rx_array = AntennaArray(
-                "single",  # First positional argument for polarization
+                polarization="single",        # First positional argument
+                polarization_type="single",   # Second positional argument
+                antenna_pattern="omni",       # Third positional argument
+                num_rows=1,                   # Single row for ULA
                 num_cols=self.system_params.num_rx_antennas,
                 carrier_frequency=self.system_params.carrier_frequency,
                 horizontal_spacing=self.system_params.element_spacing
