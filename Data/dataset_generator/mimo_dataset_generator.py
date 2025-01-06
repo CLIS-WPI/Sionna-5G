@@ -79,31 +79,12 @@ class MIMODatasetGenerator:
             self.logger.debug(f"Min SNR: {self.system_params.min_snr_db}")
             self.logger.debug(f"Max SNR: {self.system_params.max_snr_db}")
             
-            # Setup antenna arrays
-            self.tx_array = AntennaArray(
-                polarization="single",        
-                polarization_type="V",        
-                antenna_pattern="omni",       
-                num_rows=1,                   
-                num_cols=self.system_params.num_tx_antennas,
-                carrier_frequency=self.system_params.carrier_frequency,
-                horizontal_spacing=self.system_params.element_spacing
-            )
-            
-            self.rx_array = AntennaArray(
-                polarization="single",        
-                polarization_type="V",        
-                antenna_pattern="omni",       
-                num_rows=1,                   
-                num_cols=self.system_params.num_rx_antennas,
-                carrier_frequency=self.system_params.carrier_frequency,
-                horizontal_spacing=self.system_params.element_spacing
-            )
-
-            # Initialize Rayleigh channel model with correct parameter names
+            # Initialize Rayleigh channel model with ALL required parameters
             self.channel_model = sn.channel.RayleighBlockFading(
-                num_tx=self.system_params.num_tx_antennas,
-                num_tx_ant=self.system_params.num_tx_antennas,  # This was missing
+                num_rx=1,                                      # Number of receivers
+                num_rx_ant=self.system_params.num_rx_antennas, # Number of receive antennas
+                num_tx=1,                                      # Number of transmitters
+                num_tx_ant=self.system_params.num_tx_antennas, # Number of transmit antennas
                 dtype=tf.complex64
             )
 
