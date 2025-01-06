@@ -167,17 +167,16 @@ class MIMODatasetGenerator:
             raise
 
     def generate_dataset(self, save_path: str = 'dataset/mimo_dataset.h5'):
-        """
-        Generate MIMO dataset with enhanced metrics and validation
+        """Generate MIMO dataset and save to HDF5 file.
         
         Args:
-            save_path (str): Path to save the HDF5 dataset
+            save_path (str): Path where to save the dataset
             
         Returns:
             bool: True if generation successful, False otherwise
         """
         try:
-            # Prepare output directory
+            # Create output directory
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             
             with h5py.File(save_path, 'w') as f:
@@ -191,29 +190,20 @@ class MIMODatasetGenerator:
                 data_group = f.create_group('channel_data')
                 total_samples = self.system_params.total_samples
                 
-                # Create datasets
-                data_group.create_dataset(
-                    'channel_response',
-                    shape=(total_samples, self.system_params.num_rx_antennas, 
-                        self.system_params.num_tx_antennas),
-                    dtype=np.complex64
-                )
-                
-                # Create datasets for metrics
-                metrics_datasets = {
+                # Define datasets to create
+                datasets = {
+                    'channel_response': (total_samples, self.system_params.num_rx_antennas, 
+                                    self.system_params.num_tx_antennas),
+                    'path_loss': (total_samples,),
+                    'sinr': (total_samples,),
                     'spectral_efficiency': (total_samples,),
-                    'effective_snr': (total_samples,),
-                    'condition_number': (total_samples,),
-                    'eigenvalues': (total_samples, min(self.system_params.num_rx_antennas, 
-                                                    self.system_params.num_tx_antennas))
+                    'distances': (total_samples,)
                 }
                 
-                for metric_name, shape in metrics_datasets.items():
-                    data_group.create_dataset(
-                        metric_name,
-                        shape=shape,
-                        dtype=np.float32
-                    )
+                # Create datasets
+                for name, shape in datasets.items():
+                    dtype = np.complex64 if name == 'channel_response' else np.float32
+                    data_group.create_dataset(name, shape=shape, dtype=dtype)
                 
                 # Generate data in batches
                 self.logger.info(f"Generating dataset with {total_samples} samples")
@@ -222,38 +212,17 @@ class MIMODatasetGenerator:
                     batch_size = min(self.system_params.batch_size, total_samples - i)
                     
                     try:
-                        # Generate channel responses
-                        snr_db = tf.random.uniform(
-                            [batch_size], 
-                            minval=self.system_params.min_snr_db,
-                            maxval=self.system_params.max_snr_db
-                        )
-                        
-                        # Generate channel responses using channel model
-                        channel_response = self.channel_model.generate_channel_samples(
+                        # Generate batch data using our fixed _generate_batch_data method
+                        batch_data = self._generate_batch_data(
                             batch_size=batch_size,
-                            snr_db=snr_db
-                        )['perfect_channel']
-                        
-                        # Calculate metrics
-                        metrics = self.metrics_calculator.calculate_mimo_metrics(
-                            channel_response=channel_response,
-                            snr_db=snr_db
+                            mod_scheme='QPSK'
                         )
                         
-                        # Validate data
-                        is_valid = self._validate_batch_data(channel_response, metrics)
-                        if not is_valid:
-                            continue
-                        
-                        # Store channel response
-                        data_group['channel_response'][i:i+batch_size] = channel_response.numpy()
-                        
-                        # Store metrics
-                        for metric_name, metric_data in metrics.items():
-                            if metric_name in data_group:
-                                data_group[metric_name][i:i+batch_size] = metric_data.numpy()
-                        
+                        # Store the batch data
+                        for key, value in batch_data.items():
+                            if key in data_group:
+                                data_group[key][i:i+batch_size] = value.numpy()
+                                
                     except Exception as batch_error:
                         self.logger.warning(f"Error generating batch {i}: {str(batch_error)}")
                         continue
@@ -264,13 +233,13 @@ class MIMODatasetGenerator:
                 f.attrs['valid_samples'] = i + batch_size
                 
                 self.logger.info(f"Dataset generated successfully: {save_path}")
-
-                # Add integrity check here, after closing the file
+                
+                # Add integrity check
                 checker = MIMODatasetIntegrityChecker(
                     save_path,
                     system_params=self.system_params
                 )
-
+                
                 integrity_report = checker.check_dataset_integrity()
                 if not integrity_report['overall_status']:
                     self.logger.error("Dataset integrity check failed")
@@ -281,7 +250,6 @@ class MIMODatasetGenerator:
         except Exception as e:
             self.logger.error(f"Dataset generation failed: {str(e)}")
             return False
-
     def _validate_batch_data(self, channel_response: tf.Tensor, metrics: Dict[str, tf.Tensor]) -> bool:
         """
         Validate generated batch data
