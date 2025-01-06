@@ -77,31 +77,30 @@ class MIMODatasetGenerator:
         try:
             # Setup antenna arrays
             self.tx_array = AntennaArray(
-                polarization="single",        # First positional argument
-                polarization_type="V",        # Must be 'V' or 'H' for single polarization
-                antenna_pattern="omni",       # Third positional argument
-                num_rows=1,                   # Single row for ULA
+                polarization="single",        
+                polarization_type="V",        # Changed to "V" for vertical polarization
+                antenna_pattern="omni",       
+                num_rows=1,                   
                 num_cols=self.system_params.num_tx_antennas,
                 carrier_frequency=self.system_params.carrier_frequency,
                 horizontal_spacing=self.system_params.element_spacing
             )
             
             self.rx_array = AntennaArray(
-                polarization="single",        # First positional argument
-                polarization_type="V",        # Must be 'V' or 'H' for single polarization
-                antenna_pattern="omni",       # Third positional argument
-                num_rows=1,                   # Single row for ULA
+                polarization="single",        
+                polarization_type="V",        # Changed to "V" for vertical polarization
+                antenna_pattern="omni",       
+                num_rows=1,                   
                 num_cols=self.system_params.num_rx_antennas,
                 carrier_frequency=self.system_params.carrier_frequency,
                 horizontal_spacing=self.system_params.element_spacing
             )
 
-            # Setup channel model
+            # Setup channel model - removed num_time_steps parameter
             if self.system_params.channel_model.lower() == "rayleigh":
                 self.channel_model = sn.channel.RayleighBlockFading(
                     num_rx=self.system_params.num_rx_antennas,
-                    num_tx=self.system_params.num_tx_antennas,
-                    num_time_steps=self.system_params.num_ofdm_symbols
+                    num_tx=self.system_params.num_tx_antennas
                 )
             else:
                 raise ValueError(f"Unsupported channel model: {self.system_params.channel_model}")
