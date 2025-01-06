@@ -96,17 +96,17 @@ class MIMODatasetGenerator:
                 horizontal_spacing=self.system_params.element_spacing
             )
 
-            # Setup channel model - using positional arguments
+            # Setup channel model - using positional arguments as required
             if self.system_params.channel_model.lower() == "rayleigh":
                 self.channel_model = sn.channel.RayleighBlockFading(
-                    self.system_params.num_rx_antennas,  # First positional argument: num_rx_ant
+                    self.system_params.num_tx_antennas,  # First positional argument: num_tx
                     self.system_params.num_tx_antennas   # Second positional argument: num_tx_ant
                 )
             else:
                 raise ValueError(f"Unsupported channel model: {self.system_params.channel_model}")
-                    
-            self.logger.info("Sionna components initialized successfully")
                 
+            self.logger.info("Sionna components initialized successfully")
+            
         except Exception as e:
             self.logger.error(f"Failed to setup Sionna components: {str(e)}")
             raise
