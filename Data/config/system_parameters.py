@@ -101,9 +101,9 @@ class SystemParameters:
         Validate system parameters for consistency and physical plausibility.
         """
         # Validate antenna configuration
-        assert self.num_tx > 0, "Number of transmit antennas must be positive."
-        assert self.num_rx > 0, "Number of receive antennas must be positive."
-        assert 1 <= self.num_streams <= min(self.num_tx, self.num_rx), "Invalid number of streams."
+        assert self.num_tx_antennas > 0, "Number of transmit antennas must be positive."
+        assert self.num_rx_antennas > 0, "Number of receive antennas must be positive."
+        assert 1 <= self.num_streams <= min(self.num_tx_antennas, self.num_rx_antennas), "Invalid number of streams."
 
         # Validate frequency
         assert 1e9 <= self.carrier_frequency <= 6e9, "Carrier frequency must be in the 1-6 GHz range."
