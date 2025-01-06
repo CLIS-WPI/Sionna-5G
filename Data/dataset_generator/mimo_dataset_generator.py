@@ -144,21 +144,29 @@ class MIMODatasetGenerator:
                 num_time_steps=1  # Set to 1 for static channel
             )
             
-            # Reshape channel response to match expected dimensions
-            # Remove extra dimensions and keep only [batch_size, num_rx, num_tx]
+            # Ensure complex64 type and correct shape
+            channel_response = tf.cast(channel_response, tf.complex64)
             channel_response = tf.squeeze(channel_response)  # Remove singleton dimensions
             channel_response = channel_response[:, :self.system_params.num_rx_antennas, 
                                             :self.system_params.num_tx_antennas]
             
             # Apply path loss to channel response
             path_loss_linear = tf.pow(10.0, -path_loss_db/20)
-            path_loss_shaped = tf.reshape(path_loss_linear, [-1, 1, 1])  # Reshape for broadcasting
+            path_loss_shaped = tf.cast(
+                tf.reshape(path_loss_linear, [-1, 1, 1]),  # Reshape for broadcasting
+                tf.complex64
+            )
             channel_response *= path_loss_shaped
             
             # Calculate SINR
             noise_power = tf.pow(10.0, (self.system_params.noise_floor - 30)/10)  # Convert dBm to linear
             channel_power = tf.reduce_mean(tf.abs(channel_response)**2, axis=[-2, -1])
             sinr = 10 * tf.math.log(channel_power / noise_power) / tf.math.log(10.0)
+            
+            # Calculate effective SNR
+            effective_snr = sinr - 10 * tf.math.log(
+                tf.cast(self.system_params.num_tx_antennas, tf.float32)
+            ) / tf.math.log(10.0)
             
             # Calculate spectral efficiency
             spectral_efficiency = tf.math.log(1 + tf.pow(10.0, sinr/10)) / tf.math.log(2.0)
@@ -167,6 +175,7 @@ class MIMODatasetGenerator:
                 'channel_response': channel_response,
                 'path_loss': path_loss_db,
                 'sinr': sinr,
+                'effective_snr': effective_snr,  # Added effective SNR
                 'spectral_efficiency': spectral_efficiency,
                 'distances': distances
             }
