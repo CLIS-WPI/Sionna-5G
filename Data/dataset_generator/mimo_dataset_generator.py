@@ -245,6 +245,18 @@ class MIMODatasetGenerator:
                 f.attrs['valid_samples'] = i + batch_size
                 
                 self.logger.info(f"Dataset generated successfully: {save_path}")
+
+                # Add integrity check here, after closing the file
+                checker = MIMODatasetIntegrityChecker(
+                    save_path,
+                    system_params=self.system_params
+                )
+
+                integrity_report = checker.check_dataset_integrity()
+                if not integrity_report['overall_status']:
+                    self.logger.error("Dataset integrity check failed")
+                    self.logger.error("\n".join(integrity_report['errors']))
+                    return False
                 return True
                 
         except Exception as e:
