@@ -100,11 +100,11 @@ class MIMODatasetGenerator:
                 horizontal_spacing=self.system_params.element_spacing
             )
 
-            # Initialize Rayleigh channel model with complex64 dtype
+            # Initialize Rayleigh channel model with correct parameter names
             self.channel_model = sn.channel.RayleighBlockFading(
-                num_rx=self.system_params.num_rx_antennas,
-                num_tx=self.system_params.num_tx_antennas,
-                dtype=tf.complex64  # Explicitly set dtype to complex64
+                num_rx_ant=self.system_params.num_rx_antennas,  # Changed from num_rx
+                num_tx_ant=self.system_params.num_tx_antennas,  # Changed from num_tx
+                dtype=tf.complex64
             )
 
         except Exception as e:
