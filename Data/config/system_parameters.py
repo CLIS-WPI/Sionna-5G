@@ -74,6 +74,9 @@ class SystemParameters:
     samples_per_modulation: int = None       # Samples per modulation scheme
     random_seed: int = 42                    # Random seed for reproducibility
 
+    channel_dtype: tf.DType = tf.complex64
+    compute_dtype: tf.DType = tf.float32
+
     def __post_init__(self):
         """Validate and initialize dependent parameters"""
         # Calculate samples per modulation if not specified
@@ -91,7 +94,11 @@ class SystemParameters:
         # Validate batch size
         assert self.batch_size <= self.total_samples, \
             "Batch size cannot exceed total samples"
-
+        # Validate dtypes
+        assert self.channel_dtype in [tf.complex64, tf.complex128], \
+            "Channel dtype must be complex64 or complex128"
+        assert self.compute_dtype in [tf.float32, tf.float64], \
+            "Compute dtype must be float32 or float64"
     def __post_init__(self):
         """
         Post-initialization validation and calculations.
