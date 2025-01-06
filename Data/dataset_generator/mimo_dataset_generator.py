@@ -107,48 +107,54 @@ class MIMODatasetGenerator:
             wavelength = 3e8 / self.system_params.carrier_frequency
             path_loss_db = 20 * tf.math.log(4 * np.pi * distances / wavelength) / tf.math.log(10.0)
             
-            # Generate channel response with correct shape handling
+            # Generate channel response with correct shape handling and type
             channel_response = self.channel_model(
                 batch_size=batch_size,
                 num_time_steps=1  # Set to 1 for static channel
             )
             
             # Ensure complex64 type and correct shape
-            channel_response = tf.cast(channel_response, tf.complex64)
+            channel_response = tf.cast(channel_response, tf.complex64)  # Explicit cast to complex64
             channel_response = tf.squeeze(channel_response)  # Remove singleton dimensions
-            channel_response = channel_response[:, :self.system_params.num_rx_antennas, 
-                                            :self.system_params.num_tx_antennas]
             
             # Apply path loss to channel response
             path_loss_linear = tf.pow(10.0, -path_loss_db/20)
             path_loss_shaped = tf.cast(
                 tf.reshape(path_loss_linear, [-1, 1, 1]),  # Reshape for broadcasting
-                tf.complex64
+                tf.complex64  # Explicit cast to complex64
             )
-            channel_response *= path_loss_shaped
+            
+            # Ensure multiplication maintains complex64 type
+            channel_response = tf.cast(channel_response * path_loss_shaped, tf.complex64)
             
             # Calculate SINR
-            noise_power = tf.pow(10.0, (self.system_params.noise_floor - 30)/10)  # Convert dBm to linear
+            noise_power = tf.pow(10.0, (self.system_params.noise_floor - 30)/10)
             channel_power = tf.reduce_mean(tf.abs(channel_response)**2, axis=[-2, -1])
             sinr = 10 * tf.math.log(channel_power / noise_power) / tf.math.log(10.0)
             
-            # Calculate effective SNR
-            effective_snr = sinr - 10 * tf.math.log(
-                tf.cast(self.system_params.num_tx_antennas, tf.float32)
-            ) / tf.math.log(10.0)
+            # Calculate effective SNR and ensure float32 type
+            effective_snr = tf.cast(
+                sinr - 10 * tf.math.log(
+                    tf.cast(self.system_params.num_tx_antennas, tf.float32)
+                ) / tf.math.log(10.0),
+                tf.float32
+            )
             
-            # Calculate spectral efficiency
-            spectral_efficiency = tf.math.log(1 + tf.pow(10.0, sinr/10)) / tf.math.log(2.0)
+            # Calculate spectral efficiency and ensure float32 type
+            spectral_efficiency = tf.cast(
+                tf.math.log(1 + tf.pow(10.0, sinr/10)) / tf.math.log(2.0),
+                tf.float32
+            )
             
             return {
-                'channel_response': channel_response,
-                'path_loss': path_loss_db,
-                'sinr': sinr,
-                'effective_snr': effective_snr,  # Added effective SNR
+                'channel_response': channel_response,  # Should be complex64
+                'path_loss': tf.cast(path_loss_db, tf.float32),
+                'sinr': tf.cast(sinr, tf.float32),
+                'effective_snr': effective_snr,
                 'spectral_efficiency': spectral_efficiency,
-                'distances': distances
+                'distances': tf.cast(distances, tf.float32)
             }
-            
+                
         except Exception as e:
             self.logger.error(f"Batch generation failed: {str(e)}")
             raise
