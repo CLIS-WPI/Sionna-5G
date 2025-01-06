@@ -138,9 +138,11 @@ class MIMODatasetGenerator:
             wavelength = 3e8 / self.system_params.carrier_frequency
             path_loss_db = 20 * tf.math.log(4 * np.pi * distances / wavelength) / tf.math.log(10.0)
             
-            # Generate channel response - directly call the channel model
-            # The RayleighBlockFading object is callable and returns channel response
-            channel_response = self.channel_model()
+            # Generate channel response - properly call the channel model with required arguments
+            channel_response = self.channel_model(
+                batch_size=batch_size,
+                num_time_steps=self.system_params.num_ofdm_symbols  # This should be defined in SystemParameters
+            )
             
             # Apply path loss to channel response
             path_loss_linear = tf.pow(10.0, -path_loss_db/20)
