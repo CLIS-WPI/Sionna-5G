@@ -76,20 +76,20 @@ class MIMODatasetGenerator:
         """Setup Sionna channel models and antenna arrays"""
         try:
             # Setup antenna arrays
-            self.tx_array = AntennaArray(  # Remove sn.channel prefix
-                num_rows=1,
-                num_cols=self.system_params.num_tx_antennas,
-                vertical_spacing=self.system_params.element_spacing,
-                horizontal_spacing=self.system_params.element_spacing,
-                pattern="iso"
+            self.tx_array = AntennaArray(
+            num_rows=1,
+            num_cols=self.system_params.num_tx_antennas,
+            polarization=self.system_params.polarization,  # Add this line
+            carrier_frequency=self.system_params.carrier_frequency,  # Add this line
+            horizontal_spacing=self.system_params.element_spacing
             )
             
-            self.rx_array = AntennaArray(  # Remove sn.channel prefix
-                num_rows=1,
-                num_cols=self.system_params.num_rx_antennas,
-                vertical_spacing=self.system_params.element_spacing,
-                horizontal_spacing=self.system_params.element_spacing,
-                pattern="iso"
+            self.rx_array = AntennaArray(
+            num_rows=1,
+            num_cols=self.system_params.num_rx_antennas,
+            polarization=self.system_params.polarization,
+            carrier_frequency=self.system_params.carrier_frequency,
+            horizontal_spacing=self.system_params.element_spacing
             )
 
             # Setup channel model
