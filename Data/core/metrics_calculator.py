@@ -61,10 +61,10 @@ class MetricsCalculator:
             raise TypeError(f"Channel response must be complex64, got {channel_response.dtype}")
         
     def calculate_mimo_metrics(
-        self,
-        channel_response: tf.Tensor,
-        snr_db: tf.Tensor
-    ) -> Dict[str, tf.Tensor]:
+            self,
+            channel_response: tf.Tensor,
+            snr_db: tf.Tensor
+        ) -> Dict[str, tf.Tensor]:
         """
         Calculate essential MIMO metrics for dataset generation
         
@@ -75,29 +75,22 @@ class MetricsCalculator:
         Returns:
             Dictionary containing calculated metrics
         """
-        self.validate_tensor_types(channel_response)
-        # Ensure float32 for SNR calculations
-        snr_db = tf.cast(snr_db, tf.float32)
-        # Calculate channel matrix properties
-        H = tf.cast(channel_response, tf.complex64)
-        H_H = tf.transpose(H, perm=[0, 2, 1], conjugate=True)
         try:
+            # Type validation and casting
+            self.validate_tensor_types(channel_response)
+            snr_db = tf.cast(snr_db, tf.float32)
+            H = tf.cast(channel_response, tf.complex64)
+            
             # Validate input shapes
-            batch_size = tf.shape(channel_response)[0]
-            expected_shape = [
-                batch_size,
-                self.system_params.num_rx_antennas,
-                self.system_params.num_tx_antennas
-            ]
+            batch_size = tf.shape(H)[0]
             validate_mimo_tensor_shapes(
-                channel_response=channel_response,
+                channel_response=H,
                 num_tx_antennas=self.system_params.num_tx_antennas,
                 num_rx_antennas=self.system_params.num_rx_antennas,
                 batch_size=batch_size
             )
             
             # Calculate channel matrix properties
-            H = channel_response
             H_H = tf.transpose(H, perm=[0, 2, 1], conjugate=True)
             HH = tf.matmul(H, H_H)
             
@@ -111,12 +104,12 @@ class MetricsCalculator:
             
             HH_stable = HH + I
             
-            # Calculate eigenvalues
+            # Calculate eigenvalues with stability
             eigenvalues = tf.abs(tf.linalg.eigvalsh(HH_stable))
             eigenvalues = tf.maximum(eigenvalues, epsilon)
             eigenvalues = eigenvalues / tf.reduce_max(eigenvalues, axis=1, keepdims=True)
             
-            # Process SNR
+            # Process SNR with validation
             snr_db = tf.clip_by_value(
                 snr_db,
                 self.validation_thresholds['sinr']['min'],
@@ -124,7 +117,7 @@ class MetricsCalculator:
             )
             snr_linear = tf.pow(10.0, snr_db/10.0)
             
-            # Calculate spectral efficiency
+            # Calculate spectral efficiency with validation
             spectral_efficiency = tf.reduce_sum(
                 tf.math.log(1.0 + eigenvalues * tf.reshape(snr_linear, [-1, 1])) / tf.math.log(2.0),
                 axis=1
@@ -135,7 +128,7 @@ class MetricsCalculator:
                 self.validation_thresholds['spectral_efficiency']['max']
             )
             
-            # Calculate effective SNR
+            # Calculate effective SNR with validation
             effective_snr = tf.reduce_mean(eigenvalues, axis=1) * snr_linear
             effective_snr = tf.maximum(effective_snr, self.validation_thresholds['signal_power']['min'])
             effective_snr_db = 10.0 * tf.math.log(effective_snr) / tf.math.log(10.0)
@@ -145,22 +138,24 @@ class MetricsCalculator:
                 self.validation_thresholds['effective_snr']['max']
             )
             
-            # Calculate condition number
+            # Calculate condition number with stability
             condition_number = tf.reduce_max(eigenvalues, axis=1) / tf.maximum(
                 tf.reduce_min(eigenvalues, axis=1),
                 epsilon
             )
             
+            # Return metrics dictionary with explicit type casting
             return {
-                'spectral_efficiency': spectral_efficiency,
-                'effective_snr': effective_snr_db,
-                'eigenvalues': eigenvalues,
-                'condition_number': condition_number
+                'spectral_efficiency': tf.cast(spectral_efficiency, tf.float32),
+                'effective_snr': tf.cast(effective_snr_db, tf.float32),
+                'eigenvalues': tf.cast(eigenvalues, tf.float32),
+                'condition_number': tf.cast(condition_number, tf.float32)
             }
-            
+                
         except Exception as e:
             self.logger.error(f"Error in calculate_mimo_metrics: {str(e)}")
             raise
+
 
 def main():
     """Test the metrics calculator"""
