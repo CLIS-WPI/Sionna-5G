@@ -100,10 +100,10 @@ class MIMODatasetGenerator:
                 horizontal_spacing=self.system_params.element_spacing
             )
 
-            # Initialize Rayleigh channel model with correct parameter names
+            # Initialize Rayleigh channel model with positional arguments
             self.channel_model = sn.channel.RayleighBlockFading(
-                num_rx=self.system_params.num_rx_antennas,  # Changed to num_rx
-                num_tx=self.system_params.num_tx_antennas,  # Changed to num_tx
+                self.system_params.num_rx_antennas,  # First positional argument: num_rx
+                self.system_params.num_tx_antennas,  # Second positional argument: num_tx
                 dtype=tf.complex64
             )
 
