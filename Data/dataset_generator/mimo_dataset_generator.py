@@ -40,7 +40,8 @@ from utill.logging_config import LoggerManager
 from core.metrics_calculator import MetricsCalculator
 from config.system_parameters import SystemParameters
 from integrity.dataset_integrity_checker import MIMODatasetIntegrityChecker
-
+from utill.tensor_shape_validator import validate_mimo_tensor_shapes
+from utill.tensor_shape_validator import validate_mimo_metrics
 class MIMODatasetGenerator:
     __version__ = '2.0.0'
 
@@ -287,9 +288,26 @@ class MIMODatasetGenerator:
                 tf.reduce_any(tf.math.is_inf(metric_data)):
                     self.logger.warning(f"Invalid values in metric: {metric_name}")
                     return False
-                    
+                # Validate channel response shape
+            if not validate_mimo_tensor_shapes(
+                channel_response,
+                self.system_params.num_tx_antennas,
+                self.system_params.num_rx_antennas,
+                self.system_params.batch_size
+            ):
+                return False
+        
+            # Validate metrics
+            if not validate_mimo_metrics(
+                metrics,
+                self.system_params.batch_size,
+                self.system_params.num_tx_antennas,
+                self.system_params.num_rx_antennas
+                ):
+                return False
+            
             return True
             
         except Exception as e:
             self.logger.error(f"Validation error: {str(e)}")
-            return False
+        return False

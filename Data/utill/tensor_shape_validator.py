@@ -3,254 +3,166 @@
 # Provides robust shape checking, broadcasting, and normalization for complex tensors
 # Ensures tensor compatibility and provides detailed error reporting for machine learning workflows
 
-import tensorflow as tf
+# Add these imports
+import sionna
+from sionna.mimo import StreamManagement
+from typing import Dict, List, Union, Any, Optional, Tuple
 import logging
-from typing import Dict, List, Union, Any
 
-def assert_tensor_shape(
-    tensor: tf.Tensor, 
-    expected_shape: List[Union[int, None]], 
-    tensor_name: str = 'input_tensor'
-) -> tf.Tensor:
-    """
-    Robust tensor shape validation with detailed error reporting
-    
-    Args:
-        tensor (tf.Tensor): Input tensor to validate
-        expected_shape (List[Union[int, None]]): Expected shape dimensions
-        tensor_name (str, optional): Name of tensor for error reporting
-    
-    Returns:
-        tf.Tensor: Validated input tensor
-    
-    Raises:
-        ValueError: If tensor shape doesn't match expected shape
-    """
-    try:
-        actual_shape = tensor.shape.as_list()
-        
-        # Validate rank (number of dimensions)
-        if len(actual_shape) != len(expected_shape):
-            raise ValueError(
-                f"Rank mismatch for {tensor_name}: "
-                f"Expected {len(expected_shape)} dimensions, "
-                f"Got {len(actual_shape)} dimensions"
-            )
-        
-        # Check each dimension
-        for idx, (expected_dim, actual_dim) in enumerate(zip(expected_shape, actual_shape)):
-            if expected_dim is not None and expected_dim != actual_dim:
-                raise ValueError(
-                    f"Shape mismatch for {tensor_name} at dimension {idx}: "
-                    f"Expected {expected_dim}, Got {actual_dim}"
-                )
-        
-        return tensor
-    
-    except Exception as e:
-        tf.print(f"❌ Shape validation error for {tensor_name}:")
-        tf.print(f"   Actual shape: {tensor.shape}")
-        tf.print(f"   Expected shape: {expected_shape}")
-        tf.print(f"   Error: {str(e)}")
-        raise
-
-def broadcast_tensors(
-    tensor1: tf.Tensor, 
-    tensor2: tf.Tensor
-) -> tuple:
-    """
-    Broadcast two tensors to compatible shapes
-    
-    Args:
-        tensor1 (tf.Tensor): First input tensor
-        tensor2 (tf.Tensor): Second input tensor
-    
-    Returns:
-        tuple: Broadcasted tensors
-    """
-    try:
-        # Determine the maximum rank between the two tensors
-        max_rank = max(len(tensor1.shape), len(tensor2.shape))
-        
-        # Pad shapes with 1s to match rank
-        shape1 = [1] * (max_rank - len(tensor1.shape)) + tensor1.shape.as_list()
-        shape2 = [1] * (max_rank - len(tensor2.shape)) + tensor2.shape.as_list()
-        
-        # Check broadcasting compatibility
-        for dim1, dim2 in zip(shape1, shape2):
-            if dim1 != 1 and dim2 != 1 and dim1 != dim2:
-                raise ValueError("Tensors cannot be broadcasted")
-        
-        # Use TensorFlow's broadcast_to
-        return (
-            tf.broadcast_to(tensor1, tf.math.maximum(tensor1.shape, tensor2.shape)),
-            tf.broadcast_to(tensor2, tf.math.maximum(tensor1.shape, tensor2.shape))
-        )
-    
-    except Exception as e:
-        tf.print("❌ Tensor broadcasting error:")
-        tf.print(f"   Tensor 1 shape: {tensor1.shape}")
-        tf.print(f"   Tensor 2 shape: {tensor2.shape}")
-        tf.print(f"   Error: {str(e)}")
-        raise
-
-def normalize_complex_tensor(
-    tensor: tf.Tensor, 
-    axis: Union[int, List[int]] = None
-) -> tf.Tensor:
-    """
-    Normalize complex tensor with flexible axis handling
-    
-    Args:
-        tensor (tf.Tensor): Complex input tensor
-        axis (Union[int, List[int]], optional): Axis/axes for normalization
-    
-    Returns:
-        tf.Tensor: Normalized complex tensor
-    """
-    # Default to all axes if not specified
-    if axis is None:
-        axis = list(range(len(tensor.shape)))
-    
-    # Compute magnitude
-    magnitude = tf.abs(tensor)
-    
-    # Compute normalization factor
-    norm_factor = tf.reduce_mean(magnitude, axis=axis, keepdims=True)
-    
-    # Convert norm_factor to complex before adding epsilon
-    norm_factor = tf.cast(norm_factor, dtype=tf.complex64)
-    epsilon = tf.complex(1e-10, 0.0)
-    
-    # Avoid division by zero with complex epsilon
-    return tensor / (norm_factor + epsilon)
-
-def validate_tensor_properties(
-    tensor: tf.Tensor, 
-    dtype: tf.DType = None, 
-    min_rank: int = None, 
-    max_rank: int = None
-) -> tf.Tensor:
-    """
-    Comprehensive tensor property validation
-    
-    Args:
-        tensor (tf.Tensor): Input tensor to validate
-        dtype (tf.DType, optional): Expected data type
-        min_rank (int, optional): Minimum tensor rank
-        max_rank (int, optional): Maximum tensor rank
-    
-    Returns:
-        tf.Tensor: Validated input tensor
-    """
-    # Check data type
-    if dtype is not None and tensor.dtype != dtype:
-        raise TypeError(
-            f"Incorrect tensor dtype. "
-            f"Expected {dtype}, Got {tensor.dtype}"
-        )
-    
-    # Check tensor rank
-    rank = len(tensor.shape)
-    if min_rank is not None and rank < min_rank:
-        raise ValueError(
-            f"Tensor rank too low. "
-            f"Expected at least {min_rank}, Got {rank}"
-        )
-    
-    if max_rank is not None and rank > max_rank:
-        raise ValueError(
-            f"Tensor rank too high. "
-            f"Expected at most {max_rank}, Got {rank}"
-        )
-    
-    return tensor
-
-# In tensor_shape_validator.py, add complex tensor validation:
-def validate_complex_tensor(
-    tensor: tf.Tensor,
+def validate_mimo_tensor_shapes(
+    channel_response: tf.Tensor,
+    num_tx_antennas: int,
+    num_rx_antennas: int,
+    batch_size: int,
     name: str = "channel_response"
 ) -> bool:
-    try:
-        # Verify dtype
-        if not tensor.dtype in (tf.complex64, tf.complex128):
-            raise ValueError(f"{name} must be complex type")
-            
-        # Check for invalid values
-        real_part = tf.math.real(tensor)
-        imag_part = tf.math.imag(tensor)
-        
-        invalid_real = tf.reduce_any(tf.math.is_nan(real_part))
-        invalid_imag = tf.reduce_any(tf.math.is_nan(imag_part))
-        
-        if invalid_real or invalid_imag:
-            raise ValueError(f"Invalid complex values in {name}")
-            
-        return True
-        
-    except Exception as e:
-        logging.error(f"Complex tensor validation failed: {str(e)}")
-        return False
-def validate_tensor_shapes(tensors_dict):
     """
-    Validate multiple tensor shapes at once
+    Validate MIMO channel response tensor shapes
     
     Args:
-        tensors_dict (dict): Dictionary of tensor names and their expected shapes
-                            Format: {'tensor_name': (tensor, expected_shape)}
-    
-    Raises:
-        ValueError: If any tensor shape doesn't match expected shape
+        channel_response (tf.Tensor): MIMO channel response tensor
+        num_tx_antennas (int): Number of transmit antennas
+        num_rx_antennas (int): Number of receive antennas
+        batch_size (int): Batch size
+        name (str): Tensor name for error reporting
+        
+    Returns:
+        bool: True if shapes are valid
     """
-    for tensor_name, (tensor, expected_shape) in tensors_dict.items():
-        actual_shape = tensor.shape
-        if len(actual_shape) != len(expected_shape):
-            raise ValueError(
-                f"Rank mismatch for {tensor_name}:\n"
-                f"   Expected rank: {len(expected_shape)}\n"
-                f"   Actual rank: {len(actual_shape)}"
-            )
-        
-        for dim_actual, dim_expected in zip(actual_shape, expected_shape):
-            if dim_expected is not None and dim_actual != dim_expected:
-                raise ValueError(
-                    f"Shape mismatch for {tensor_name}:\n"
-                    f"   Expected shape: {expected_shape}\n"
-                    f"   Actual shape: {actual_shape}"
-                )
-def verify_batch_consistency(batch_tensors: Dict[str, tf.Tensor], batch_size: int) -> bool:
     try:
-        # Ensure batch_size is int32
-        batch_size = tf.cast(batch_size, tf.int32)
+        expected_shape = [batch_size, num_rx_antennas, num_tx_antennas]
+        actual_shape = channel_response.shape.as_list()
         
-        for name, tensor in batch_tensors.items():
-            # Explicitly cast to int32
-            actual_batch = tf.cast(tf.shape(tensor)[0], tf.int32)
+        if len(actual_shape) != 3:
+            raise ValueError(
+                f"{name} must have 3 dimensions [batch_size, num_rx, num_tx], "
+                f"got shape {actual_shape}"
+            )
             
-            # Compare batch sizes
-            if not tf.equal(actual_batch, batch_size):
-                print(f"Batch size mismatch in {name}: expected {batch_size}, got {actual_batch}")
-                return False
+        if actual_shape != expected_shape:
+            raise ValueError(
+                f"Shape mismatch for {name}: "
+                f"Expected {expected_shape}, got {actual_shape}"
+            )
+            
         return True
         
     except Exception as e:
-        print(f"Batch consistency verification failed: {str(e)}")
+        logging.error(f"MIMO tensor shape validation failed: {str(e)}")
         return False
+
+def validate_mimo_metrics(
+    metrics: Dict[str, tf.Tensor],
+    batch_size: int,
+    num_tx_antennas: int,
+    num_rx_antennas: int
+) -> bool:
+    """
+    Validate shapes of MIMO metrics tensors
+    
+    Args:
+        metrics (Dict[str, tf.Tensor]): Dictionary of MIMO metrics
+        batch_size (int): Batch size
+        num_tx_antennas (int): Number of transmit antennas
+        num_rx_antennas (int): Number of receive antennas
+        
+    Returns:
+        bool: True if all metrics shapes are valid
+    """
+    try:
+        expected_shapes = {
+            'spectral_efficiency': [batch_size],
+            'effective_snr': [batch_size],
+            'condition_number': [batch_size],
+            'eigenvalues': [batch_size, min(num_rx_antennas, num_tx_antennas)]
+        }
+        
+        for metric_name, tensor in metrics.items():
+            if metric_name not in expected_shapes:
+                logging.warning(f"Unexpected metric: {metric_name}")
+                continue
                 
-# Example usage demonstrating utility functions
-def example_usage():
-    # Shape validation
-    x = tf.random.normal([32, 4, 4])
-    assert_tensor_shape(x, [32, 4, 4], 'example_tensor')
+            expected_shape = expected_shapes[metric_name]
+            actual_shape = tensor.shape.as_list()
+            
+            if actual_shape != expected_shape:
+                raise ValueError(
+                    f"Shape mismatch for {metric_name}: "
+                    f"Expected {expected_shape}, got {actual_shape}"
+                )
+                
+        return True
+        
+    except Exception as e:
+        logging.error(f"MIMO metrics validation failed: {str(e)}")
+        return False
+
+def validate_stream_management(
+    stream_manager: StreamManagement,
+    num_tx_antennas: int,
+    num_rx_antennas: int
+) -> bool:
+    """
+    Validate Sionna StreamManagement configuration
     
-    # Tensor broadcasting
-    a = tf.random.normal([32, 1, 4])
-    b = tf.random.normal([32, 4, 1])
-    broadcasted_a, broadcasted_b = broadcast_tensors(a, b)
+    Args:
+        stream_manager: Sionna StreamManagement object
+        num_tx_antennas (int): Number of transmit antennas
+        num_rx_antennas (int): Number of receive antennas
+        
+    Returns:
+        bool: True if configuration is valid
+    """
+    try:
+        # Verify stream configuration
+        num_streams = stream_manager.num_streams_per_rx
+        max_streams = min(num_tx_antennas, num_rx_antennas)
+        
+        if num_streams > max_streams:
+            raise ValueError(
+                f"Number of streams ({num_streams}) cannot exceed "
+                f"min(num_tx, num_rx) = {max_streams}"
+            )
+            
+        return True
+        
+    except Exception as e:
+        logging.error(f"Stream management validation failed: {str(e)}")
+        return False
+
+def validate_channel_frequencies(
+    frequencies: tf.Tensor,
+    num_subcarriers: int,
+    subcarrier_spacing: float
+) -> bool:
+    """
+    Validate channel frequency configuration
     
-    # Complex tensor normalization
-    complex_tensor = tf.complex(
-        tf.random.normal([32, 4, 4]), 
-        tf.random.normal([32, 4, 4])
-    )
-    normalized_tensor = normalize_complex_tensor(complex_tensor)
+    Args:
+        frequencies (tf.Tensor): Frequency points tensor
+        num_subcarriers (int): Number of subcarriers
+        subcarrier_spacing (float): Subcarrier spacing in Hz
+        
+    Returns:
+        bool: True if frequency configuration is valid
+    """
+    try:
+        expected_shape = [num_subcarriers]
+        actual_shape = frequencies.shape.as_list()
+        
+        if actual_shape != expected_shape:
+            raise ValueError(
+                f"Frequency shape mismatch: Expected {expected_shape}, "
+                f"got {actual_shape}"
+            )
+            
+        # Verify frequency spacing
+        freq_diff = tf.experimental.numpy.diff(frequencies)
+        if not tf.reduce_all(tf.abs(freq_diff - subcarrier_spacing) < 1e-6):
+            raise ValueError("Inconsistent subcarrier spacing")
+            
+        return True
+        
+    except Exception as e:
+        logging.error(f"Frequency validation failed: {str(e)}")
+        return False
