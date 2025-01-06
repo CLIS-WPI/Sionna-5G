@@ -13,7 +13,7 @@ from sionna.utils import compute_ber
 from typing import Dict, List, Any, Optional
 from utill.logging_config import LoggerManager
 from config.system_parameters import SystemParameters
-from utill.tensor_shape_validator import assert_tensor_shape
+from utill.tensor_shape_validator import validate_mimo_tensor_shapes
 
 class MetricsCalculator:
     """Metrics calculator for MIMO dataset generation"""
@@ -78,7 +78,12 @@ class MetricsCalculator:
                 self.system_params.num_rx_antennas,
                 self.system_params.num_tx_antennas
             ]
-            assert_tensor_shape(channel_response, expected_shape)
+            validate_mimo_tensor_shapes(
+                channel_response=channel_response,
+                num_tx_antennas=self.system_params.num_tx_antennas,
+                num_rx_antennas=self.system_params.num_rx_antennas,
+                batch_size=batch_size
+            )
             
             # Calculate channel matrix properties
             H = channel_response
