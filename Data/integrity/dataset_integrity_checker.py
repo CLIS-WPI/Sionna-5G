@@ -9,6 +9,7 @@ import tensorflow as tf
 from typing import Dict, Any, Optional, Tuple, List
 from datetime import datetime
 from logging import Logger
+from metrics.metrics_calculator import MetricsCalculator
 class MIMODatasetIntegrityChecker:
     """
     Advanced dataset integrity verification for MIMO communication datasets
@@ -24,7 +25,7 @@ class MIMODatasetIntegrityChecker:
         self.dataset_path = dataset_path
         self.dataset = None
         self.modulation_schemes = ['QPSK', '16QAM', '64QAM']
-
+        self.metrics_calculator = MetricsCalculator()
         # Update thresholds based on observed data ranges
         self.validation_thresholds = {
             'eigenvalues': {'min': 0.0, 'max': 1.0},
@@ -34,6 +35,10 @@ class MIMODatasetIntegrityChecker:
             'sinr': {'min': -20.0, 'max': 30.0}
         }
 
+    def validate_metrics(self, ...):
+        # Use validation_thresholds from MetricsCalculator
+        thresholds = self.metrics_calculator.validation_thresholds
+        
     def __enter__(self):
         """
         Context manager entry point

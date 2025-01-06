@@ -37,10 +37,11 @@ import sionna as sn
 from tqdm import tqdm
 from config.system_parameters import SystemParameters
 from utill.logging_config import LoggerManager
+from metrics.metrics_calculator import MetricsCalculator
 
 class MIMODatasetGenerator:
     __version__ = '2.0.0'
-    
+
     def __init__(
         self, 
         system_params: SystemParameters = None,
@@ -53,7 +54,7 @@ class MIMODatasetGenerator:
         )
         
         self.system_params = system_params or SystemParameters()
-        
+        self.metrics_calculator = MetricsCalculator(self.system_params)
         # Initialize Sionna components
         self._setup_sionna_components()
         
