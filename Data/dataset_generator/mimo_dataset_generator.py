@@ -37,7 +37,7 @@ import sionna as sn
 from tqdm import tqdm
 from config.system_parameters import SystemParameters
 from utill.logging_config import LoggerManager
-from metrics.metrics_calculator import MetricsCalculator
+from core.metrics_calculator import MetricsCalculator
 
 class MIMODatasetGenerator:
     __version__ = '2.0.0'
@@ -145,101 +145,137 @@ class MIMODatasetGenerator:
             self.logger.error(f"Batch generation failed: {str(e)}")
             raise
 
-    def _validate_batch_data(self, batch_data: dict) -> tuple[bool, list[str]]:
-        """Validate batch data against defined thresholds"""
-        errors = []
-        try:
-            for key, data in batch_data.items():
-                if key in self.validation_thresholds:
-                    if tf.is_tensor(data):
-                        if data.dtype.is_complex:
-                            data_np = np.abs(data.numpy()).flatten()
-                        else:
-                            data_np = data.numpy().flatten()
-                    else:
-                        data_np = np.asarray(data).flatten()
-
-                    threshold = self.validation_thresholds[key]
-                    stats = {
-                        'min': np.min(data_np),
-                        'max': np.max(data_np),
-                        'mean': np.mean(data_np),
-                        'std': np.std(data_np)
-                    }
-
-                    if stats['min'] < threshold['min'] or stats['max'] > threshold['max']:
-                        errors.append(
-                            f"{key}: Values outside threshold range "
-                            f"[{threshold['min']}, {threshold['max']}]. "
-                            f"Stats: {stats}"
-                        )
-
-            return len(errors) == 0, errors
-
-        except Exception as e:
-            self.logger.error(f"Batch validation error: {str(e)}")
-            return False, [f"Critical validation error: {str(e)}"]
-
     def generate_dataset(self, save_path: str = 'dataset/mimo_dataset.h5'):
-        """Generate MIMO dataset"""
+        """
+        Generate MIMO dataset with enhanced metrics and validation
+        
+        Args:
+            save_path (str): Path to save the HDF5 dataset
+            
+        Returns:
+            bool: True if generation successful, False otherwise
+        """
         try:
             # Prepare output directory
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             
             with h5py.File(save_path, 'w') as f:
-                # Create dataset structure
-                samples_per_mod = self.system_params.total_samples // len(self.system_params.modulation_schemes)
-                
                 # Store configuration
                 config_group = f.create_group('configuration')
                 for key, value in self.system_params.__dict__.items():
                     if isinstance(value, (int, float, str)):
                         config_group.attrs[key] = value
                 
-                # Create groups for each modulation scheme
-                for mod_scheme in self.system_params.modulation_schemes:
-                    mod_group = f.create_group(f'modulation_data/{mod_scheme}')
-                    
-                    # Create datasets
-                    mod_group.create_dataset(
-                        'channel_response',
-                        shape=(samples_per_mod, self.system_params.num_rx_antennas, 
-                            self.system_params.num_tx_antennas),
-                        dtype=np.complex64
-                    )
-                    
-                    for metric in ['path_loss', 'sinr', 'spectral_efficiency']:
-                        mod_group.create_dataset(
-                            metric,
-                            shape=(samples_per_mod,),
-                            dtype=np.float32
-                        )
+                # Create main data group
+                data_group = f.create_group('channel_data')
+                total_samples = self.system_params.total_samples
                 
-                # Generate data for each modulation scheme
-                for mod_scheme in self.system_params.modulation_schemes:
-                    self.logger.info(f"Generating data for {mod_scheme}")
-                    mod_group = f[f'modulation_data/{mod_scheme}']
+                # Create datasets
+                data_group.create_dataset(
+                    'channel_response',
+                    shape=(total_samples, self.system_params.num_rx_antennas, 
+                        self.system_params.num_tx_antennas),
+                    dtype=np.complex64
+                )
+                
+                # Create datasets for metrics
+                metrics_datasets = {
+                    'spectral_efficiency': (total_samples,),
+                    'effective_snr': (total_samples,),
+                    'condition_number': (total_samples,),
+                    'eigenvalues': (total_samples, min(self.system_params.num_rx_antennas, 
+                                                    self.system_params.num_tx_antennas))
+                }
+                
+                for metric_name, shape in metrics_datasets.items():
+                    data_group.create_dataset(
+                        metric_name,
+                        shape=shape,
+                        dtype=np.float32
+                    )
+                
+                # Generate data in batches
+                self.logger.info(f"Generating dataset with {total_samples} samples")
+                
+                for i in tqdm(range(0, total_samples, self.system_params.batch_size)):
+                    batch_size = min(self.system_params.batch_size, total_samples - i)
                     
-                    for i in tqdm(range(0, samples_per_mod, self.system_params.batch_size)):
-                        batch_size = min(self.system_params.batch_size, samples_per_mod - i)
+                    try:
+                        # Generate channel responses
+                        snr_db = tf.random.uniform(
+                            [batch_size], 
+                            minval=self.system_params.min_snr_db,
+                            maxval=self.system_params.max_snr_db
+                        )
                         
-                        # Generate batch data
-                        batch_data = self._generate_batch_data(batch_size, mod_scheme)
+                        # Generate channel responses using channel model
+                        channel_response = self.channel_model.generate_channel_samples(
+                            batch_size=batch_size,
+                            snr_db=snr_db
+                        )['perfect_channel']
                         
-                        # Validate batch data
-                        is_valid, errors = self._validate_batch_data(batch_data)
+                        # Calculate metrics
+                        metrics = self.metrics_calculator.calculate_mimo_metrics(
+                            channel_response=channel_response,
+                            snr_db=snr_db
+                        )
+                        
+                        # Validate data
+                        is_valid = self._validate_batch_data(channel_response, metrics)
                         if not is_valid:
-                            self.logger.warning(f"Batch validation failed: {errors}")
                             continue
                         
-                        # Save batch data
-                        for key, data in batch_data.items():
-                            if key in mod_group:
-                                mod_group[key][i:i+batch_size] = data.numpy()
+                        # Store channel response
+                        data_group['channel_response'][i:i+batch_size] = channel_response.numpy()
+                        
+                        # Store metrics
+                        for metric_name, metric_data in metrics.items():
+                            if metric_name in data_group:
+                                data_group[metric_name][i:i+batch_size] = metric_data.numpy()
+                        
+                    except Exception as batch_error:
+                        self.logger.warning(f"Error generating batch {i}: {str(batch_error)}")
+                        continue
+                
+                # Add metadata
+                f.attrs['generation_timestamp'] = datetime.now().isoformat()
+                f.attrs['total_samples'] = total_samples
+                f.attrs['valid_samples'] = i + batch_size
                 
                 self.logger.info(f"Dataset generated successfully: {save_path}")
                 return True
                 
         except Exception as e:
             self.logger.error(f"Dataset generation failed: {str(e)}")
+            return False
+
+    def _validate_batch_data(self, channel_response: tf.Tensor, metrics: Dict[str, tf.Tensor]) -> bool:
+        """
+        Validate generated batch data
+        
+        Args:
+            channel_response: Generated channel responses
+            metrics: Dictionary of calculated metrics
+            
+        Returns:
+            bool: True if data is valid, False otherwise
+        """
+        try:
+            # Check for NaN or Inf values
+            if tf.reduce_any(tf.math.is_nan(channel_response)) or \
+            tf.reduce_any(tf.math.is_inf(channel_response)):
+                self.logger.warning("Invalid values in channel response")
+                return False
+                
+            # Validate metrics
+            for metric_name, metric_data in metrics.items():
+                if tf.reduce_any(tf.math.is_nan(metric_data)) or \
+                tf.reduce_any(tf.math.is_inf(metric_data)):
+                    self.logger.warning(f"Invalid values in metric: {metric_name}")
+                    return False
+                    
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Validation error: {str(e)}")
             return False
