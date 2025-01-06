@@ -30,41 +30,57 @@ import logging
 
 @dataclasses.dataclass
 class SystemParameters:
-    """
-    Configuration for MIMO system and dataset generation.
-    """
+    """Configuration for MIMO system and dataset generation."""
+
+    # MIMO System Configuration
+    num_tx_antennas: int = 4                 # Number of transmit antennas
+    num_rx_antennas: int = 4                 # Number of receive antennas
+    num_streams: int = 4                     # Number of data streams
+    element_spacing: float = 0.5             # Antenna element spacing (wavelengths)
+    polarization: str = "single"             # Antenna polarization type
+
+    # RF Parameters
+    carrier_frequency: float = 3.5e9         # Carrier frequency in Hz
+    subcarrier_spacing: float = 30e3         # Subcarrier spacing in Hz
+    noise_floor: float = -174                # Noise floor in dBm/Hz
+
+    # OFDM Configuration
+    num_subcarriers: int = 64                # Number of subcarriers
+    num_ofdm_symbols: int = 14               # OFDM symbols per slot
+
+    # Channel Model Parameters
+    channel_model: str = "rayleigh"          # Channel model type
+    num_paths: int = 10                      # Number of multipath components
+    snr_range: Tuple[float, float] = (0.0, 30.0)  # Signal-to-Noise Ratio range in dB
+
+    # Modulation Configuration
+    modulation_schemes: List[str] = dataclasses.field(
+        default_factory=lambda: ["QPSK", "16QAM", "64QAM"]
+    )
 
     # Dataset Generation Parameters
     total_samples: int = 1_320_000           # Total number of samples to generate
     batch_size: int = 1000                   # Processing batch size
     samples_per_modulation: int = None       # Samples per modulation scheme
-
-    # Antenna Configuration
-    num_tx_antennas: int = 4                 # Number of transmit antennas
-    num_rx_antennas: int = 4                          # Number of receive antennas
-    num_streams: int = 4                     # Number of data streams
-    element_spacing: float = 0.5             # Antenna element spacing (wavelengths)
-    channel_model: str = "rayleigh"          # Channel model type
-    # Frequency Parameters
-    carrier_frequency: float = 3.5e9         # Carrier frequency in Hz
-    polarization: str = "single"             # Antenna polarization type
-    # OFDM Parameters
-    num_subcarriers: int = 64                # Number of subcarriers
-    num_ofdm_symbols: int = 14               # OFDM symbols per slot
-    subcarrier_spacing: float = 30e3         # Subcarrier spacing in Hz
-
-    # Channel Parameters
-    num_paths: int = 10                      # Number of multipath components
-    snr_range: Tuple[float, float] = (0.0, 30.0)  # Signal-to-Noise Ratio range in dB
-    noise_floor: float = -174                # Noise floor in dBm/Hz
-
-    # Modulation Schemes
-    modulation_schemes: List[str] = dataclasses.field(
-        default_factory=lambda: ["QPSK", "16QAM", "64QAM"]
-    )
-
-    # Reproducibility
     random_seed: int = 42                    # Random seed for reproducibility
+
+    def __post_init__(self):
+        """Validate and initialize dependent parameters"""
+        # Calculate samples per modulation if not specified
+        if self.samples_per_modulation is None:
+            self.samples_per_modulation = self.total_samples // len(self.modulation_schemes)
+
+        # Validate MIMO configuration
+        assert self.num_streams <= min(self.num_tx_antennas, self.num_rx_antennas), \
+            "Number of streams cannot exceed min(num_tx_antennas, num_rx_antennas)"
+
+        # Validate SNR range
+        assert self.snr_range[0] < self.snr_range[1], \
+            "Invalid SNR range: min should be less than max"
+
+        # Validate batch size
+        assert self.batch_size <= self.total_samples, \
+            "Batch size cannot exceed total samples"
 
     def __post_init__(self):
         """
