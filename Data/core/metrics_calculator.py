@@ -10,7 +10,7 @@
 import tensorflow as tf
 import numpy as np
 from sionna.utils import compute_ber
-from typing import Dict, Any, Optional
+from typing import Dict, List, Any, Optional
 from utill.logging_config import LoggerManager
 from config.system_parameters import SystemParameters
 from utill.tensor_shape_validator import assert_tensor_shape
@@ -31,7 +31,30 @@ class MetricsCalculator:
             'signal_power': {'min': 1e-10, 'max': 1e3},
             'noise_power': {'min': 1e-10, 'max': 1e3}
         }
-
+    def assert_tensor_shape(tensor: tf.Tensor, expected_shape: List[int], name: str = "tensor") -> bool:
+        """
+        Assert that tensor has expected shape
+        
+        Args:
+            tensor (tf.Tensor): Input tensor
+            expected_shape (List[int]): Expected tensor shape
+            name (str): Tensor name for error reporting
+            
+        Returns:
+            bool: True if shape matches
+        """
+        try:
+            actual_shape = tensor.shape.as_list()
+            if actual_shape != expected_shape:
+                raise ValueError(
+                    f"Shape mismatch for {name}: "
+                    f"Expected {expected_shape}, got {actual_shape}"
+                )
+            return True
+        except Exception as e:
+            logging.error(f"Tensor shape assertion failed: {str(e)}")
+            return False
+        
     def calculate_mimo_metrics(
         self,
         channel_response: tf.Tensor,
