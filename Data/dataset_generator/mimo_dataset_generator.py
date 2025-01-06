@@ -102,8 +102,8 @@ class MIMODatasetGenerator:
 
             # Initialize Rayleigh channel model with correct parameter names
             self.channel_model = sn.channel.RayleighBlockFading(
-                self.system_params.num_tx_antennas,  # First positional argument: num_tx
-                self.system_params.num_tx_antennas,  # Second positional argument: num_tx_ant
+                num_tx=self.system_params.num_tx_antennas,
+                num_tx_ant=self.system_params.num_tx_antennas,  # This was missing
                 dtype=tf.complex64
             )
 
