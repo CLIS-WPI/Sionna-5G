@@ -75,6 +75,9 @@ class MIMODatasetGenerator:
     def _setup_sionna_components(self):
         """Setup Sionna channel models and antenna arrays"""
         try:
+            self.logger.debug(f"SNR Range: {self.system_params.snr_range}")
+            self.logger.debug(f"Min SNR: {self.system_params.min_snr_db}")
+            self.logger.debug(f"Max SNR: {self.system_params.max_snr_db}")
             # Setup antenna arrays
             self.tx_array = AntennaArray(
                 polarization="single",        

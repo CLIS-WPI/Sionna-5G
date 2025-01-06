@@ -53,6 +53,16 @@ class SystemParameters:
     num_paths: int = 10                      # Number of multipath components
     snr_range: Tuple[float, float] = (0.0, 30.0)  # Signal-to-Noise Ratio range in dB
 
+    @property
+    def min_snr_db(self) -> float:
+        """Minimum SNR in dB"""
+        return self.snr_range[0]
+    
+    @property
+    def max_snr_db(self) -> float:
+        """Maximum SNR in dB"""
+        return self.snr_range[1]
+    
     # Modulation Configuration
     modulation_schemes: List[str] = dataclasses.field(
         default_factory=lambda: ["QPSK", "16QAM", "64QAM"]
