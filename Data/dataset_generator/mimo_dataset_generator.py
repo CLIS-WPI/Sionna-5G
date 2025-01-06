@@ -34,7 +34,7 @@ import h5py
 import numpy as np
 import tensorflow as tf
 import sionna as sn
-from tqdm import tqdm
+from sionna.channel.tr38901 import AntennaArray
 from config.system_parameters import SystemParameters
 from utill.logging_config import LoggerManager
 from core.metrics_calculator import MetricsCalculator
@@ -76,7 +76,7 @@ class MIMODatasetGenerator:
         """Setup Sionna channel models and antenna arrays"""
         try:
             # Setup antenna arrays
-            self.tx_array = sn.channel.AntennaArray(
+            self.tx_array = AntennaArray(  # Remove sn.channel prefix
                 num_rows=1,
                 num_cols=self.system_params.num_tx_antennas,
                 vertical_spacing=self.system_params.element_spacing,
@@ -84,14 +84,14 @@ class MIMODatasetGenerator:
                 pattern="iso"
             )
             
-            self.rx_array = sn.channel.AntennaArray(
+            self.rx_array = AntennaArray(  # Remove sn.channel prefix
                 num_rows=1,
                 num_cols=self.system_params.num_rx_antennas,
                 vertical_spacing=self.system_params.element_spacing,
                 horizontal_spacing=self.system_params.element_spacing,
                 pattern="iso"
             )
-            
+
             # Setup channel model
             if self.system_params.channel_model.lower() == "rayleigh":
                 self.channel_model = sn.channel.RayleighBlockFading(
