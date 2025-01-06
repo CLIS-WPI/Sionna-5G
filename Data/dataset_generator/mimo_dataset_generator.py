@@ -138,15 +138,22 @@ class MIMODatasetGenerator:
             wavelength = 3e8 / self.system_params.carrier_frequency
             path_loss_db = 20 * tf.math.log(4 * np.pi * distances / wavelength) / tf.math.log(10.0)
             
-            # Generate channel response - properly call the channel model with required arguments
+            # Generate channel response with correct shape handling
             channel_response = self.channel_model(
                 batch_size=batch_size,
-                num_time_steps=self.system_params.num_ofdm_symbols  # This should be defined in SystemParameters
+                num_time_steps=1  # Set to 1 for static channel
             )
+            
+            # Reshape channel response to match expected dimensions
+            # Remove extra dimensions and keep only [batch_size, num_rx, num_tx]
+            channel_response = tf.squeeze(channel_response)  # Remove singleton dimensions
+            channel_response = channel_response[:, :self.system_params.num_rx_antennas, 
+                                            :self.system_params.num_tx_antennas]
             
             # Apply path loss to channel response
             path_loss_linear = tf.pow(10.0, -path_loss_db/20)
-            channel_response *= tf.expand_dims(tf.expand_dims(path_loss_linear, -1), -1)
+            path_loss_shaped = tf.reshape(path_loss_linear, [-1, 1, 1])  # Reshape for broadcasting
+            channel_response *= path_loss_shaped
             
             # Calculate SINR
             noise_power = tf.pow(10.0, (self.system_params.noise_floor - 30)/10)  # Convert dBm to linear
