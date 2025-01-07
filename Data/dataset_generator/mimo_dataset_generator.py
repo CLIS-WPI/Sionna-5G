@@ -154,22 +154,47 @@ class MIMODatasetGenerator:
                 # Create main data group
                 data_group = f.create_group('channel_data')
                 
-                # Create datasets with total size
+                # Create datasets with total size and appropriate dtypes
                 datasets = {
-                    'channel_response': (total_samples, 
-                                    self.system_params.num_rx_antennas,
-                                    self.system_params.num_tx_antennas),
-                    'path_loss_db': (total_samples,),
-                    'distances': (total_samples,),
-                    'spectral_efficiency': (total_samples,),
-                    'effective_snr': (total_samples,),
-                    'eigenvalues': (total_samples,),
-                    'condition_number': (total_samples,)
+                    'channel_response': {
+                        'shape': (total_samples, 
+                                self.system_params.num_rx_antennas,
+                                self.system_params.num_tx_antennas),
+                        'dtype': np.complex64  # Changed to complex64 for channel response
+                    },
+                    'path_loss_db': {
+                        'shape': (total_samples,),
+                        'dtype': np.float32
+                    },
+                    'distances': {
+                        'shape': (total_samples,),
+                        'dtype': np.float32
+                    },
+                    'spectral_efficiency': {
+                        'shape': (total_samples,),
+                        'dtype': np.float32
+                    },
+                    'effective_snr': {
+                        'shape': (total_samples,),
+                        'dtype': np.float32
+                    },
+                    'eigenvalues': {
+                        'shape': (total_samples,),
+                        'dtype': np.float32
+                    },
+                    'condition_number': {
+                        'shape': (total_samples,),
+                        'dtype': np.float32
+                    }
                 }
                 
-                # Initialize datasets
-                for name, shape in datasets.items():
-                    data_group.create_dataset(name, shape=shape, dtype=np.float32)
+                # Initialize datasets with proper dtypes
+                for name, config in datasets.items():
+                    data_group.create_dataset(
+                        name, 
+                        shape=config['shape'],
+                        dtype=config['dtype']
+                    )
                 
                 # Use tqdm to show progress of actual samples
                 samples_processed = 0
@@ -212,6 +237,13 @@ class MIMODatasetGenerator:
             self.logger.error(f"Failed to generate dataset: {str(e)}")
             raise
 
+    def verify_complex_data(file_path):
+        with h5py.File(file_path, 'r') as f:
+            channel_response = f['channel_data']['channel_response'][:]
+            print("Channel Response dtype:", channel_response.dtype)
+            print("Contains complex values:", np.iscomplexobj(channel_response))
+            print("Shape:", channel_response.shape)
+                    
     def _validate_batch_data(self, channel_response: tf.Tensor, metrics: Dict[str, tf.Tensor]) -> bool:
         """
         Validate generated batch data
