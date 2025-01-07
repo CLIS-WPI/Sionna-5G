@@ -92,7 +92,17 @@ class MIMODatasetGenerator:
             self.logger.error(f"Failed to setup Sionna components: {str(e)}")
             raise
 
-    def _generate_batch_data(self, batch_size: int) -> Dict[str, tf.Tensor]:
+    def _generate_batch_data(self, batch_size: int, mod_scheme: str = 'QPSK') -> Dict[str, tf.Tensor]:
+        """
+        Generate a batch of MIMO channel data
+        
+        Args:
+            batch_size (int): Size of the batch to generate
+            mod_scheme (str, optional): Modulation scheme to use. Defaults to 'QPSK'
+            
+        Returns:
+            Dict[str, tf.Tensor]: Dictionary containing generated data
+        """
         try:
             # Generate complex channel response
             channel_response = tf.complex(
@@ -132,6 +142,7 @@ class MIMODatasetGenerator:
                 'channel_response': channel_response,  # complex64
                 'path_loss_db': tf.cast(path_loss_db, tf.float32),
                 'distances': tf.cast(distances, tf.float32),
+                'modulation_scheme': mod_scheme,  # Include modulation scheme in output
                 **metrics  # Include calculated metrics
             }
             
