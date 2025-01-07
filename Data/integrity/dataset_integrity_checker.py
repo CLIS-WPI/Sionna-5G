@@ -31,6 +31,48 @@ class MIMODatasetIntegrityChecker:
         # Use validation thresholds from MetricsCalculator
         self.validation_thresholds = self.metrics_calculator.validation_thresholds
 
+    def verify_complex_data(self) -> Dict[str, Any]:
+        """
+        Verify complex data types and shapes in the dataset
+        
+        Returns:
+            Dict[str, Any]: Verification results for complex data
+        """
+        results = {}
+        try:
+            with h5py.File(self.dataset_path, 'r') as f:
+                if 'channel_data' not in f:
+                    return {
+                        'status': False,
+                        'error': 'Missing channel_data group'
+                    }
+                    
+                channel_response = f['channel_data']['channel_response'][:]
+                results = {
+                    'status': True,
+                    'dtype': str(channel_response.dtype),
+                    'is_complex': np.iscomplexobj(channel_response),
+                    'shape': channel_response.shape,
+                    'validation': {
+                        'correct_dtype': channel_response.dtype in [np.complex64, np.complex128],
+                        'correct_shape': len(channel_response.shape) == 3
+                    }
+                }
+                
+                self.logger.info(f"Channel Response verification results:")
+                self.logger.info(f"  dtype: {results['dtype']}")
+                self.logger.info(f"  complex values: {results['is_complex']}")
+                self.logger.info(f"  shape: {results['shape']}")
+                
+                return results
+                
+        except Exception as e:
+            self.logger.error(f"Complex data verification failed: {str(e)}")
+            return {
+                'status': False,
+                'error': str(e)
+            }
+            
     def _validate_metrics(self, metrics_data: Dict[str, np.ndarray]) -> Tuple[bool, List[str]]:
         """
         Validate metrics against thresholds
@@ -95,6 +137,7 @@ class MIMODatasetIntegrityChecker:
             'errors': [],
             'warnings': [],
             'validation_details': {}
+            'complex_data_verification': {}
         }
         
         try:
@@ -129,6 +172,10 @@ class MIMODatasetIntegrityChecker:
                 # Add statistics
                 integrity_report['validation_details'] = self._calculate_statistics(metrics_data)
                 
+                complex_verification = self.verify_complex_data()
+                integrity_report['complex_data_verification'] = complex_verification
+                if not complex_verification.get('status', False):
+                    integrity_report['overall_status'] = False
             return integrity_report
             
         except Exception as e:
