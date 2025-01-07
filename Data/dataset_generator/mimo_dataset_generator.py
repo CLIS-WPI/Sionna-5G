@@ -118,12 +118,15 @@ class MIMODatasetGenerator:
                                     self.system_params.max_snr_db)
             
             # Generate transmitted symbols (QPSK modulation)
+            # Generate transmitted symbols (QPSK modulation)
             if mod_scheme == 'QPSK':
-                tx_symbols = tf.complex(
-                    tf.random.uniform([batch_size, self.system_params.num_streams]) > 0.5,
-                    tf.random.uniform([batch_size, self.system_params.num_streams]) > 0.5
-                )
-                tx_symbols = (2 * tf.cast(tx_symbols, tf.float32) - 1) / tf.sqrt(2.0)
+                # First generate random values as float32
+                real_part = tf.cast(tf.random.uniform([batch_size, self.system_params.num_streams]) > 0.5, tf.float32)
+                imag_part = tf.cast(tf.random.uniform([batch_size, self.system_params.num_streams]) > 0.5, tf.float32)
+                
+                # Create complex numbers with proper types
+                tx_symbols = tf.complex(real_part, imag_part)
+                tx_symbols = (2 * tx_symbols - 1) / tf.sqrt(2.0)
                 tx_symbols = tf.cast(tx_symbols, tf.complex64)
             else:
                 raise ValueError(f"Unsupported modulation scheme: {mod_scheme}")
@@ -235,7 +238,7 @@ class MIMODatasetGenerator:
                     }
                 }
                 
-                # Initialize datasets
+                # Initialize datasets once
                 for name, config in datasets.items():
                     data_group.create_dataset(
                         name, 
@@ -243,36 +246,7 @@ class MIMODatasetGenerator:
                         dtype=config['dtype']
                     )
                 
-                # Generate and store data in batches
-                with tqdm(total=total_samples, desc="Generating samples") as pbar:
-                    for batch_idx in range(num_batches):
-                        try:
-                            # Generate batch data including tx and rx symbols
-                            batch_data = self._generate_batch_data(batch_size)
-                            
-                            start_idx = batch_idx * batch_size
-                            end_idx = start_idx + batch_size
-                            
-                            # Store all batch data including tx and rx symbols
-                            for name, data in batch_data.items():
-                                if name != 'modulation_scheme':
-                                    data_group[name][start_idx:end_idx] = data
-                            
-                            pbar.update(batch_size)
-                            
-                        except Exception as e:
-                            self.logger.warning(f"Error generating batch {start_idx}: {str(e)}")
-                            continue
-
-                # Initialize datasets with proper dtypes
-                for name, config in datasets.items():
-                    data_group.create_dataset(
-                        name, 
-                        shape=config['shape'],
-                        dtype=config['dtype']
-                    )
-                
-                # Use tqdm to show progress of actual samples
+                # Generate and store data in batches - single loop
                 samples_processed = 0
                 with tqdm(total=total_samples, desc="Generating samples") as pbar:
                     for batch_idx in range(num_batches):
@@ -280,16 +254,20 @@ class MIMODatasetGenerator:
                             # Generate batch data
                             batch_data = self._generate_batch_data(batch_size)
                             
-                            # Calculate start and end indices for this batch
+                            # Calculate indices
                             start_idx = batch_idx * batch_size
                             end_idx = start_idx + batch_size
                             
                             # Store batch data
                             for name, data in batch_data.items():
                                 if name != 'modulation_scheme':
-                                    data_group[name][start_idx:end_idx] = data
+                                    try:
+                                        data_group[name][start_idx:end_idx] = data
+                                    except Exception as e:
+                                        self.logger.error(f"Error storing {name} data: {str(e)}")
+                                        raise
                             
-                            # Update progress bar with actual samples processed
+                            # Update progress
                             samples_processed += batch_size
                             pbar.update(batch_size)
                             
@@ -306,9 +284,9 @@ class MIMODatasetGenerator:
                     elif isinstance(value, (list, tuple)):
                         config_group.create_dataset(key, data=value)
                 
-            self.logger.info(f"Dataset generated successfully: {save_path}")
-            return save_path
-            
+                self.logger.info(f"Dataset generated successfully: {save_path}")
+                return save_path
+                
         except Exception as e:
             self.logger.error(f"Failed to generate dataset: {str(e)}")
             raise
