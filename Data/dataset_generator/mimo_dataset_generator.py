@@ -160,13 +160,25 @@ class MIMODatasetGenerator:
                         'shape': (total_samples, 
                                 self.system_params.num_rx_antennas,
                                 self.system_params.num_tx_antennas),
-                        'dtype': np.complex64  # Changed to complex64 for channel response
+                        'dtype': np.complex64
                     },
                     'path_loss_db': {
                         'shape': (total_samples,),
                         'dtype': np.float32
                     },
                     'distances': {
+                        'shape': (total_samples,),
+                        'dtype': np.float32
+                    },
+                    'tx_symbols': {
+                        'shape': (total_samples, self.system_params.num_streams),
+                        'dtype': np.complex64
+                    },
+                    'rx_symbols': {
+                        'shape': (total_samples, self.system_params.num_streams),
+                        'dtype': np.complex64
+                    },
+                    'snr_db': {
                         'shape': (total_samples,),
                         'dtype': np.float32
                     },
@@ -178,16 +190,41 @@ class MIMODatasetGenerator:
                         'shape': (total_samples,),
                         'dtype': np.float32
                     },
-                    'eigenvalues': {
-                        'shape': (total_samples,),
-                        'dtype': np.float32
-                    },
                     'condition_number': {
                         'shape': (total_samples,),
                         'dtype': np.float32
                     }
                 }
                 
+                # Initialize datasets
+                for name, config in datasets.items():
+                    data_group.create_dataset(
+                        name, 
+                        shape=config['shape'],
+                        dtype=config['dtype']
+                    )
+                
+                # Generate and store data in batches
+                with tqdm(total=total_samples, desc="Generating samples") as pbar:
+                    for batch_idx in range(num_batches):
+                        try:
+                            # Generate batch data including tx and rx symbols
+                            batch_data = self._generate_batch_data(batch_size)
+                            
+                            start_idx = batch_idx * batch_size
+                            end_idx = start_idx + batch_size
+                            
+                            # Store all batch data including tx and rx symbols
+                            for name, data in batch_data.items():
+                                if name != 'modulation_scheme':
+                                    data_group[name][start_idx:end_idx] = data
+                            
+                            pbar.update(batch_size)
+                            
+                        except Exception as e:
+                            self.logger.warning(f"Error generating batch {start_idx}: {str(e)}")
+                            continue
+
                 # Initialize datasets with proper dtypes
                 for name, config in datasets.items():
                     data_group.create_dataset(
