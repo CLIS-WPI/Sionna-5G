@@ -104,9 +104,12 @@ class MetricsCalculator:
             
             HH_stable = HH + I
             
-            # Calculate eigenvalues with stability
-            eigenvalues = tf.abs(tf.linalg.eigvalsh(HH_stable))
-            eigenvalues = tf.maximum(eigenvalues, epsilon)
+            # Calculate eigenvalues and convert to float32
+            eigenvalues = tf.cast(tf.abs(tf.linalg.eigvalsh(HH_stable)), tf.float32)
+            epsilon_float = tf.cast(1e-10, tf.float32)
+            
+            # Use float32 for all subsequent calculations
+            eigenvalues = tf.maximum(eigenvalues, epsilon_float)
             eigenvalues = eigenvalues / tf.reduce_max(eigenvalues, axis=1, keepdims=True)
             
             # Process SNR with validation
@@ -141,15 +144,14 @@ class MetricsCalculator:
             # Calculate condition number with stability
             condition_number = tf.reduce_max(eigenvalues, axis=1) / tf.maximum(
                 tf.reduce_min(eigenvalues, axis=1),
-                epsilon
+                epsilon_float
             )
             
-            # Return metrics dictionary with explicit type casting
             return {
-                'spectral_efficiency': tf.cast(spectral_efficiency, tf.float32),
-                'effective_snr': tf.cast(effective_snr_db, tf.float32),
-                'eigenvalues': tf.cast(eigenvalues, tf.float32),
-                'condition_number': tf.cast(condition_number, tf.float32)
+                'spectral_efficiency': spectral_efficiency,
+                'effective_snr': effective_snr_db,
+                'eigenvalues': eigenvalues,
+                'condition_number': condition_number
             }
                 
         except Exception as e:
