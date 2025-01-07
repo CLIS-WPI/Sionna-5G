@@ -104,19 +104,19 @@ def main():
             logger=logger
         )
 
-        logger.info(f"Generating dataset with {system_params.total_samples} samples...")
-        success = generator.generate_dataset(save_path=output_path)
+        logger.info(f"Generating dataset with {system_params.total_samples:,} samples...")
+        dataset_path = generator.generate_dataset(save_path=output_path)
         
-        if not success:
+        if not dataset_path:
             logger.error("Dataset generation failed")
             sys.exit(1)
 
-        logger.info(f"Dataset saved to {output_path}")
+        logger.info(f"Dataset saved to {dataset_path}")
 
         # Verify dataset if requested
         if args.verify:
             logger.info("Verifying dataset integrity...")
-            with MIMODatasetIntegrityChecker(output_path) as checker:
+            with MIMODatasetIntegrityChecker(dataset_path) as checker:
                 integrity_report = checker.check_dataset_integrity()
                 if integrity_report.get('overall_status', False):
                     logger.info("✅ Dataset verification successful.")

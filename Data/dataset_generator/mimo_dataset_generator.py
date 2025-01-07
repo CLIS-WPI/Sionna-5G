@@ -146,75 +146,72 @@ class MIMODatasetGenerator:
         try:
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             
+            total_samples = self.system_params.total_samples
+            batch_size = self.system_params.batch_size
+            num_batches = total_samples // batch_size
+            
             with h5py.File(save_path, 'w') as f:
                 # Create main data group
                 data_group = f.create_group('channel_data')
                 
-                # Create and populate configuration group
+                # Create datasets with total size
+                datasets = {
+                    'channel_response': (total_samples, 
+                                    self.system_params.num_rx_antennas,
+                                    self.system_params.num_tx_antennas),
+                    'path_loss_db': (total_samples,),
+                    'distances': (total_samples,),
+                    'spectral_efficiency': (total_samples,),
+                    'effective_snr': (total_samples,),
+                    'eigenvalues': (total_samples,),
+                    'condition_number': (total_samples,)
+                }
+                
+                # Initialize datasets
+                for name, shape in datasets.items():
+                    data_group.create_dataset(name, shape=shape, dtype=np.float32)
+                
+                # Use tqdm to show progress of actual samples
+                samples_processed = 0
+                with tqdm(total=total_samples, desc="Generating samples") as pbar:
+                    for batch_idx in range(num_batches):
+                        try:
+                            # Generate batch data
+                            batch_data = self._generate_batch_data(batch_size)
+                            
+                            # Calculate start and end indices for this batch
+                            start_idx = batch_idx * batch_size
+                            end_idx = start_idx + batch_size
+                            
+                            # Store batch data
+                            for name, data in batch_data.items():
+                                if name != 'modulation_scheme':
+                                    data_group[name][start_idx:end_idx] = data
+                            
+                            # Update progress bar with actual samples processed
+                            samples_processed += batch_size
+                            pbar.update(batch_size)
+                            
+                        except Exception as e:
+                            self.logger.warning(f"Error generating batch {start_idx}: {str(e)}")
+                            continue
+                
+                # Add configuration group
                 config_group = f.create_group('configuration')
                 config_dict = self.system_params.get_config_dict()
-                
-                # Save configuration attributes
                 for key, value in config_dict.items():
                     if isinstance(value, (int, float, str)):
                         config_group.attrs[key] = value
                     elif isinstance(value, (list, tuple)):
                         config_group.create_dataset(key, data=value)
                 
-                # Create datasets
-                required_datasets = {
-                    'channel_response': (self.system_params.total_samples, 
-                                    self.system_params.num_rx_antennas,
-                                    self.system_params.num_tx_antennas),
-                    'path_loss_db': (self.system_params.total_samples,),
-                    'distances': (self.system_params.total_samples,),
-                    'spectral_efficiency': (self.system_params.total_samples,),
-                    'effective_snr': (self.system_params.total_samples,),
-                    'eigenvalues': (self.system_params.total_samples,),
-                    'condition_number': (self.system_params.total_samples,)
-                }
-                                
-                # Create datasets
-                for name, shape in required_datasets.items():
-                    dtype = np.complex64 if name == 'channel_response' else np.float32
-                    data_group.create_dataset(name, shape=shape, dtype=dtype)
-                
-                # Generate data in batches
-                for i in tqdm(range(0, self.system_params.total_samples, 
-                                self.system_params.batch_size)):
-                    batch_size = min(self.system_params.batch_size, 
-                                self.system_params.total_samples - i)
-                    
-                    try:
-                        batch_data = self._generate_batch_data(batch_size=batch_size)
-                        
-                        # Store all batch data
-                        for key, value in batch_data.items():
-                            if key in data_group:
-                                data_group[key][i:i+batch_size] = value.numpy()
-                                
-                    except Exception as batch_error:
-                        self.logger.warning(f"Error generating batch {i}: {str(batch_error)}")
-                        continue
-                
-                self.logger.info(f"Dataset generated successfully: {save_path}")
-                
-                # Verify dataset integrity
-                checker = MIMODatasetIntegrityChecker(save_path, self.system_params)
-                integrity_report = checker.check_dataset_integrity()
-                
-                if not integrity_report['overall_status']:
-                    self.logger.error("Dataset integrity check failed")
-                    if 'errors' in integrity_report:
-                        for error in integrity_report['errors']:
-                            self.logger.error(error)
-                    return False
-                
-                return True
-                
+            self.logger.info(f"Dataset generated successfully: {save_path}")
+            return save_path
+            
         except Exception as e:
-            self.logger.error(f"Dataset generation failed: {str(e)}")
-            return False
+            self.logger.error(f"Failed to generate dataset: {str(e)}")
+            raise
+
     def _validate_batch_data(self, channel_response: tf.Tensor, metrics: Dict[str, tf.Tensor]) -> bool:
         """
         Validate generated batch data
