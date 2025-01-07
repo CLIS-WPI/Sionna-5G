@@ -186,3 +186,11 @@ def main():
 
     logger.info("MIMO Dataset Generation completed successfully.")
     sys.exit(0)
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        print(f"Error during execution: {e}")
+        logging.error(f"Error during execution: {e}", exc_info=True)
+        sys.exit(1)
