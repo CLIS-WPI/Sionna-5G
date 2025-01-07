@@ -119,21 +119,39 @@ def main():
         generator.verify_complex_data(dataset_path)
         
         # Add metrics calculation here
+        # Add metrics calculation here
         logger.info("Calculating and validating performance metrics...")
         with h5py.File(dataset_path, 'r') as f:
-            # Extract necessary data from the dataset
-            channel_response = tf.convert_to_tensor(f['channel_response'][:])
-            tx_symbols = tf.convert_to_tensor(f['tx_symbols'][:])
-            rx_symbols = tf.convert_to_tensor(f['rx_symbols'][:])
-            snr_db = tf.convert_to_tensor(f['snr_db'][:])
+            try:
+                # First, check if the data exists and log the available keys
+                logger.info(f"Available dataset keys: {list(f.keys())}")
+                
+                # Extract necessary data from the dataset with proper group structure
+                channel_response = tf.convert_to_tensor(f['channel_data']['channel_response'][:])
+                tx_symbols = tf.convert_to_tensor(f['channel_data']['tx_symbols'][:])
+                rx_symbols = tf.convert_to_tensor(f['channel_data']['rx_symbols'][:])
+                snr_db = tf.convert_to_tensor(f['channel_data']['snr_db'][:])
 
-            # Calculate and validate metrics
-            metrics = metrics_calc.calculate_enhanced_metrics(
-                channel_response=channel_response,
-                tx_symbols=tx_symbols,
-                rx_symbols=rx_symbols,
-                snr_db=snr_db
-            )
+                # Log shapes for debugging
+                logger.info(f"Channel Response shape: {channel_response.shape}")
+                logger.info(f"TX Symbols shape: {tx_symbols.shape}")
+                logger.info(f"RX Symbols shape: {rx_symbols.shape}")
+                logger.info(f"SNR shape: {snr_db.shape}")
+
+                # Calculate and validate metrics
+                metrics = metrics_calc.calculate_enhanced_metrics(
+                    channel_response=channel_response,
+                    tx_symbols=tx_symbols,
+                    rx_symbols=rx_symbols,
+                    snr_db=snr_db
+                )
+
+            except KeyError as e:
+                logger.error(f"Failed to read dataset: Missing key {e}")
+                raise
+            except Exception as e:
+                logger.error(f"Error during metrics calculation: {e}")
+                raise
 
             # Log validation results
             validation_results = metrics['validation_results']

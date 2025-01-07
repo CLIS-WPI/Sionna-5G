@@ -79,12 +79,103 @@ class MetricsCalculator:
         if not all(validation_results.values()):
             self.logger.warning("Some performance targets were not met!")
 
-    def calculate_enhanced_metrics(self, channel_response: tf.Tensor, 
-                                tx_symbols: tf.Tensor, 
-                                rx_symbols: tf.Tensor, 
-                                snr_db: tf.Tensor) -> Dict[str, Any]:
+    def calculate_performance_metrics(
+        self,
+        channel_response: tf.Tensor,
+        tx_symbols: tf.Tensor,
+        rx_symbols: tf.Tensor,
+        snr_db: tf.Tensor
+    ) -> Dict[str, tf.Tensor]:
+        """
+        Calculate base performance metrics for MIMO system.
+        
+        Args:
+            channel_response: Complex channel matrix [batch_size, num_rx, num_tx]
+            tx_symbols: Transmitted symbols [batch_size, num_streams]
+            rx_symbols: Received symbols [batch_size, num_streams]
+            snr_db: SNR values in dB [batch_size]
+            
+        Returns:
+            Dictionary containing calculated metrics
+        """
+        # Calculate MIMO metrics using existing method
+        mimo_metrics = self.calculate_mimo_metrics(channel_response, snr_db)
+        
+        # Calculate signal power
+        signal_power = tf.reduce_mean(tf.abs(tx_symbols) ** 2, axis=-1)
+        signal_power = tf.clip_by_value(
+            signal_power,
+            self.validation_thresholds['signal_power']['min'],
+            self.validation_thresholds['signal_power']['max']
+        )
+        
+        # Calculate noise power
+        noise = rx_symbols - tx_symbols
+        noise_power = tf.reduce_mean(tf.abs(noise) ** 2, axis=-1)
+        noise_power = tf.clip_by_value(
+            noise_power,
+            self.validation_thresholds['noise_power']['min'],
+            self.validation_thresholds['noise_power']['max']
+        )
+        
+        # Calculate SINR
+        sinr = signal_power / (noise_power + 1e-10)
+        sinr_db = 10.0 * tf.math.log(sinr) / tf.math.log(10.0)
+        sinr_db = tf.clip_by_value(
+            sinr_db,
+            self.validation_thresholds['sinr']['min'],
+            self.validation_thresholds['sinr']['max']
+        )
+        
+        # Combine all metrics
+        metrics = {
+            'sinr_db': sinr_db,
+            'signal_power': signal_power,
+            'noise_power': noise_power,
+            **mimo_metrics  # Include MIMO metrics
+        }
+        
+        return metrics
+
+    def calculate_ber(self, tx_symbols: tf.Tensor, rx_symbols: tf.Tensor) -> tf.Tensor:
+        """
+        Calculate Bit Error Rate between transmitted and received symbols.
+        
+        Args:
+            tx_symbols: Transmitted symbols [batch_size, num_streams]
+            rx_symbols: Received symbols [batch_size, num_streams]
+            
+        Returns:
+            BER values [batch_size]
+        """
+        # Convert symbols to bits (assuming QPSK modulation)
+        tx_bits = tf.cast(tf.real(tx_symbols) > 0, tf.int32)
+        rx_bits = tf.cast(tf.real(rx_symbols) > 0, tf.int32)
+        
+        # Calculate BER
+        errors = tf.cast(tx_bits != rx_bits, tf.float32)
+        ber = tf.reduce_mean(errors, axis=-1)
+        
+        return ber
+
+    def calculate_enhanced_metrics(
+        self,
+        channel_response: tf.Tensor,
+        tx_symbols: tf.Tensor,
+        rx_symbols: tf.Tensor,
+        snr_db: tf.Tensor
+    ) -> Dict[str, Any]:
         """
         Calculate and validate enhanced performance metrics.
+        
+        Args:
+            channel_response: Complex channel matrix [batch_size, num_rx, num_tx]
+            tx_symbols: Transmitted symbols [batch_size, num_streams]
+            rx_symbols: Received symbols [batch_size, num_streams]
+            snr_db: SNR values in dB [batch_size]
+            
+        Returns:
+            Dictionary containing calculated metrics and validation results
         """
         # Calculate base metrics
         metrics = self.calculate_performance_metrics(
