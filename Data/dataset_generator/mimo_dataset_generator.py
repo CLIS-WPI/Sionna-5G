@@ -104,6 +104,12 @@ class MIMODatasetGenerator:
             Dict[str, tf.Tensor]: Dictionary containing generated data
         """
         try:
+            # Generate distances first
+            distances = tf.random.uniform([batch_size], minval=10.0, maxval=500.0)
+            
+            # Calculate path loss using PathLossManager
+            path_loss_db = self.path_loss_manager.calculate_free_space_path_loss(distances)
+            
             # Generate complex channel response
             channel_response = tf.complex(
                 tf.random.normal([batch_size, self.system_params.num_rx_antennas, 
@@ -115,13 +121,8 @@ class MIMODatasetGenerator:
             # Ensure complex64 type
             channel_response = tf.cast(channel_response, tf.complex64)
             
-            # Calculate path loss (ensure proper broadcasting)
-            distances = tf.random.uniform([batch_size], minval=10.0, maxval=500.0)
-            wavelength = 3e8 / self.system_params.carrier_frequency
-            path_loss_db = 20 * tf.math.log(4 * np.pi * distances / wavelength) / tf.math.log(10.0)
-            
-            # Convert path loss to linear scale and cast to complex64
-            path_loss_linear = tf.pow(10.0, -path_loss_db/20)
+            # Convert path loss to linear scale and reshape for broadcasting
+            path_loss_linear = tf.pow(10.0, -path_loss_db/20.0)
             path_loss_shaped = tf.cast(
                 tf.reshape(path_loss_linear, [-1, 1, 1]),
                 tf.complex64
@@ -140,9 +141,10 @@ class MIMODatasetGenerator:
             
             return {
                 'channel_response': channel_response,  # complex64
-                'path_loss_db': tf.cast(path_loss_db, tf.float32),
+                'path_loss_db': tf.cast(path_loss_db, tf.float32),  # Now properly defined
                 'distances': tf.cast(distances, tf.float32),
-                'modulation_scheme': mod_scheme,  # Include modulation scheme in output
+                'modulation_scheme': mod_scheme,
+                'effective_snr': metrics['effective_snr'],
                 **metrics  # Include calculated metrics
             }
             
@@ -151,58 +153,41 @@ class MIMODatasetGenerator:
             raise
 
     def generate_dataset(self, save_path: str = 'dataset/mimo_dataset.h5'):
-        """Generate MIMO dataset and save to HDF5 file.
-        
-        Args:
-            save_path (str): Path where to save the dataset
-            
-        Returns:
-            bool: True if generation successful, False otherwise
-        """
         try:
-            # Create output directory
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             
             with h5py.File(save_path, 'w') as f:
-                # Store configuration
-                config_group = f.create_group('configuration')
-                for key, value in self.system_params.__dict__.items():
-                    if isinstance(value, (int, float, str)):
-                        config_group.attrs[key] = value
-                
                 # Create main data group
                 data_group = f.create_group('channel_data')
-                total_samples = self.system_params.total_samples
                 
                 # Define datasets to create
-                datasets = {
-                    'channel_response': (total_samples, self.system_params.num_rx_antennas, 
+                required_datasets = {
+                    'channel_response': (self.system_params.total_samples, 
+                                    self.system_params.num_rx_antennas,
                                     self.system_params.num_tx_antennas),
-                    'path_loss': (total_samples,),
-                    'sinr': (total_samples,),
-                    'spectral_efficiency': (total_samples,),
-                    'distances': (total_samples,)
+                    'path_loss_db': (self.system_params.total_samples,),
+                    'distances': (self.system_params.total_samples,),
+                    'spectral_efficiency': (self.system_params.total_samples,),
+                    'effective_snr': (self.system_params.total_samples,),  # Add effective_snr
+                    'eigenvalues': (self.system_params.total_samples,),
+                    'condition_number': (self.system_params.total_samples,)
                 }
                 
                 # Create datasets
-                for name, shape in datasets.items():
+                for name, shape in required_datasets.items():
                     dtype = np.complex64 if name == 'channel_response' else np.float32
                     data_group.create_dataset(name, shape=shape, dtype=dtype)
                 
                 # Generate data in batches
-                self.logger.info(f"Generating dataset with {total_samples} samples")
-                
-                for i in tqdm(range(0, total_samples, self.system_params.batch_size)):
-                    batch_size = min(self.system_params.batch_size, total_samples - i)
+                for i in tqdm(range(0, self.system_params.total_samples, 
+                                self.system_params.batch_size)):
+                    batch_size = min(self.system_params.batch_size, 
+                                self.system_params.total_samples - i)
                     
                     try:
-                        # Generate batch data using our fixed _generate_batch_data method
-                        batch_data = self._generate_batch_data(
-                            batch_size=batch_size,
-                            mod_scheme='QPSK'
-                        )
+                        batch_data = self._generate_batch_data(batch_size=batch_size)
                         
-                        # Store the batch data
+                        # Store all batch data
                         for key, value in batch_data.items():
                             if key in data_group:
                                 data_group[key][i:i+batch_size] = value.numpy()
@@ -211,24 +196,19 @@ class MIMODatasetGenerator:
                         self.logger.warning(f"Error generating batch {i}: {str(batch_error)}")
                         continue
                 
-                # Add metadata
-                f.attrs['generation_timestamp'] = datetime.now().isoformat()
-                f.attrs['total_samples'] = total_samples
-                f.attrs['valid_samples'] = i + batch_size
-                
                 self.logger.info(f"Dataset generated successfully: {save_path}")
                 
-                # Add integrity check
-                checker = MIMODatasetIntegrityChecker(
-                    save_path,
-                    system_params=self.system_params
-                )
-                
+                # Verify dataset integrity
+                checker = MIMODatasetIntegrityChecker(save_path, self.system_params)
                 integrity_report = checker.check_dataset_integrity()
+                
                 if not integrity_report['overall_status']:
                     self.logger.error("Dataset integrity check failed")
-                    self.logger.error("\n".join(integrity_report['errors']))
+                    if 'errors' in integrity_report:
+                        for error in integrity_report['errors']:
+                            self.logger.error(error)
                     return False
+                
                 return True
                 
         except Exception as e:
