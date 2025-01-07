@@ -31,6 +31,79 @@ class MetricsCalculator:
             'signal_power': {'min': 1e-10, 'max': 1e3},
             'noise_power': {'min': 1e-10, 'max': 1e3}
         }
+
+    def validate_performance_metrics(self, metrics: Dict[str, tf.Tensor]) -> Dict[str, bool]:
+        """
+        Validates if the calculated metrics meet the target requirements.
+        
+        Args:
+            metrics: Dictionary containing calculated performance metrics
+            
+        Returns:
+            Dictionary with validation results for each metric
+        """
+        validation_results = {}
+        
+        # Validate BER
+        ber = metrics.get('ber', None)
+        if ber is not None:
+            # Check BER at 15dB SNR
+            snr_15db_mask = tf.abs(metrics['snr_db'] - 15.0) < 0.5
+            ber_at_15db = tf.boolean_mask(ber, snr_15db_mask)
+            validation_results['ber_valid'] = tf.reduce_mean(ber_at_15db) < self.system_params.ber_target
+            
+        # Validate SINR
+        sinr = metrics.get('sinr_db', None)
+        if sinr is not None:
+            validation_results['sinr_valid'] = tf.reduce_mean(sinr) > self.system_params.sinr_target
+            
+        # Validate Spectral Efficiency
+        spectral_eff = metrics.get('spectral_efficiency', None)
+        if spectral_eff is not None:
+            se_valid = tf.logical_and(
+                tf.reduce_mean(spectral_eff) >= self.system_params.spectral_efficiency_min,
+                tf.reduce_mean(spectral_eff) <= self.system_params.spectral_efficiency_max
+            )
+            validation_results['spectral_efficiency_valid'] = se_valid
+            
+        return validation_results
+
+    def log_validation_results(self, validation_results: Dict[str, bool]):
+        """
+        Logs the validation results with appropriate messages.
+        """
+        for metric, is_valid in validation_results.items():
+            status = "PASSED" if is_valid else "FAILED"
+            self.logger.info(f"Performance Validation - {metric}: {status}")
+            
+        if not all(validation_results.values()):
+            self.logger.warning("Some performance targets were not met!")
+
+    def calculate_enhanced_metrics(self, channel_response: tf.Tensor, 
+                                tx_symbols: tf.Tensor, 
+                                rx_symbols: tf.Tensor, 
+                                snr_db: tf.Tensor) -> Dict[str, Any]:
+        """
+        Calculate and validate enhanced performance metrics.
+        """
+        # Calculate base metrics
+        metrics = self.calculate_performance_metrics(
+            channel_response, tx_symbols, rx_symbols, snr_db
+        )
+        
+        # Calculate BER
+        ber = self.calculate_ber(tx_symbols, rx_symbols)
+        metrics['ber'] = ber
+        
+        # Validate metrics against targets
+        validation_results = self.validate_performance_metrics(metrics)
+        metrics['validation_results'] = validation_results
+        
+        # Log validation results
+        self.log_validation_results(validation_results)
+        
+        return metrics
+
     def assert_tensor_shape(tensor: tf.Tensor, expected_shape: List[int], name: str = "tensor") -> bool:
         """
         Assert that tensor has expected shape

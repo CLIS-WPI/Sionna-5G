@@ -77,6 +77,12 @@ class SystemParameters:
     channel_dtype: tf.DType = tf.complex64
     compute_dtype: tf.DType = tf.float32
 
+    # Performance Targets (from simulation plan)
+    ber_target: float = 1e-5        # BER Target: < 10^-5 at 15 dB SNR
+    sinr_target: float = 15.0       # SINR Target: > 15 dB
+    spectral_efficiency_min: float = 4.0  # Minimum target: 4 bits/s/Hz
+    spectral_efficiency_max: float = 8.0  # Maximum target: 8 bits/s/Hz
+
     def __post_init__(self):
         """Validate and initialize dependent parameters"""
         # Calculate samples per modulation if not specified
@@ -141,6 +147,11 @@ class SystemParameters:
         for scheme in self.modulation_schemes:
             if scheme.upper() not in valid_schemes:
                 raise ValueError(f"Invalid modulation scheme: {scheme}")
+        
+        # Validate performance targets
+        assert 0 < self.ber_target <= 1e-4, "BER target must be positive and <= 1e-4"
+        assert 10 <= self.sinr_target <= 30, "SINR target must be between 10 and 30 dB"
+        assert (0 < self.spectral_efficiency_min < self.spectral_efficiency_max <= 10,"Invalid spectral efficiency range")
 
     def set_global_seeds(self):
         """

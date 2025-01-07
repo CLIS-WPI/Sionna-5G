@@ -12,7 +12,7 @@ import h5py
 import tensorflow as tf
 import numpy as np
 import random
-
+from Data.core.metrics_calculator import MetricsCalculator
 def configure_gpu_environment():
     """Configure GPU environment with memory growth and mixed precision."""
     try:
@@ -93,6 +93,9 @@ def main():
         carrier_frequency=args.carrier_freq
     )
 
+    # Initialize metrics calculator
+    metrics_calc = MetricsCalculator(system_params)
+
     # Generate dataset
     output_path = generate_output_path(args.output)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -114,6 +117,36 @@ def main():
         logger.info(f"Dataset saved to {dataset_path}")
         generator.verify_complex_data(dataset_path)
         
+        # Add metrics calculation here
+        logger.info("Calculating and validating performance metrics...")
+        with h5py.File(dataset_path, 'r') as f:
+            # Extract necessary data from the dataset
+            channel_response = tf.convert_to_tensor(f['channel_response'][:])
+            tx_symbols = tf.convert_to_tensor(f['tx_symbols'][:])
+            rx_symbols = tf.convert_to_tensor(f['rx_symbols'][:])
+            snr_db = tf.convert_to_tensor(f['snr_db'][:])
+
+            # Calculate and validate metrics
+            metrics = metrics_calc.calculate_enhanced_metrics(
+                channel_response=channel_response,
+                tx_symbols=tx_symbols,
+                rx_symbols=rx_symbols,
+                snr_db=snr_db
+            )
+
+            # Log validation results
+            validation_results = metrics['validation_results']
+            if all(validation_results.values()):
+                logger.info("✅ All performance targets met!")
+                for metric, value in metrics.items():
+                    if metric != 'validation_results':
+                        logger.info(f"{metric}: {value}")
+            else:
+                logger.warning("❌ Some performance targets not met:")
+                for metric, is_valid in validation_results.items():
+                    status = "✅" if is_valid else "❌"
+                    logger.warning(f"{status} {metric}")
+        
         # Verify dataset if requested
         if args.verify:
             logger.info("Verifying dataset integrity...")
@@ -134,18 +167,3 @@ def main():
 
     logger.info("MIMO Dataset Generation completed successfully.")
     sys.exit(0)
-
-if __name__ == "__main__":
-    # Set environment variables for reproducibility
-    os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
-    os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
-    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-
-    # Set random seeds
-    seed = 42
-    np.random.seed(seed)
-    random.seed(seed)
-    tf.random.set_seed(seed)
-
-    # Execute main function
-    main()
