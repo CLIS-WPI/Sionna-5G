@@ -237,7 +237,12 @@ class MIMODatasetGenerator:
             self.logger.error(f"Failed to generate dataset: {str(e)}")
             raise
 
-    def verify_complex_data(file_path):
+    def verify_complex_data(self, file_path):
+        """Verify complex data types in the dataset.
+        
+        Args:
+            file_path (str): Path to the HDF5 dataset file
+        """
         with h5py.File(file_path, 'r') as f:
             channel_response = f['channel_data']['channel_response'][:]
             print("Channel Response dtype:", channel_response.dtype)
