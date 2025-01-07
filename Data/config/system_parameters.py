@@ -151,7 +151,7 @@ class SystemParameters:
         # Validate performance targets
         assert 0 < self.ber_target <= 1e-4, "BER target must be positive and <= 1e-4"
         assert 10 <= self.sinr_target <= 30, "SINR target must be between 10 and 30 dB"
-        assert (0 < self.spectral_efficiency_min < self.spectral_efficiency_max <= 10,"Invalid spectral efficiency range")
+        assert 0 < self.spectral_efficiency_min < self.spectral_efficiency_max <= 10, "Invalid spectral efficiency range"
 
     def set_global_seeds(self):
         """
