@@ -117,9 +117,44 @@ class MIMODatasetGenerator:
                                     self.system_params.min_snr_db,
                                     self.system_params.max_snr_db)
             
+            # Generate transmitted symbols (QPSK modulation)
+            if mod_scheme == 'QPSK':
+                tx_symbols = tf.complex(
+                    tf.random.uniform([batch_size, self.system_params.num_streams]) > 0.5,
+                    tf.random.uniform([batch_size, self.system_params.num_streams]) > 0.5
+                )
+                tx_symbols = (2 * tf.cast(tx_symbols, tf.float32) - 1) / tf.sqrt(2.0)
+                tx_symbols = tf.cast(tx_symbols, tf.complex64)
+            else:
+                raise ValueError(f"Unsupported modulation scheme: {mod_scheme}")
+
+            # Calculate received symbols
+            # First reshape channel response for matrix multiplication
+            H = tf.cast(channel_response, tf.complex64)
+            x = tf.expand_dims(tx_symbols, -1)  # Add dimension for matrix multiplication
+            
+            # Calculate received symbols before noise
+            y_without_noise = tf.matmul(H, x)
+            y_without_noise = tf.squeeze(y_without_noise, -1)  # Remove extra dimension
+            
+            # Add noise based on SNR
+            snr_linear = tf.pow(10.0, snr_db/10.0)
+            noise_power = 1.0 / snr_linear
+            noise = tf.complex(
+                tf.random.normal([batch_size, self.system_params.num_rx_antennas], 
+                            stddev=tf.sqrt(noise_power/2)),
+                tf.random.normal([batch_size, self.system_params.num_rx_antennas], 
+                            stddev=tf.sqrt(noise_power/2))
+            )
+            
+            # Final received symbols
+            rx_symbols = y_without_noise + noise
+            
             # Calculate metrics using the MetricsCalculator
-            metrics = self.metrics_calculator.calculate_mimo_metrics(
+            metrics = self.metrics_calculator.calculate_enhanced_metrics(
                 channel_response=channel_response,
+                tx_symbols=tx_symbols,
+                rx_symbols=rx_symbols,
                 snr_db=snr_db
             )
             
@@ -132,10 +167,14 @@ class MIMODatasetGenerator:
                 'path_loss_db': tf.cast(path_loss_db, tf.float32),
                 'distances': tf.cast(distances, tf.float32),
                 'modulation_scheme': mod_scheme,
+                'tx_symbols': tx_symbols,
+                'rx_symbols': rx_symbols,
+                'snr_db': snr_db,
                 'effective_snr': metrics['effective_snr'],
                 'spectral_efficiency': metrics['spectral_efficiency'],
                 'eigenvalues': metrics['eigenvalues'],
-                'condition_number': metrics['condition_number']
+                'condition_number': metrics['condition_number'],
+                'ber': metrics.get('ber', None)  # Include BER if available
             }
             
         except Exception as e:
