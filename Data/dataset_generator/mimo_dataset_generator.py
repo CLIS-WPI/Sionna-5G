@@ -150,7 +150,18 @@ class MIMODatasetGenerator:
                 # Create main data group
                 data_group = f.create_group('channel_data')
                 
-                # Define datasets to create
+                # Create and populate configuration group
+                config_group = f.create_group('configuration')
+                config_dict = self.system_params.get_config_dict()
+                
+                # Save configuration attributes
+                for key, value in config_dict.items():
+                    if isinstance(value, (int, float, str)):
+                        config_group.attrs[key] = value
+                    elif isinstance(value, (list, tuple)):
+                        config_group.create_dataset(key, data=value)
+                
+                # Create datasets
                 required_datasets = {
                     'channel_response': (self.system_params.total_samples, 
                                     self.system_params.num_rx_antennas,
@@ -158,11 +169,11 @@ class MIMODatasetGenerator:
                     'path_loss_db': (self.system_params.total_samples,),
                     'distances': (self.system_params.total_samples,),
                     'spectral_efficiency': (self.system_params.total_samples,),
-                    'effective_snr': (self.system_params.total_samples,),  # Add effective_snr
+                    'effective_snr': (self.system_params.total_samples,),
                     'eigenvalues': (self.system_params.total_samples,),
                     'condition_number': (self.system_params.total_samples,)
                 }
-                
+                                
                 # Create datasets
                 for name, shape in required_datasets.items():
                     dtype = np.complex64 if name == 'channel_response' else np.float32
