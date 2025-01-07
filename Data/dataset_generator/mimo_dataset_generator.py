@@ -43,10 +43,10 @@ from integrity.dataset_integrity_checker import MIMODatasetIntegrityChecker
 from utill.tensor_shape_validator import validate_mimo_tensor_shapes
 from utill.tensor_shape_validator import validate_mimo_metrics
 from tqdm import tqdm
+from core.path_loss_model import PathLossManager
+
 
 class MIMODatasetGenerator:
-    __version__ = '2.0.0'
-
     def __init__(
         self, 
         system_params: SystemParameters = None,
@@ -60,6 +60,10 @@ class MIMODatasetGenerator:
         
         self.system_params = system_params or SystemParameters()
         self.metrics_calculator = MetricsCalculator(self.system_params)
+        
+        # Initialize PathLossManager
+        self.path_loss_manager = PathLossManager(self.system_params)
+        
         # Initialize Sionna components
         self._setup_sionna_components()
         
@@ -71,7 +75,7 @@ class MIMODatasetGenerator:
             'effective_snr': {'min': -10.0, 'max': 40.0},
             'channel_response': {'min': -100.0, 'max': 100.0}
         }
-
+        
     def _setup_sionna_components(self):
         """Setup Sionna channel models and antenna arrays"""
         try:
