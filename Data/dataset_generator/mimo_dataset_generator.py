@@ -97,16 +97,6 @@ class MIMODatasetGenerator:
             raise
 
     def _generate_batch_data(self, batch_size: int, mod_scheme: str = 'QPSK') -> Dict[str, tf.Tensor]:
-        """
-        Generate a batch of MIMO channel data
-        
-        Args:
-            batch_size (int): Size of the batch to generate
-            mod_scheme (str, optional): Modulation scheme to use. Defaults to 'QPSK'
-            
-        Returns:
-            Dict[str, tf.Tensor]: Dictionary containing generated data
-        """
         try:
             # Generate distances first
             distances = tf.random.uniform([batch_size], minval=10.0, maxval=500.0)
@@ -122,34 +112,30 @@ class MIMODatasetGenerator:
                                 self.system_params.num_tx_antennas], dtype=tf.float32)
             )
             
-            # Ensure complex64 type
-            channel_response = tf.cast(channel_response, tf.complex64)
-            
-            # Convert path loss to linear scale and reshape for broadcasting
-            path_loss_linear = tf.pow(10.0, -path_loss_db/20.0)
-            path_loss_shaped = tf.cast(
-                tf.reshape(path_loss_linear, [-1, 1, 1]),
-                tf.complex64
-            )
-            
-            # Apply path loss to channel response
-            channel_response = channel_response * path_loss_shaped
+            # Calculate SNR values
+            snr_db = tf.random.uniform([batch_size], 
+                                    self.system_params.min_snr_db,
+                                    self.system_params.max_snr_db)
             
             # Calculate metrics using the MetricsCalculator
             metrics = self.metrics_calculator.calculate_mimo_metrics(
                 channel_response=channel_response,
-                snr_db=tf.random.uniform([batch_size], 
-                                    self.system_params.min_snr_db,
-                                    self.system_params.max_snr_db)
+                snr_db=snr_db
             )
             
+            # Ensure eigenvalues have correct shape by taking the mean across antenna dimension
+            if 'eigenvalues' in metrics and len(metrics['eigenvalues'].shape) > 1:
+                metrics['eigenvalues'] = tf.reduce_mean(metrics['eigenvalues'], axis=1)
+            
             return {
-                'channel_response': channel_response,  # complex64
-                'path_loss_db': tf.cast(path_loss_db, tf.float32),  # Now properly defined
+                'channel_response': channel_response,
+                'path_loss_db': tf.cast(path_loss_db, tf.float32),
                 'distances': tf.cast(distances, tf.float32),
                 'modulation_scheme': mod_scheme,
                 'effective_snr': metrics['effective_snr'],
-                **metrics  # Include calculated metrics
+                'spectral_efficiency': metrics['spectral_efficiency'],
+                'eigenvalues': metrics['eigenvalues'],
+                'condition_number': metrics['condition_number']
             }
             
         except Exception as e:
