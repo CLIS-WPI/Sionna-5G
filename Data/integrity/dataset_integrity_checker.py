@@ -136,7 +136,7 @@ class MIMODatasetIntegrityChecker:
             'configuration': {},
             'errors': [],
             'warnings': [],
-            'validation_details': {}
+            'validation_details': {},  # Added comma here
             'complex_data_verification': {}
         }
         
