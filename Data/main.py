@@ -112,7 +112,8 @@ def main():
             sys.exit(1)
 
         logger.info(f"Dataset saved to {dataset_path}")
-
+        generator.verify_complex_data(dataset_path)
+        
         # Verify dataset if requested
         if args.verify:
             logger.info("Verifying dataset integrity...")
