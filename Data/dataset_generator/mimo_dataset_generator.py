@@ -132,14 +132,17 @@ class MIMODatasetGenerator:
 
             # Calculate received symbols
             H = tf.cast(channel_response, tf.complex64)
-            x = tf.expand_dims(tx_symbols, -1)
+            x = tf.expand_dims(tx_symbols, -1)  # Shape: [batch_size, num_streams, 1]
             
             # Calculate received symbols before noise
-            y_without_noise = tf.matmul(H, x)
-            y_without_noise = tf.squeeze(y_without_noise, -1)
+            y_without_noise = tf.matmul(H, x)  # Shape: [batch_size, num_rx_antennas, 1]
+            y_without_noise = tf.squeeze(y_without_noise, -1)  # Shape: [batch_size, num_rx_antennas]
             
             # Add noise based on SNR
             snr_linear = tf.pow(10.0, snr_db/10.0)
+            # Reshape snr_linear to match the dimensions for broadcasting
+            snr_linear = tf.expand_dims(snr_linear, -1)  # Shape: [batch_size, 1]
+            
             noise_power = 1.0 / snr_linear
             noise = tf.complex(
                 tf.random.normal([batch_size, self.system_params.num_rx_antennas], 
