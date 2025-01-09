@@ -112,7 +112,7 @@ class MIMODatasetGenerator:
                                 self.system_params.num_tx_antennas], dtype=tf.float32)
             )
             
-            # Calculate SNR values
+            # Calculate SNR values and convert to complex64
             snr_db = tf.random.uniform([batch_size], 
                                     self.system_params.min_snr_db,
                                     self.system_params.max_snr_db)
@@ -131,9 +131,11 @@ class MIMODatasetGenerator:
                 real_part = 2.0 * real_part - 1.0
                 imag_part = 2.0 * imag_part - 1.0
                 
-                # Create complex symbols
-                tx_symbols = tf.complex(real_part, imag_part) / tf.sqrt(2.0)
-                
+                # Create complex symbols with explicit dtype
+                tx_symbols = tf.cast(
+                    tf.complex(real_part, imag_part) / tf.sqrt(2.0),
+                    tf.complex64
+                )
             else:
                 raise ValueError(f"Unsupported modulation scheme: {mod_scheme}")
 
@@ -157,8 +159,11 @@ class MIMODatasetGenerator:
                             stddev=tf.sqrt(noise_power/2))
             )
             
-            # Final received symbols
-            rx_symbols = y_without_noise + noise
+            # Cast noise to complex64
+            noise = tf.cast(noise, tf.complex64)
+            
+            # Final received symbols (ensure complex64)
+            rx_symbols = tf.cast(y_without_noise + noise, tf.complex64)
             
             # Calculate metrics
             metrics = self.metrics_calculator.calculate_enhanced_metrics(
@@ -169,16 +174,16 @@ class MIMODatasetGenerator:
             )
             
             return {
-                'channel_response': channel_response,
+                'channel_response': tf.cast(channel_response, tf.complex64),
                 'path_loss_db': tf.cast(path_loss_db, tf.float32),
                 'distances': tf.cast(distances, tf.float32),
                 'modulation_scheme': mod_scheme,
-                'tx_symbols': tx_symbols,
-                'rx_symbols': rx_symbols,
-                'snr_db': snr_db,
-                'effective_snr': metrics['effective_snr'],
-                'spectral_efficiency': metrics['spectral_efficiency'],
-                'condition_number': metrics['condition_number']
+                'tx_symbols': tf.cast(tx_symbols, tf.complex64),
+                'rx_symbols': tf.cast(rx_symbols, tf.complex64),
+                'snr_db': tf.cast(snr_db, tf.float32),
+                'effective_snr': tf.cast(metrics['effective_snr'], tf.float32),
+                'spectral_efficiency': tf.cast(metrics['spectral_efficiency'], tf.float32),
+                'condition_number': tf.cast(metrics['condition_number'], tf.float32)
             }
             
         except Exception as e:
