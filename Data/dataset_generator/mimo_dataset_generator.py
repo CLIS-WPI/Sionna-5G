@@ -119,14 +119,21 @@ class MIMODatasetGenerator:
             
             # Generate transmitted symbols (QPSK modulation)
             if mod_scheme == 'QPSK':
-                # First generate random values as float32
-                real_part = tf.cast(tf.random.uniform([batch_size, self.system_params.num_streams]) > 0.5, tf.float32)
-                imag_part = tf.cast(tf.random.uniform([batch_size, self.system_params.num_streams]) > 0.5, tf.float32)
+                # Generate random bits and convert to float32
+                real_bits = tf.random.uniform([batch_size, self.system_params.num_streams]) > 0.5
+                imag_bits = tf.random.uniform([batch_size, self.system_params.num_streams]) > 0.5
                 
-                # Create complex numbers with proper types
-                tx_symbols = tf.complex(real_part, imag_part)
-                scale = tf.cast(tf.sqrt(2.0), tf.complex64)
-                tx_symbols = (2.0 * tx_symbols - tf.complex(1.0, 0.0)) / scale
+                # Convert boolean to float32
+                real_part = tf.cast(real_bits, tf.float32)
+                imag_part = tf.cast(imag_bits, tf.float32)
+                
+                # Scale to proper QPSK constellation points (-1-1j, -1+1j, 1-1j, 1+1j)
+                real_part = 2.0 * real_part - 1.0
+                imag_part = 2.0 * imag_part - 1.0
+                
+                # Create complex symbols
+                tx_symbols = tf.complex(real_part, imag_part) / tf.sqrt(2.0)
+                
             else:
                 raise ValueError(f"Unsupported modulation scheme: {mod_scheme}")
 
@@ -140,7 +147,6 @@ class MIMODatasetGenerator:
             
             # Add noise based on SNR
             snr_linear = tf.pow(10.0, snr_db/10.0)
-            # Reshape snr_linear to match the dimensions for broadcasting
             snr_linear = tf.expand_dims(snr_linear, -1)  # Shape: [batch_size, 1]
             
             noise_power = 1.0 / snr_linear
