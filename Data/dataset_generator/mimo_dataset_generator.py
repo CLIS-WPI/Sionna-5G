@@ -118,7 +118,6 @@ class MIMODatasetGenerator:
                                     self.system_params.max_snr_db)
             
             # Generate transmitted symbols (QPSK modulation)
-            # Generate transmitted symbols (QPSK modulation)
             if mod_scheme == 'QPSK':
                 # First generate random values as float32
                 real_part = tf.cast(tf.random.uniform([batch_size, self.system_params.num_streams]) > 0.5, tf.float32)
@@ -126,19 +125,18 @@ class MIMODatasetGenerator:
                 
                 # Create complex numbers with proper types
                 tx_symbols = tf.complex(real_part, imag_part)
-                tx_symbols = (2 * tx_symbols - 1) / tf.sqrt(2.0)
-                tx_symbols = tf.cast(tx_symbols, tf.complex64)
+                scale = tf.cast(tf.sqrt(2.0), tf.complex64)
+                tx_symbols = (2.0 * tx_symbols - tf.complex(1.0, 0.0)) / scale
             else:
                 raise ValueError(f"Unsupported modulation scheme: {mod_scheme}")
 
             # Calculate received symbols
-            # First reshape channel response for matrix multiplication
             H = tf.cast(channel_response, tf.complex64)
-            x = tf.expand_dims(tx_symbols, -1)  # Add dimension for matrix multiplication
+            x = tf.expand_dims(tx_symbols, -1)
             
             # Calculate received symbols before noise
             y_without_noise = tf.matmul(H, x)
-            y_without_noise = tf.squeeze(y_without_noise, -1)  # Remove extra dimension
+            y_without_noise = tf.squeeze(y_without_noise, -1)
             
             # Add noise based on SNR
             snr_linear = tf.pow(10.0, snr_db/10.0)
@@ -153,17 +151,13 @@ class MIMODatasetGenerator:
             # Final received symbols
             rx_symbols = y_without_noise + noise
             
-            # Calculate metrics using the MetricsCalculator
+            # Calculate metrics
             metrics = self.metrics_calculator.calculate_enhanced_metrics(
                 channel_response=channel_response,
                 tx_symbols=tx_symbols,
                 rx_symbols=rx_symbols,
                 snr_db=snr_db
             )
-            
-            # Ensure eigenvalues have correct shape by taking the mean across antenna dimension
-            if 'eigenvalues' in metrics and len(metrics['eigenvalues'].shape) > 1:
-                metrics['eigenvalues'] = tf.reduce_mean(metrics['eigenvalues'], axis=1)
             
             return {
                 'channel_response': channel_response,
@@ -175,9 +169,7 @@ class MIMODatasetGenerator:
                 'snr_db': snr_db,
                 'effective_snr': metrics['effective_snr'],
                 'spectral_efficiency': metrics['spectral_efficiency'],
-                'eigenvalues': metrics['eigenvalues'],
-                'condition_number': metrics['condition_number'],
-                'ber': metrics.get('ber', None)  # Include BER if available
+                'condition_number': metrics['condition_number']
             }
             
         except Exception as e:
@@ -196,22 +188,15 @@ class MIMODatasetGenerator:
                 # Create main data group
                 data_group = f.create_group('channel_data')
                 
-                # Create datasets with total size and appropriate dtypes
+                # Initialize datasets once
                 datasets = {
                     'channel_response': {
-                        'shape': (total_samples, 
-                                self.system_params.num_rx_antennas,
+                        'shape': (total_samples, self.system_params.num_rx_antennas,
                                 self.system_params.num_tx_antennas),
                         'dtype': np.complex64
                     },
-                    'path_loss_db': {
-                        'shape': (total_samples,),
-                        'dtype': np.float32
-                    },
-                    'distances': {
-                        'shape': (total_samples,),
-                        'dtype': np.float32
-                    },
+                    'path_loss_db': {'shape': (total_samples,), 'dtype': np.float32},
+                    'distances': {'shape': (total_samples,), 'dtype': np.float32},
                     'tx_symbols': {
                         'shape': (total_samples, self.system_params.num_streams),
                         'dtype': np.complex64
@@ -220,62 +205,37 @@ class MIMODatasetGenerator:
                         'shape': (total_samples, self.system_params.num_streams),
                         'dtype': np.complex64
                     },
-                    'snr_db': {
-                        'shape': (total_samples,),
-                        'dtype': np.float32
-                    },
-                    'spectral_efficiency': {
-                        'shape': (total_samples,),
-                        'dtype': np.float32
-                    },
-                    'effective_snr': {
-                        'shape': (total_samples,),
-                        'dtype': np.float32
-                    },
-                    'condition_number': {
-                        'shape': (total_samples,),
-                        'dtype': np.float32
-                    }
+                    'snr_db': {'shape': (total_samples,), 'dtype': np.float32},
+                    'spectral_efficiency': {'shape': (total_samples,), 'dtype': np.float32},
+                    'effective_snr': {'shape': (total_samples,), 'dtype': np.float32},
+                    'condition_number': {'shape': (total_samples,), 'dtype': np.float32}
                 }
                 
-                # Initialize datasets once
+                # Create datasets
                 for name, config in datasets.items():
-                    data_group.create_dataset(
-                        name, 
-                        shape=config['shape'],
-                        dtype=config['dtype']
-                    )
+                    data_group.create_dataset(name, shape=config['shape'],
+                                        dtype=config['dtype'])
                 
-                # Generate and store data in batches - single loop
-                samples_processed = 0
+                # Generate and store data in batches
                 with tqdm(total=total_samples, desc="Generating samples") as pbar:
                     for batch_idx in range(num_batches):
+                        start_idx = batch_idx * batch_size
                         try:
-                            # Generate batch data
                             batch_data = self._generate_batch_data(batch_size)
-                            
-                            # Calculate indices
-                            start_idx = batch_idx * batch_size
                             end_idx = start_idx + batch_size
                             
                             # Store batch data
                             for name, data in batch_data.items():
                                 if name != 'modulation_scheme':
-                                    try:
-                                        data_group[name][start_idx:end_idx] = data
-                                    except Exception as e:
-                                        self.logger.error(f"Error storing {name} data: {str(e)}")
-                                        raise
+                                    data_group[name][start_idx:end_idx] = data
                             
-                            # Update progress
-                            samples_processed += batch_size
                             pbar.update(batch_size)
                             
                         except Exception as e:
                             self.logger.warning(f"Error generating batch {start_idx}: {str(e)}")
                             continue
                 
-                # Add configuration group
+                # Add configuration
                 config_group = f.create_group('configuration')
                 config_dict = self.system_params.get_config_dict()
                 for key, value in config_dict.items():
@@ -284,13 +244,12 @@ class MIMODatasetGenerator:
                     elif isinstance(value, (list, tuple)):
                         config_group.create_dataset(key, data=value)
                 
-                self.logger.info(f"Dataset generated successfully: {save_path}")
-                return save_path
-                
+            self.logger.info(f"Dataset generated successfully: {save_path}")
+            return save_path
+            
         except Exception as e:
             self.logger.error(f"Failed to generate dataset: {str(e)}")
             raise
-
     def verify_complex_data(self, file_path):
         """Verify complex data types in the dataset.
         
