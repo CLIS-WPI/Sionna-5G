@@ -152,11 +152,18 @@ class MIMODatasetGenerator:
             snr_linear = tf.expand_dims(snr_linear, -1)  # Shape: [batch_size, 1]
             
             noise_power = 1.0 / snr_linear
+            # Add noise based on SNR
+            snr_linear = tf.cast(tf.pow(10.0, snr_db/10.0), tf.float32)
+            snr_linear = tf.expand_dims(snr_linear, -1)  # Shape: [batch_size, 1]
+
+            noise_power = tf.cast(1.0 / snr_linear, tf.float32)
             noise = tf.complex(
                 tf.random.normal([batch_size, self.system_params.num_rx_antennas], 
-                            stddev=tf.sqrt(noise_power/2)),
+                                stddev=tf.sqrt(noise_power/2),
+                                dtype=tf.float32),  # Explicitly specify dtype
                 tf.random.normal([batch_size, self.system_params.num_rx_antennas], 
-                            stddev=tf.sqrt(noise_power/2))
+                                stddev=tf.sqrt(noise_power/2),
+                                dtype=tf.float32)  # Explicitly specify dtype
             )
             
             # Cast noise to complex64
