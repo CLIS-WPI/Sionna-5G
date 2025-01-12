@@ -168,7 +168,7 @@ class MetricsCalculator:
         rx_symbols: tf.Tensor,
         snr_db: tf.Tensor
     ) -> Dict[str, tf.Tensor]:
-        """Calculate enhanced metrics with proper dtype handling."""
+        """Calculate enhanced metrics with proper dtype and shape handling."""
         try:
             # Ensure proper dtypes
             channel_response = tf.cast(channel_response, tf.complex64)
@@ -189,19 +189,28 @@ class MetricsCalculator:
             )
 
             # Calculate channel capacity (real-valued)
+            # Reshape snr_linear to match eigenvalues shape
             snr_linear = tf.pow(10.0, snr_db/10.0)
+            snr_linear_expanded = tf.expand_dims(snr_linear, axis=-1)  # [batch_size, 1]
+            
             capacity = tf.reduce_sum(
-                tf.math.log(1.0 + snr_linear * tf.square(tf.abs(s))) / tf.math.log(2.0),
+                tf.math.log(1.0 + snr_linear_expanded * tf.square(tf.abs(s))) / tf.math.log(2.0),
                 axis=-1
             )
 
             # Calculate effective SNR (real-valued)
             channel_power = tf.reduce_mean(tf.square(tf.abs(channel_response)), axis=[-2, -1])
-            noise_power = tf.reduce_mean(tf.square(tf.abs(rx_symbols - tf.matmul(
-                channel_response, 
-                tf.expand_dims(tx_symbols, -1)
-            )[:, :, 0])), axis=-1)
             
+            # Reshape tx_symbols for matrix multiplication
+            tx_symbols_reshaped = tf.expand_dims(tx_symbols, -1)  # [batch_size, num_streams, 1]
+            
+            # Calculate received signal without noise
+            expected_rx = tf.matmul(channel_response, tx_symbols_reshaped)[:, :, 0]  # Remove last dimension
+            
+            # Calculate noise power
+            noise_power = tf.reduce_mean(tf.square(tf.abs(rx_symbols - expected_rx)), axis=-1)
+            
+            # Calculate effective SNR
             effective_snr = tf.cast(
                 10.0 * tf.math.log(channel_power / (noise_power + 1e-10)) / tf.math.log(10.0),
                 tf.float32
