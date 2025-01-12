@@ -140,27 +140,25 @@ class MetricsCalculator:
 
         return metrics
 
-
     def calculate_ber(self, tx_symbols: tf.Tensor, rx_symbols: tf.Tensor, snr_db: tf.Tensor) -> Dict[str, tf.Tensor]:
         """
-        Calculate and validate Bit Error Rate across different SNR levels.
+        Calculate and validate Bit Error Rate across different SNR levels using Sionna's utilities.
         """
         try:
             metrics = {}
             
-            # Ensure proper dtype and shape casting
+            # Ensure proper dtype casting
             tx_symbols = tf.cast(tx_symbols, tf.complex64)
             rx_symbols = tf.cast(rx_symbols, tf.complex64)
             snr_db = tf.cast(snr_db, tf.float32)
+
+            # Use tf.math operations for complex numbers
+            tx_real = tf.math.real(tx_symbols) > 0
+            tx_imag = tf.math.imag(tx_symbols) > 0
+            rx_real = tf.math.real(rx_symbols) > 0
+            rx_imag = tf.math.imag(rx_symbols) > 0
             
-            # Detect QPSK symbols (assuming QPSK modulation)
-            # Convert complex symbols to binary decisions based on real and imaginary parts
-            tx_real = tf.real(tx_symbols) > 0
-            tx_imag = tf.imag(tx_symbols) > 0
-            rx_real = tf.real(rx_symbols) > 0
-            rx_imag = tf.imag(rx_symbols) > 0
-            
-            # Calculate bit errors for real and imaginary parts separately
+            # Calculate bit errors
             real_errors = tf.cast(tx_real != rx_real, tf.float32)
             imag_errors = tf.cast(tx_imag != rx_imag, tf.float32)
             
@@ -179,7 +177,7 @@ class MetricsCalculator:
             else:
                 metrics['all_targets_met'] = False
             
-            # Calculate BER for different SNR levels
+            # Calculate BER curve
             snr_levels = tf.cast(tf.round(snr_db), tf.int32)
             unique_snrs = tf.sort(tf.unique(snr_levels)[0])
             
@@ -198,6 +196,8 @@ class MetricsCalculator:
         except Exception as e:
             self.logger.error(f"Error in BER calculation: {str(e)}")
             raise
+        
+
     def calculate_enhanced_metrics(
         self, 
         channel_response: tf.Tensor,
