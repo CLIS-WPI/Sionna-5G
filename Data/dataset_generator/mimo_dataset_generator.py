@@ -98,83 +98,80 @@ class MIMODatasetGenerator:
 
     def _generate_batch_data(self, batch_size: int, mod_scheme: str = 'QPSK') -> Dict[str, tf.Tensor]:
         try:
-            # Generate distances first
-            distances = tf.random.uniform([batch_size], minval=10.0, maxval=500.0)
-            
-            # Calculate path loss using PathLossManager
-            path_loss_db = self.path_loss_manager.calculate_free_space_path_loss(distances)
-            
-            # Generate complex channel response
-            channel_response = tf.complex(
-                tf.random.normal([batch_size, self.system_params.num_rx_antennas, 
-                                self.system_params.num_tx_antennas], dtype=tf.float32),
-                tf.random.normal([batch_size, self.system_params.num_rx_antennas, 
-                                self.system_params.num_tx_antennas], dtype=tf.float32)
+            # Generate distances and path loss (ensure float32)
+            distances = tf.cast(
+                tf.random.uniform([batch_size], minval=10.0, maxval=500.0),
+                tf.float32
+            )
+            path_loss_db = tf.cast(
+                self.path_loss_manager.calculate_free_space_path_loss(distances),
+                tf.float32
             )
             
-            # Calculate SNR values and convert to complex64
-            snr_db = tf.random.uniform([batch_size], 
-                                    self.system_params.min_snr_db,
-                                    self.system_params.max_snr_db)
-            
-            # Generate transmitted symbols (QPSK modulation)
-            if mod_scheme == 'QPSK':
-                # Generate random bits and convert to float32
-                real_bits = tf.random.uniform([batch_size, self.system_params.num_streams]) > 0.5
-                imag_bits = tf.random.uniform([batch_size, self.system_params.num_streams]) > 0.5
-                
-                # Convert boolean to float32
-                real_part = tf.cast(real_bits, tf.float32)
-                imag_part = tf.cast(imag_bits, tf.float32)
-                
-                # Scale to proper QPSK constellation points (-1-1j, -1+1j, 1-1j, 1+1j)
-                real_part = 2.0 * real_part - 1.0
-                imag_part = 2.0 * imag_part - 1.0
-                
-                # Create complex symbols with explicit dtype
-                tx_symbols = tf.cast(
-                    tf.complex(real_part, imag_part) / tf.sqrt(2.0),
-                    tf.complex64
+            # Generate channel response directly as complex64
+            channel_response = tf.cast(tf.complex(
+                tf.random.normal(
+                    [batch_size, self.system_params.num_rx_antennas, self.system_params.num_tx_antennas]
+                ),
+                tf.random.normal(
+                    [batch_size, self.system_params.num_rx_antennas, self.system_params.num_tx_antennas]
                 )
+            ), tf.complex64)
+            
+            # Generate SNR values (ensure float32)
+            snr_db = tf.cast(
+                tf.random.uniform(
+                    [batch_size], 
+                    self.system_params.min_snr_db,
+                    self.system_params.max_snr_db
+                ),
+                tf.float32
+            )
+            
+            # Generate QPSK symbols using Sionna-style constellation points
+            if mod_scheme == 'QPSK':
+                # Define QPSK constellation points directly as complex64
+                qpsk_points = tf.constant([
+                    [-1.0 - 1.0j, -1.0 + 1.0j, 1.0 - 1.0j, 1.0 + 1.0j]
+                ], dtype=tf.complex64) / tf.cast(tf.sqrt(2.0), tf.complex64)
+                
+                # Generate random indices
+                indices = tf.random.uniform(
+                    [batch_size, self.system_params.num_streams],
+                    minval=0,
+                    maxval=4,
+                    dtype=tf.int32
+                )
+                
+                # Map to constellation points (ensures complex64)
+                tx_symbols = tf.gather(qpsk_points, indices, axis=1)
             else:
                 raise ValueError(f"Unsupported modulation scheme: {mod_scheme}")
 
-            # Calculate received symbols before noise
-            H = tf.cast(channel_response, tf.complex64)
-            x = tf.expand_dims(tx_symbols, -1)  # Shape: [batch_size, num_streams, 1]
+            # Calculate received symbols (maintain complex64)
+            x = tf.expand_dims(tx_symbols, -1)
+            y_without_noise = tf.matmul(channel_response, x)
+            y_without_noise = tf.squeeze(y_without_noise, -1)
 
-            # Calculate received symbols before noise
-            y_without_noise = tf.matmul(H, x)  # Shape: [batch_size, num_rx_antennas, 1]
-            y_without_noise = tf.cast(tf.squeeze(y_without_noise, -1), tf.complex64)  # Shape: [batch_size, num_rx_antennas]
+            # Generate noise with proper scaling
+            snr_linear = tf.pow(10.0, snr_db/10.0)
+            noise_power = 1.0 / tf.expand_dims(snr_linear, -1)
+            noise_stddev = tf.sqrt(noise_power/2.0)
+            
+            # Generate complex noise directly as complex64
+            noise = tf.cast(tf.complex(
+                tf.random.normal(
+                    tf.shape(y_without_noise),
+                    stddev=noise_stddev
+                ),
+                tf.random.normal(
+                    tf.shape(y_without_noise),
+                    stddev=noise_stddev
+                )
+            ), tf.complex64)
 
-            # Add noise based on SNR
-            snr_linear = tf.cast(tf.pow(10.0, snr_db/10.0), tf.float32)
-            snr_linear = tf.expand_dims(snr_linear, -1)  # Shape: [batch_size, 1]
-
-            # Calculate noise power and generate complex noise
-            noise_power = tf.cast(1.0 / snr_linear, tf.float32)
-            noise_stddev = tf.sqrt(noise_power/2)
-
-            # Generate complex noise with explicit dtypes
-            noise_real = tf.random.normal(
-                [batch_size, self.system_params.num_rx_antennas],
-                mean=0.0,
-                stddev=noise_stddev,
-                dtype=tf.float32
-            )
-            noise_imag = tf.random.normal(
-                [batch_size, self.system_params.num_rx_antennas],
-                mean=0.0,
-                stddev=noise_stddev,
-                dtype=tf.float32
-            )
-
-            # Create complex noise
-            noise = tf.complex(noise_real, noise_imag)
-            noise = tf.cast(noise, tf.complex64)
-
-            # Add noise to received symbols
-            rx_symbols = tf.cast(y_without_noise + noise, tf.complex64)
+            # Add noise (maintain complex64)
+            rx_symbols = y_without_noise + noise
             
             # Calculate metrics
             metrics = self.metrics_calculator.calculate_enhanced_metrics(
@@ -184,14 +181,15 @@ class MIMODatasetGenerator:
                 snr_db=snr_db
             )
             
+            # Return with explicit and consistent dtypes
             return {
-                'channel_response': tf.cast(channel_response, tf.complex64),
-                'path_loss_db': tf.cast(path_loss_db, tf.float32),
-                'distances': tf.cast(distances, tf.float32),
+                'channel_response': channel_response,  # Already complex64
+                'path_loss_db': path_loss_db,         # Already float32
+                'distances': distances,                # Already float32
                 'modulation_scheme': mod_scheme,
-                'tx_symbols': tf.cast(tx_symbols, tf.complex64),
-                'rx_symbols': tf.cast(rx_symbols, tf.complex64),
-                'snr_db': tf.cast(snr_db, tf.float32),
+                'tx_symbols': tx_symbols,             # Already complex64
+                'rx_symbols': rx_symbols,             # Already complex64
+                'snr_db': snr_db,                     # Already float32
                 'effective_snr': tf.cast(metrics['effective_snr'], tf.float32),
                 'spectral_efficiency': tf.cast(metrics['spectral_efficiency'], tf.float32),
                 'condition_number': tf.cast(metrics['condition_number'], tf.float32)
