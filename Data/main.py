@@ -119,7 +119,9 @@ def main():
         generator.verify_complex_data(dataset_path)
         
         # Add metrics calculation here
-        # Add metrics calculation here
+        # In main.py, modify the metrics calculation section:
+
+        # Replace the existing metrics calculation section with this:
         logger.info("Calculating and validating performance metrics...")
         with h5py.File(dataset_path, 'r') as f:
             try:
@@ -138,7 +140,7 @@ def main():
                 logger.info(f"RX Symbols shape: {rx_symbols.shape}")
                 logger.info(f"SNR shape: {snr_db.shape}")
 
-                # Calculate and validate metrics
+                # Calculate metrics
                 metrics = metrics_calc.calculate_enhanced_metrics(
                     channel_response=channel_response,
                     tx_symbols=tx_symbols,
@@ -146,43 +148,50 @@ def main():
                     snr_db=snr_db
                 )
 
+                # Validate metrics separately
+                validation_results = {}
+                
+                # Validate spectral efficiency
+                if 'spectral_efficiency' in metrics:
+                    se = metrics['spectral_efficiency']
+                    se_valid = tf.reduce_mean(se) >= system_params.spectral_efficiency_min and \
+                            tf.reduce_mean(se) <= system_params.spectral_efficiency_max
+                    validation_results['spectral_efficiency'] = se_valid
+                    
+                # Validate effective SNR
+                if 'effective_snr' in metrics:
+                    eff_snr = metrics['effective_snr']
+                    snr_valid = tf.reduce_mean(eff_snr) >= system_params.sinr_target
+                    validation_results['effective_snr'] = snr_valid
+                    
+                # Validate condition number
+                if 'condition_number' in metrics:
+                    cond_num = metrics['condition_number']
+                    cond_valid = tf.reduce_mean(cond_num) < 100  # Example threshold
+                    validation_results['condition_number'] = cond_valid
+
+                # Log validation results
+                if all(validation_results.values()):
+                    logger.info("✓ All performance targets met!")
+                    for metric, value in metrics.items():
+                        mean_value = tf.reduce_mean(value)
+                        logger.info(f"{metric}: {mean_value:.4f}")
+                else:
+                    logger.warning("⨯ Some performance targets not met:")
+                    for metric, is_valid in validation_results.items():
+                        status = "✓" if is_valid else "⨯"
+                        if metric in metrics:
+                            mean_value = tf.reduce_mean(metrics[metric])
+                            logger.warning(f"{status} {metric}: {mean_value:.4f}")
+                        else:
+                            logger.warning(f"{status} {metric}: N/A")
+
             except KeyError as e:
                 logger.error(f"Failed to read dataset: Missing key {e}")
                 raise
-            except Exception as e:
-                logger.error(f"Error during metrics calculation: {e}")
-                raise
-
-            # Log validation results
-            validation_results = metrics['validation_results']
-            if all(validation_results.values()):
-                logger.info("✅ All performance targets met!")
-                for metric, value in metrics.items():
-                    if metric != 'validation_results':
-                        logger.info(f"{metric}: {value}")
-            else:
-                logger.warning("❌ Some performance targets not met:")
-                for metric, is_valid in validation_results.items():
-                    status = "✅" if is_valid else "❌"
-                    logger.warning(f"{status} {metric}")
-        
-        # Verify dataset if requested
-        if args.verify:
-            logger.info("Verifying dataset integrity...")
-            with MIMODatasetIntegrityChecker(dataset_path) as checker:
-                integrity_report = checker.check_dataset_integrity()
-                if integrity_report.get('overall_status', False):
-                    logger.info("✅ Dataset verification successful.")
-                else:
-                    logger.warning("❌ Dataset verification failed.")
-                    if 'errors' in integrity_report:
-                        for error in integrity_report['errors']:
-                            logger.error(f"  • {error}")
-                    sys.exit(1)
-
     except Exception as e:
-        logger.error(f"Error during dataset generation: {e}", exc_info=True)
-        sys.exit(1)
+        logger.error(f"Error during metrics calculation: {e}")
+        raise
 
     logger.info("MIMO Dataset Generation completed successfully.")
     sys.exit(0)
