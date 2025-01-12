@@ -139,37 +139,41 @@ class MIMODatasetGenerator:
             else:
                 raise ValueError(f"Unsupported modulation scheme: {mod_scheme}")
 
-            # Calculate received symbols
+            # Calculate received symbols before noise
             H = tf.cast(channel_response, tf.complex64)
             x = tf.expand_dims(tx_symbols, -1)  # Shape: [batch_size, num_streams, 1]
-            
+
             # Calculate received symbols before noise
             y_without_noise = tf.matmul(H, x)  # Shape: [batch_size, num_rx_antennas, 1]
-            y_without_noise = tf.squeeze(y_without_noise, -1)  # Shape: [batch_size, num_rx_antennas]
-            
-            # Add noise based on SNR
-            snr_linear = tf.pow(10.0, snr_db/10.0)
-            snr_linear = tf.expand_dims(snr_linear, -1)  # Shape: [batch_size, 1]
-            
-            noise_power = 1.0 / snr_linear
+            y_without_noise = tf.cast(tf.squeeze(y_without_noise, -1), tf.complex64)  # Shape: [batch_size, num_rx_antennas]
+
             # Add noise based on SNR
             snr_linear = tf.cast(tf.pow(10.0, snr_db/10.0), tf.float32)
             snr_linear = tf.expand_dims(snr_linear, -1)  # Shape: [batch_size, 1]
 
+            # Calculate noise power and generate complex noise
             noise_power = tf.cast(1.0 / snr_linear, tf.float32)
-            noise = tf.complex(
-                tf.random.normal([batch_size, self.system_params.num_rx_antennas], 
-                                stddev=tf.sqrt(noise_power/2),
-                                dtype=tf.float32),  # Explicitly specify dtype
-                tf.random.normal([batch_size, self.system_params.num_rx_antennas], 
-                                stddev=tf.sqrt(noise_power/2),
-                                dtype=tf.float32)  # Explicitly specify dtype
+            noise_stddev = tf.sqrt(noise_power/2)
+
+            # Generate complex noise with explicit dtypes
+            noise_real = tf.random.normal(
+                [batch_size, self.system_params.num_rx_antennas],
+                mean=0.0,
+                stddev=noise_stddev,
+                dtype=tf.float32
             )
-            
-            # Cast noise to complex64
+            noise_imag = tf.random.normal(
+                [batch_size, self.system_params.num_rx_antennas],
+                mean=0.0,
+                stddev=noise_stddev,
+                dtype=tf.float32
+            )
+
+            # Create complex noise
+            noise = tf.complex(noise_real, noise_imag)
             noise = tf.cast(noise, tf.complex64)
-            
-            # Final received symbols (ensure complex64)
+
+            # Add noise to received symbols
             rx_symbols = tf.cast(y_without_noise + noise, tf.complex64)
             
             # Calculate metrics
