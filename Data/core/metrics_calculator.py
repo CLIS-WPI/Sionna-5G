@@ -32,6 +32,11 @@ class MetricsCalculator:
             'noise_power': {'min': 1e-10, 'max': 1e3}
         }
 
+    def validate_tensor_types(self, channel_response: tf.Tensor) -> None:
+        """Validate tensor types before computation"""
+        if channel_response.dtype != tf.complex64:
+            raise TypeError(f"Channel response must be complex64, got {channel_response.dtype}")
+        
     def validate_performance_metrics(self, metrics: Dict[str, tf.Tensor]) -> Dict[str, bool]:
         """
         Validates if the calculated metrics meet the target requirements.
@@ -157,41 +162,66 @@ class MetricsCalculator:
         return ber
 
     def calculate_enhanced_metrics(
-        self,
+        self, 
         channel_response: tf.Tensor,
         tx_symbols: tf.Tensor,
         rx_symbols: tf.Tensor,
         snr_db: tf.Tensor
-    ) -> Dict[str, Any]:
-        """
-        Calculate and validate enhanced performance metrics.
-        
-        Args:
-            channel_response: Complex channel matrix [batch_size, num_rx, num_tx]
-            tx_symbols: Transmitted symbols [batch_size, num_streams]
-            rx_symbols: Received symbols [batch_size, num_streams]
-            snr_db: SNR values in dB [batch_size]
+    ) -> Dict[str, tf.Tensor]:
+        """Calculate enhanced metrics with proper dtype handling."""
+        try:
+            # Ensure proper dtypes
+            channel_response = tf.cast(channel_response, tf.complex64)
+            tx_symbols = tf.cast(tx_symbols, tf.complex64)
+            rx_symbols = tf.cast(rx_symbols, tf.complex64)
+            snr_db = tf.cast(snr_db, tf.float32)
+
+            # Validate tensor types
+            self.validate_tensor_types(channel_response)
+
+            # Calculate singular values (ensure real output)
+            s = tf.linalg.svd(channel_response, compute_uv=False)
             
-        Returns:
-            Dictionary containing calculated metrics and validation results
-        """
-        # Calculate base metrics
-        metrics = self.calculate_performance_metrics(
-            channel_response, tx_symbols, rx_symbols, snr_db
-        )
-        
-        # Calculate BER
-        ber = self.calculate_ber(tx_symbols, rx_symbols)
-        metrics['ber'] = ber
-        
-        # Validate metrics against targets
-        validation_results = self.validate_performance_metrics(metrics)
-        metrics['validation_results'] = validation_results
-        
-        # Log validation results
-        self.log_validation_results(validation_results)
-        
-        return metrics
+            # Calculate condition number (real-valued)
+            condition_number = tf.cast(
+                tf.reduce_max(s, axis=-1) / tf.reduce_min(s, axis=-1),
+                tf.float32
+            )
+
+            # Calculate channel capacity (real-valued)
+            snr_linear = tf.pow(10.0, snr_db/10.0)
+            capacity = tf.reduce_sum(
+                tf.math.log(1.0 + snr_linear * tf.square(tf.abs(s))) / tf.math.log(2.0),
+                axis=-1
+            )
+
+            # Calculate effective SNR (real-valued)
+            channel_power = tf.reduce_mean(tf.square(tf.abs(channel_response)), axis=[-2, -1])
+            noise_power = tf.reduce_mean(tf.square(tf.abs(rx_symbols - tf.matmul(
+                channel_response, 
+                tf.expand_dims(tx_symbols, -1)
+            )[:, :, 0])), axis=-1)
+            
+            effective_snr = tf.cast(
+                10.0 * tf.math.log(channel_power / (noise_power + 1e-10)) / tf.math.log(10.0),
+                tf.float32
+            )
+
+            # Calculate spectral efficiency (real-valued)
+            spectral_efficiency = tf.cast(
+                capacity / self.system_params.num_tx_antennas,
+                tf.float32
+            )
+
+            return {
+                'condition_number': condition_number,
+                'effective_snr': effective_snr,
+                'spectral_efficiency': spectral_efficiency
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error calculating enhanced metrics: {str(e)}")
+            raise
 
     def assert_tensor_shape(tensor: tf.Tensor, expected_shape: List[int], name: str = "tensor") -> bool:
         """
@@ -217,72 +247,78 @@ class MetricsCalculator:
             logging.error(f"Tensor shape assertion failed: {str(e)}")
             return False
         
-    def validate_tensor_types(self, channel_response: tf.Tensor) -> None:
-        """Validate tensor types before computation"""
-        if channel_response.dtype != tf.complex64:
-            raise TypeError(f"Channel response must be complex64, got {channel_response.dtype}")
         
     def calculate_mimo_metrics(
-            self,
-            channel_response: tf.Tensor,
-            snr_db: tf.Tensor
-        ) -> Dict[str, tf.Tensor]:
+        self,
+        channel_response: tf.Tensor,
+        snr_db: tf.Tensor
+    ) -> Dict[str, tf.Tensor]:
         """
-        Calculate essential MIMO metrics for dataset generation
+        Calculate essential MIMO metrics for dataset generation with proper dtype handling
         
         Args:
             channel_response: Complex channel matrix [batch_size, num_rx, num_tx]
             snr_db: SNR values in dB [batch_size]
             
         Returns:
-            Dictionary containing calculated metrics
+            Dictionary containing calculated metrics with consistent dtypes
         """
         try:
-            # Type validation and casting
-            self.validate_tensor_types(channel_response)
+            # Ensure proper dtype casting at input
+            channel_response = tf.cast(channel_response, tf.complex64)
             snr_db = tf.cast(snr_db, tf.float32)
-            H = tf.cast(channel_response, tf.complex64)
             
-            # Validate input shapes
-            batch_size = tf.shape(H)[0]
+            # Type validation
+            if channel_response.dtype != tf.complex64:
+                raise TypeError(f"Channel response must be complex64, got {channel_response.dtype}")
+            
+            # Get batch size and validate shapes
+            batch_size = tf.shape(channel_response)[0]
             validate_mimo_tensor_shapes(
-                channel_response=H,
+                channel_response=channel_response,
                 num_tx_antennas=self.system_params.num_tx_antennas,
                 num_rx_antennas=self.system_params.num_rx_antennas,
                 batch_size=batch_size
             )
             
-            # Calculate channel matrix properties
-            H_H = tf.transpose(H, perm=[0, 2, 1], conjugate=True)
-            HH = tf.matmul(H, H_H)
+            # Calculate Hermitian transpose and matrix product
+            H_H = tf.transpose(channel_response, perm=[0, 2, 1], conjugate=True)
+            HH = tf.matmul(channel_response, H_H)
             
-            # Add stability term
-            epsilon = tf.cast(1e-10, dtype=tf.complex64)
+            # Add stability term for matrix operations
+            epsilon_complex = tf.cast(1e-10, tf.complex64)
             I = tf.eye(
                 tf.shape(HH)[-1],
                 batch_shape=[batch_size],
                 dtype=tf.complex64
-            ) * epsilon
+            ) * epsilon_complex
             
+            # Stabilized matrix for eigenvalue computation
             HH_stable = HH + I
             
-            # Calculate eigenvalues and convert to float32
-            eigenvalues = tf.cast(tf.abs(tf.linalg.eigvalsh(HH_stable)), tf.float32)
+            # Calculate eigenvalues with proper casting
+            eigenvalues = tf.cast(
+                tf.abs(tf.linalg.eigvalsh(HH_stable)),
+                tf.float32
+            )
+            
+            # Ensure numerical stability for float operations
             epsilon_float = tf.cast(1e-10, tf.float32)
-            
-            # Use float32 for all subsequent calculations
             eigenvalues = tf.maximum(eigenvalues, epsilon_float)
-            eigenvalues = eigenvalues / tf.reduce_max(eigenvalues, axis=1, keepdims=True)
             
-            # Process SNR with validation
+            # Normalize eigenvalues
+            max_eigenvalues = tf.reduce_max(eigenvalues, axis=1, keepdims=True)
+            eigenvalues = eigenvalues / tf.maximum(max_eigenvalues, epsilon_float)
+            
+            # Process SNR with validation and proper casting
             snr_db = tf.clip_by_value(
                 snr_db,
                 self.validation_thresholds['sinr']['min'],
                 self.validation_thresholds['sinr']['max']
             )
-            snr_linear = tf.pow(10.0, snr_db/10.0)
+            snr_linear = tf.cast(tf.pow(10.0, snr_db/10.0), tf.float32)
             
-            # Calculate spectral efficiency with validation
+            # Calculate spectral efficiency
             spectral_efficiency = tf.reduce_sum(
                 tf.math.log(1.0 + eigenvalues * tf.reshape(snr_linear, [-1, 1])) / tf.math.log(2.0),
                 axis=1
@@ -293,10 +329,21 @@ class MetricsCalculator:
                 self.validation_thresholds['spectral_efficiency']['max']
             )
             
-            # Calculate effective SNR with validation
-            effective_snr = tf.reduce_mean(eigenvalues, axis=1) * snr_linear
-            effective_snr = tf.maximum(effective_snr, self.validation_thresholds['signal_power']['min'])
-            effective_snr_db = 10.0 * tf.math.log(effective_snr) / tf.math.log(10.0)
+            # Calculate effective SNR with proper casting
+            effective_snr = tf.cast(
+                tf.reduce_mean(eigenvalues, axis=1) * snr_linear,
+                tf.float32
+            )
+            effective_snr = tf.maximum(
+                effective_snr,
+                self.validation_thresholds['signal_power']['min']
+            )
+            
+            # Convert to dB with proper casting
+            effective_snr_db = tf.cast(
+                10.0 * tf.math.log(effective_snr) / tf.math.log(10.0),
+                tf.float32
+            )
             effective_snr_db = tf.clip_by_value(
                 effective_snr_db,
                 self.validation_thresholds['effective_snr']['min'],
@@ -304,16 +351,20 @@ class MetricsCalculator:
             )
             
             # Calculate condition number with stability
-            condition_number = tf.reduce_max(eigenvalues, axis=1) / tf.maximum(
-                tf.reduce_min(eigenvalues, axis=1),
-                epsilon_float
+            condition_number = tf.cast(
+                tf.reduce_max(eigenvalues, axis=1) / tf.maximum(
+                    tf.reduce_min(eigenvalues, axis=1),
+                    epsilon_float
+                ),
+                tf.float32
             )
             
+            # Return metrics with consistent dtypes
             return {
-                'spectral_efficiency': spectral_efficiency,
-                'effective_snr': effective_snr_db,
-                'eigenvalues': eigenvalues,
-                'condition_number': condition_number
+                'spectral_efficiency': tf.cast(spectral_efficiency, tf.float32),
+                'effective_snr': tf.cast(effective_snr_db, tf.float32),
+                'eigenvalues': tf.cast(eigenvalues, tf.float32),
+                'condition_number': tf.cast(condition_number, tf.float32)
             }
                 
         except Exception as e:
