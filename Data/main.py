@@ -170,16 +170,18 @@ def main():
                     cond_valid = tf.reduce_mean(cond_num) < 100  # Example threshold
                     validation_results['condition_number'] = cond_valid
 
+                # In main.py, replace the logging section with:
+
                 # Log validation results
                 if all(validation_results.values()):
-                    logger.info("✓ All performance targets met!")
+                    logger.info("[PASS] All performance targets met!")
                     for metric, value in metrics.items():
                         mean_value = tf.reduce_mean(value)
                         logger.info(f"{metric}: {mean_value:.4f}")
                 else:
-                    logger.warning("⨯ Some performance targets not met:")
+                    logger.warning("[FAIL] Some performance targets not met:")
                     for metric, is_valid in validation_results.items():
-                        status = "✓" if is_valid else "⨯"
+                        status = "[PASS]" if is_valid else "[FAIL]"
                         if metric in metrics:
                             mean_value = tf.reduce_mean(metrics[metric])
                             logger.warning(f"{status} {metric}: {mean_value:.4f}")
