@@ -13,7 +13,7 @@ import tensorflow as tf
 import numpy as np
 import random
 from core.metrics_calculator import MetricsCalculator
-
+import matplotlib.pyplot as plt
 def configure_gpu_environment():
     """Configure GPU environment with memory growth and mixed precision."""
     try:
@@ -170,8 +170,6 @@ def main():
                     cond_valid = tf.reduce_mean(cond_num) < 100  # Example threshold
                     validation_results['condition_number'] = cond_valid
 
-                # In main.py, replace the logging section with:
-
                 # Log validation results
                 if all(validation_results.values()):
                     logger.info("[PASS] All performance targets met!")
@@ -187,6 +185,34 @@ def main():
                             logger.warning(f"{status} {metric}: {mean_value:.4f}")
                         else:
                             logger.warning(f"{status} {metric}: N/A")
+                # Calculate BER metrics
+                ber_metrics = metrics_calc.calculate_ber(tx_symbols, rx_symbols, snr_db)
+
+                # Log BER results
+                logger.info("BER Performance Summary:")
+                logger.info(f"Average BER: {ber_metrics['average_ber']:.2e}")
+                logger.info(f"BER Target Met: {ber_metrics['all_targets_met']}")
+
+                # Plot BER curve
+                try:
+                    plt.figure()
+                    snr_points = sorted(ber_metrics['ber_curve'].keys())
+                    ber_values = [ber_metrics['ber_curve'][snr] for snr in snr_points]
+                    
+                    plt.semilogy(snr_points, ber_values, 'b.-', label='Measured BER')
+                    plt.grid(True)
+                    plt.xlabel('SNR (dB)')
+                    plt.ylabel('BER')
+                    plt.title('BER vs SNR Performance')
+                    plt.legend()
+                    
+                    # Create plots directory if it doesn't exist
+                    os.makedirs('plots', exist_ok=True)
+                    plt.savefig('plots/ber_performance.png')
+                    logger.info("BER performance plot saved to plots/ber_performance.png")
+                    plt.close()
+                except Exception as e:
+                    logger.warning(f"Failed to generate BER plot: {e}")
 
             except KeyError as e:
                 logger.error(f"Failed to read dataset: Missing key {e}")
