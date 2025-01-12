@@ -140,26 +140,28 @@ class MetricsCalculator:
 
         return metrics
 
-    def calculate_ber(self, tx_symbols: tf.Tensor, rx_symbols: tf.Tensor) -> tf.Tensor:
-        """
-        Calculate Bit Error Rate between transmitted and received symbols.
+
+    def calculate_ber(self, tx_symbols: tf.Tensor, rx_symbols: tf.Tensor, snr_db: tf.Tensor) -> Dict[str, tf.Tensor]:
+        """Calculate Bit Error Rate across different SNR levels."""
+        metrics = {}
         
-        Args:
-            tx_symbols: Transmitted symbols [batch_size, num_streams]
-            rx_symbols: Received symbols [batch_size, num_streams]
-            
-        Returns:
-            BER values [batch_size]
-        """
-        # Convert symbols to bits (assuming QPSK modulation)
-        tx_bits = tf.cast(tf.real(tx_symbols) > 0, tf.int32)
-        rx_bits = tf.cast(tf.real(rx_symbols) > 0, tf.int32)
+        # Calculate BER using Sionna's utility
+        ber = compute_ber(tx_symbols, rx_symbols)
         
-        # Calculate BER
-        errors = tf.cast(tx_bits != rx_bits, tf.float32)
-        ber = tf.reduce_mean(errors, axis=-1)
+        # Group BER by SNR levels for analysis
+        snr_levels = tf.cast(tf.round(snr_db), tf.int32)
+        unique_snrs = tf.unique(snr_levels)[0]
         
-        return ber
+        for snr in unique_snrs:
+            mask = tf.equal(snr_levels, snr)
+            ber_at_snr = tf.boolean_mask(ber, mask)
+            metrics[f'ber_at_{snr}db'] = tf.reduce_mean(ber_at_snr)
+        
+        # Validate against target
+        meets_target = tf.less(metrics['ber_at_15db'], 1e-5)  # From simulation plan
+        metrics['ber_target_met'] = meets_target
+        
+        return metrics
 
     def calculate_enhanced_metrics(
         self, 
