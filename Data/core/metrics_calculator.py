@@ -149,17 +149,26 @@ class MetricsCalculator:
             metrics = {}
             
             # Ensure proper dtype and shape casting
-            tx_symbols = tf.cast(tx_symbols, tf.complex64)  # [batch_size, num_streams]
-            rx_symbols = tf.cast(rx_symbols, tf.complex64)  # [batch_size, num_streams]
-            snr_db = tf.cast(snr_db, tf.float32)          # [batch_size]
+            tx_symbols = tf.cast(tx_symbols, tf.complex64)
+            rx_symbols = tf.cast(rx_symbols, tf.complex64)
+            snr_db = tf.cast(snr_db, tf.float32)
             
-            # Calculate BER - make sure this returns a tensor of shape [batch_size]
-            ber = tf.cast(tf.not_equal(tx_symbols, rx_symbols), tf.float32)
-            ber = tf.reduce_mean(ber, axis=-1)  # Average across streams
+            # Detect QPSK symbols (assuming QPSK modulation)
+            # Convert complex symbols to binary decisions based on real and imaginary parts
+            tx_real = tf.real(tx_symbols) > 0
+            tx_imag = tf.imag(tx_symbols) > 0
+            rx_real = tf.real(rx_symbols) > 0
+            rx_imag = tf.imag(rx_symbols) > 0
+            
+            # Calculate bit errors for real and imaginary parts separately
+            real_errors = tf.cast(tx_real != rx_real, tf.float32)
+            imag_errors = tf.cast(tx_imag != rx_imag, tf.float32)
+            
+            # Total bit errors (average of real and imaginary parts)
+            ber = (real_errors + imag_errors) / 2.0
             
             # Calculate average BER
-            average_ber = tf.reduce_mean(ber)
-            metrics['average_ber'] = average_ber
+            metrics['average_ber'] = tf.reduce_mean(ber)
             
             # Check if BER meets target at 15dB SNR
             snr_15db_mask = tf.abs(snr_db - 15.0) < 0.5
@@ -170,22 +179,16 @@ class MetricsCalculator:
             else:
                 metrics['all_targets_met'] = False
             
-            # Group BER by SNR levels
+            # Calculate BER for different SNR levels
             snr_levels = tf.cast(tf.round(snr_db), tf.int32)
-            unique_snrs, _ = tf.unique(snr_levels)
+            unique_snrs = tf.sort(tf.unique(snr_levels)[0])
             
-            # Calculate BER for each SNR level
             ber_curve = {}
             for snr in unique_snrs:
                 mask = tf.equal(snr_levels, snr)
                 ber_at_snr = tf.boolean_mask(ber, mask)
-                
                 if tf.size(ber_at_snr) > 0:
                     mean_ber = tf.reduce_mean(ber_at_snr)
-                    std_ber = tf.math.reduce_std(ber_at_snr)
-                    
-                    metrics[f'ber_at_{snr}db'] = mean_ber
-                    metrics[f'ber_std_at_{snr}db'] = std_ber
                     ber_curve[int(snr.numpy())] = float(mean_ber.numpy())
             
             metrics['ber_curve'] = ber_curve
@@ -195,7 +198,6 @@ class MetricsCalculator:
         except Exception as e:
             self.logger.error(f"Error in BER calculation: {str(e)}")
             raise
-
     def calculate_enhanced_metrics(
         self, 
         channel_response: tf.Tensor,
