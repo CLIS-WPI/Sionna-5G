@@ -158,7 +158,17 @@ class MetricsCalculator:
             ber = tf.reduce_mean(ber, axis=-1)  # Average across streams
             
             # Calculate average BER
-            metrics['average_ber'] = tf.reduce_mean(ber)
+            average_ber = tf.reduce_mean(ber)
+            metrics['average_ber'] = average_ber
+            
+            # Check if BER meets target at 15dB SNR
+            snr_15db_mask = tf.abs(snr_db - 15.0) < 0.5
+            ber_at_15db = tf.boolean_mask(ber, snr_15db_mask)
+            if tf.size(ber_at_15db) > 0:
+                ber_at_15db_mean = tf.reduce_mean(ber_at_15db)
+                metrics['all_targets_met'] = ber_at_15db_mean < self.system_params.ber_target
+            else:
+                metrics['all_targets_met'] = False
             
             # Group BER by SNR levels
             snr_levels = tf.cast(tf.round(snr_db), tf.int32)
@@ -167,9 +177,7 @@ class MetricsCalculator:
             # Calculate BER for each SNR level
             ber_curve = {}
             for snr in unique_snrs:
-                # Create mask of shape [batch_size]
                 mask = tf.equal(snr_levels, snr)
-                # Apply mask to ber values
                 ber_at_snr = tf.boolean_mask(ber, mask)
                 
                 if tf.size(ber_at_snr) > 0:
