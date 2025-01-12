@@ -128,14 +128,12 @@ class MIMODatasetGenerator:
                 tf.float32
             )
             
-            # Generate QPSK symbols using Sionna-style constellation points
+            # Generate QPSK symbols
             if mod_scheme == 'QPSK':
-                # Define QPSK constellation points directly as complex64
                 qpsk_points = tf.constant([
                     [1.0 + 1.0j, 1.0 - 1.0j, -1.0 + 1.0j, -1.0 - 1.0j]
                 ], dtype=tf.complex64) / tf.cast(tf.sqrt(2.0), tf.complex64)
                 
-                # Generate random indices
                 indices = tf.random.uniform(
                     [batch_size, self.system_params.num_streams],
                     minval=0,
@@ -143,61 +141,67 @@ class MIMODatasetGenerator:
                     dtype=tf.int32
                 )
                 
-                # Map to constellation points (ensures complex64)
                 tx_symbols = tf.gather(qpsk_points, indices, axis=1)
             else:
                 raise ValueError(f"Unsupported modulation scheme: {mod_scheme}")
 
             # Calculate signal power
-            signal_power = tf.reduce_mean(tf.abs(tx_symbols) ** 2)
+            signal_power = tf.cast(tf.reduce_mean(tf.abs(tx_symbols) ** 2), tf.float32)
 
-            # Convert SNR from dB to linear scale
+            # Convert SNR from dB to linear scale and prepare for complex multiplication
             snr_linear = tf.pow(10.0, snr_db/10.0)
+            snr_scaling = tf.cast(
+                tf.complex(
+                    tf.sqrt(snr_linear),
+                    tf.zeros_like(snr_linear)
+                ),
+                tf.complex64
+            )
             
-            # Calculate received symbols (maintain complex64)
+            # Reshape SNR scaling for broadcasting
+            snr_scaling = tf.reshape(snr_scaling, [batch_size, 1, 1])
+            
+            # Scale channel response (now both complex64)
+            scaled_channel = channel_response * snr_scaling
+            
+            # Calculate received symbols
             x = tf.expand_dims(tx_symbols, -1)
-            
-            # Scale channel response by SNR
-            scaled_channel = channel_response * tf.sqrt(tf.expand_dims(snr_linear, -1))
             y_without_noise = tf.matmul(scaled_channel, x)
             y_without_noise = tf.squeeze(y_without_noise, -1)
 
-            # Calculate noise power based on signal power and SNR
-            noise_power = signal_power / snr_linear
+            # Calculate noise power and stddev
+            noise_power = tf.cast(signal_power / snr_linear, tf.float32)
             noise_stddev = tf.sqrt(noise_power/2.0)
             
-            # Generate complex noise directly as complex64
-            noise = tf.cast(tf.complex(
-                tf.random.normal(
-                    tf.shape(y_without_noise),
-                    stddev=tf.expand_dims(noise_stddev, -1)
-                ),
-                tf.random.normal(
-                    tf.shape(y_without_noise),
-                    stddev=tf.expand_dims(noise_stddev, -1)
-                )
-            ), tf.complex64)
+            # Generate complex noise with proper shape and scaling
+            noise_shape = tf.shape(y_without_noise)
+            noise_stddev = tf.reshape(noise_stddev, [batch_size, 1])
+            
+            noise = tf.complex(
+                tf.random.normal(noise_shape, stddev=noise_stddev),
+                tf.random.normal(noise_shape, stddev=noise_stddev)
+            )
+            noise = tf.cast(noise, tf.complex64)
 
-            # Add noise (maintain complex64)
+            # Add noise
             rx_symbols = y_without_noise + noise
             
             # Calculate metrics
             metrics = self.metrics_calculator.calculate_enhanced_metrics(
-                channel_response=scaled_channel,  # Use scaled channel response
+                channel_response=scaled_channel,
                 tx_symbols=tx_symbols,
                 rx_symbols=rx_symbols,
                 snr_db=snr_db
             )
             
-            # Return with explicit and consistent dtypes
             return {
-                'channel_response': scaled_channel,    # Already complex64
-                'path_loss_db': path_loss_db,         # Already float32
-                'distances': distances,                # Already float32
+                'channel_response': scaled_channel,
+                'path_loss_db': path_loss_db,
+                'distances': distances,
                 'modulation_scheme': mod_scheme,
-                'tx_symbols': tx_symbols,             # Already complex64
-                'rx_symbols': rx_symbols,             # Already complex64
-                'snr_db': snr_db,                     # Already float32
+                'tx_symbols': tx_symbols,
+                'rx_symbols': rx_symbols,
+                'snr_db': snr_db,
                 'effective_snr': tf.cast(metrics['effective_snr'], tf.float32),
                 'spectral_efficiency': tf.cast(metrics['spectral_efficiency'], tf.float32),
                 'condition_number': tf.cast(metrics['condition_number'], tf.float32)
