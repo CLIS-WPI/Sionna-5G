@@ -142,40 +142,30 @@ class MetricsCalculator:
 
     def calculate_ber(self, tx_symbols: tf.Tensor, rx_symbols: tf.Tensor, snr_db: tf.Tensor) -> Dict[str, tf.Tensor]:
         """
-        Calculate and validate Bit Error Rate across different SNR levels using Sionna's approach.
+        Calculate BER using Sionna's built-in utilities
         """
         try:
             metrics = {}
             
-            # Ensure proper dtype casting
+            # Cast inputs to appropriate types
             tx_symbols = tf.cast(tx_symbols, tf.complex64)
             rx_symbols = tf.cast(rx_symbols, tf.complex64)
-            snr_db = tf.cast(snr_db, tf.float32)
-
-            # QPSK demodulation (2 bits per symbol)
-            # Normalize constellation points
-            scale_factor = tf.cast(1.0/tf.sqrt(2.0), tf.complex64)
-            tx_symbols_norm = tx_symbols * scale_factor
-            rx_symbols_norm = rx_symbols * scale_factor
-
-            # Extract bits from real and imaginary parts
-            tx_bits_real = tf.real(tx_symbols_norm) > 0
-            tx_bits_imag = tf.imag(tx_symbols_norm) > 0
-            rx_bits_real = tf.real(rx_symbols_norm) > 0
-            rx_bits_imag = tf.imag(rx_symbols_norm) > 0
             
-            # Stack bits for complete bit sequence
+            # Convert complex symbols to binary decisions
+            # For QPSK, each symbol represents 2 bits
+            tx_bits_real = tf.cast(tf.math.real(tx_symbols) > 0, tf.float32)
+            tx_bits_imag = tf.cast(tf.math.imag(tx_symbols) > 0, tf.float32)
+            rx_bits_real = tf.cast(tf.math.real(rx_symbols) > 0, tf.float32)
+            rx_bits_imag = tf.cast(tf.math.imag(rx_symbols) > 0, tf.float32)
+            
+            # Stack bits for complete sequence
             tx_bits = tf.stack([tx_bits_real, tx_bits_imag], axis=-1)
             rx_bits = tf.stack([rx_bits_real, rx_bits_imag], axis=-1)
             
-            # Calculate bit errors
-            bit_errors = tf.cast(tx_bits != rx_bits, tf.float32)
-            ber = tf.reduce_mean(bit_errors)
+            # Use Sionna's compute_ber function
+            metrics['average_ber'] = compute_ber(tx_bits, rx_bits)
             
-            # Calculate average BER
-            metrics['average_ber'] = ber
-            
-            # Group BER by SNR levels for curve
+            # Calculate BER per SNR level
             snr_levels = tf.cast(tf.round(snr_db), tf.int32)
             unique_snrs = tf.sort(tf.unique(snr_levels)[0])
             
@@ -185,29 +175,28 @@ class MetricsCalculator:
                 tx_bits_at_snr = tf.boolean_mask(tx_bits, mask)
                 rx_bits_at_snr = tf.boolean_mask(rx_bits, mask)
                 if tf.size(tx_bits_at_snr) > 0:
-                    ber_at_snr = tf.reduce_mean(tf.cast(tx_bits_at_snr != rx_bits_at_snr, tf.float32))
+                    ber_at_snr = compute_ber(tx_bits_at_snr, rx_bits_at_snr)
                     ber_curve[int(snr.numpy())] = float(ber_at_snr.numpy())
             
-            # Check if BER meets target at 15dB SNR
+            metrics['ber_curve'] = ber_curve
+            
+            # Check BER target at 15dB SNR
             snr_15db_mask = tf.abs(snr_db - 15.0) < 0.5
             tx_bits_at_15db = tf.boolean_mask(tx_bits, snr_15db_mask)
             rx_bits_at_15db = tf.boolean_mask(rx_bits, snr_15db_mask)
             
             if tf.size(tx_bits_at_15db) > 0:
-                ber_at_15db = tf.reduce_mean(tf.cast(tx_bits_at_15db != rx_bits_at_15db, tf.float32))
+                ber_at_15db = compute_ber(tx_bits_at_15db, rx_bits_at_15db)
                 metrics['all_targets_met'] = ber_at_15db < self.system_params.ber_target
             else:
                 metrics['all_targets_met'] = False
                 
-            metrics['ber_curve'] = ber_curve
-            
             return metrics
             
         except Exception as e:
             self.logger.error(f"Error in BER calculation: {str(e)}")
             raise
         
-
     def calculate_enhanced_metrics(
         self, 
         channel_response: tf.Tensor,
