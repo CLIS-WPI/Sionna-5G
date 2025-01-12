@@ -142,26 +142,97 @@ class MetricsCalculator:
 
 
     def calculate_ber(self, tx_symbols: tf.Tensor, rx_symbols: tf.Tensor, snr_db: tf.Tensor) -> Dict[str, tf.Tensor]:
-        """Calculate Bit Error Rate across different SNR levels."""
-        metrics = {}
+        """
+        Calculate and validate Bit Error Rate across different SNR levels.
         
-        # Calculate BER using Sionna's utility
-        ber = compute_ber(tx_symbols, rx_symbols)
-        
-        # Group BER by SNR levels for analysis
-        snr_levels = tf.cast(tf.round(snr_db), tf.int32)
-        unique_snrs = tf.unique(snr_levels)[0]
-        
-        for snr in unique_snrs:
-            mask = tf.equal(snr_levels, snr)
-            ber_at_snr = tf.boolean_mask(ber, mask)
-            metrics[f'ber_at_{snr}db'] = tf.reduce_mean(ber_at_snr)
-        
-        # Validate against target
-        meets_target = tf.less(metrics['ber_at_15db'], 1e-5)  # From simulation plan
-        metrics['ber_target_met'] = meets_target
-        
-        return metrics
+        Args:
+            tx_symbols: Transmitted symbols [batch_size, num_streams]
+            rx_symbols: Received symbols [batch_size, num_streams]
+            snr_db: SNR values in dB [batch_size]
+            
+        Returns:
+            Dictionary containing BER metrics and validation results
+        """
+        try:
+            metrics = {}
+            
+            # Ensure proper dtype casting
+            tx_symbols = tf.cast(tx_symbols, tf.complex64)
+            rx_symbols = tf.cast(rx_symbols, tf.complex64)
+            snr_db = tf.cast(snr_db, tf.float32)
+            
+            # Calculate BER using Sionna's utility
+            ber = compute_ber(tx_symbols, rx_symbols)
+            metrics['average_ber'] = tf.reduce_mean(ber)
+            
+            # Group BER by SNR levels for analysis
+            snr_levels = tf.cast(tf.round(snr_db), tf.int32)
+            unique_snrs = tf.unique(snr_levels)[0]
+            
+            # Calculate BER for each SNR level
+            ber_curve = {}
+            for snr in unique_snrs:
+                mask = tf.equal(snr_levels, snr)
+                ber_at_snr = tf.boolean_mask(ber, mask)
+                mean_ber = tf.reduce_mean(ber_at_snr)
+                std_ber = tf.math.reduce_std(ber_at_snr)
+                
+                metrics[f'ber_at_{snr}db'] = mean_ber
+                metrics[f'ber_std_at_{snr}db'] = std_ber
+                ber_curve[int(snr.numpy())] = float(mean_ber.numpy())
+            
+            # Store BER curve data for plotting
+            metrics['ber_curve'] = ber_curve
+            
+            # Validate against targets at specific SNR points
+            target_snrs = [15, 20, 25]  # Key SNR points for validation
+            validation_results = {}
+            
+            for target_snr in target_snrs:
+                snr_key = f'ber_at_{target_snr}db'
+                if snr_key in metrics:
+                    meets_target = tf.less(metrics[snr_key], self.system_params.ber_target)
+                    validation_results[f'ber_valid_at_{target_snr}db'] = meets_target
+                    
+                    # Log validation results
+                    self.logger.info(
+                        f"BER at {target_snr}dB: {metrics[snr_key]:.2e} "
+                        f"({'PASS' if meets_target else 'FAIL'})"
+                    )
+            
+            # Overall BER validation
+            metrics['ber_validation'] = validation_results
+            metrics['all_targets_met'] = tf.reduce_all(
+                [result for result in validation_results.values()]
+            )
+            
+            # Log overall results
+            self.logger.info(
+                f"Overall BER validation: "
+                f"{'PASS' if metrics['all_targets_met'] else 'FAIL'}"
+            )
+            
+            # Add confidence intervals
+            confidence_level = 0.95
+            z_score = 1.96  # For 95% confidence
+            
+            for snr in unique_snrs:
+                mask = tf.equal(snr_levels, snr)
+                ber_at_snr = tf.boolean_mask(ber, mask)
+                n_samples = tf.cast(tf.size(ber_at_snr), tf.float32)
+                
+                std_error = metrics[f'ber_std_at_{snr}db'] / tf.sqrt(n_samples)
+                margin_error = z_score * std_error
+                
+                metrics[f'ber_ci_lower_{snr}db'] = metrics[f'ber_at_{snr}db'] - margin_error
+                metrics[f'ber_ci_upper_{snr}db'] = metrics[f'ber_at_{snr}db'] + margin_error
+            
+            return metrics
+            
+        except Exception as e:
+            self.logger.error(f"Error in BER calculation: {str(e)}")
+            raise
+
 
     def calculate_enhanced_metrics(
         self, 
