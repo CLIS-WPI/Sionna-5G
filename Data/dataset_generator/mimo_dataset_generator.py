@@ -132,7 +132,7 @@ class MIMODatasetGenerator:
             if mod_scheme == 'QPSK':
                 # Define QPSK constellation points directly as complex64
                 qpsk_points = tf.constant([
-                [1.0 + 1.0j, 1.0 - 1.0j, -1.0 + 1.0j, -1.0 - 1.0j]
+                    [1.0 + 1.0j, 1.0 - 1.0j, -1.0 + 1.0j, -1.0 - 1.0j]
                 ], dtype=tf.complex64) / tf.cast(tf.sqrt(2.0), tf.complex64)
                 
                 # Generate random indices
@@ -148,25 +148,33 @@ class MIMODatasetGenerator:
             else:
                 raise ValueError(f"Unsupported modulation scheme: {mod_scheme}")
 
+            # Calculate signal power
+            signal_power = tf.reduce_mean(tf.abs(tx_symbols) ** 2)
+
+            # Convert SNR from dB to linear scale
+            snr_linear = tf.pow(10.0, snr_db/10.0)
+            
             # Calculate received symbols (maintain complex64)
             x = tf.expand_dims(tx_symbols, -1)
-            y_without_noise = tf.matmul(channel_response, x)
+            
+            # Scale channel response by SNR
+            scaled_channel = channel_response * tf.sqrt(tf.expand_dims(snr_linear, -1))
+            y_without_noise = tf.matmul(scaled_channel, x)
             y_without_noise = tf.squeeze(y_without_noise, -1)
 
-            # Generate noise with proper scaling
-            snr_linear = tf.pow(10.0, snr_db/10.0)
-            noise_power = 1.0 / tf.expand_dims(snr_linear, -1)
+            # Calculate noise power based on signal power and SNR
+            noise_power = signal_power / snr_linear
             noise_stddev = tf.sqrt(noise_power/2.0)
             
             # Generate complex noise directly as complex64
             noise = tf.cast(tf.complex(
                 tf.random.normal(
                     tf.shape(y_without_noise),
-                    stddev=noise_stddev
+                    stddev=tf.expand_dims(noise_stddev, -1)
                 ),
                 tf.random.normal(
                     tf.shape(y_without_noise),
-                    stddev=noise_stddev
+                    stddev=tf.expand_dims(noise_stddev, -1)
                 )
             ), tf.complex64)
 
@@ -175,7 +183,7 @@ class MIMODatasetGenerator:
             
             # Calculate metrics
             metrics = self.metrics_calculator.calculate_enhanced_metrics(
-                channel_response=channel_response,
+                channel_response=scaled_channel,  # Use scaled channel response
                 tx_symbols=tx_symbols,
                 rx_symbols=rx_symbols,
                 snr_db=snr_db
@@ -183,7 +191,7 @@ class MIMODatasetGenerator:
             
             # Return with explicit and consistent dtypes
             return {
-                'channel_response': channel_response,  # Already complex64
+                'channel_response': scaled_channel,    # Already complex64
                 'path_loss_db': path_loss_db,         # Already float32
                 'distances': distances,                # Already float32
                 'modulation_scheme': mod_scheme,
