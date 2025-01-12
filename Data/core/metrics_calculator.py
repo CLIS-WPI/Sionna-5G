@@ -88,36 +88,35 @@ class MetricsCalculator:
     ) -> Dict[str, tf.Tensor]:
         """
         Calculate base performance metrics for MIMO system.
-        
-        Args:
-            channel_response: Complex channel matrix [batch_size, num_rx, num_tx]
-            tx_symbols: Transmitted symbols [batch_size, num_streams]
-            rx_symbols: Received symbols [batch_size, num_streams]
-            snr_db: SNR values in dB [batch_size]
-            
-        Returns:
-            Dictionary containing calculated metrics
         """
-        # Calculate MIMO metrics using existing method
+        # Ensure consistent dtypes
+        channel_response = tf.cast(channel_response, tf.complex64)
+        tx_symbols = tf.cast(tx_symbols, tf.complex64)
+        rx_symbols = tf.cast(rx_symbols, tf.complex64)
+        snr_db = tf.cast(snr_db, tf.float32)
+
+        # Calculate MIMO metrics
         mimo_metrics = self.calculate_mimo_metrics(channel_response, snr_db)
-        
-        # Calculate signal power
+
+        # Calculate signal power (using complex magnitude)
         signal_power = tf.reduce_mean(tf.abs(tx_symbols) ** 2, axis=-1)
+        signal_power = tf.cast(signal_power, tf.float32)  # Convert to float32 for calculations
         signal_power = tf.clip_by_value(
             signal_power,
             self.validation_thresholds['signal_power']['min'],
             self.validation_thresholds['signal_power']['max']
         )
-        
-        # Calculate noise power
+
+        # Calculate noise power (using complex difference)
         noise = rx_symbols - tx_symbols
         noise_power = tf.reduce_mean(tf.abs(noise) ** 2, axis=-1)
+        noise_power = tf.cast(noise_power, tf.float32)  # Convert to float32 for calculations
         noise_power = tf.clip_by_value(
             noise_power,
             self.validation_thresholds['noise_power']['min'],
             self.validation_thresholds['noise_power']['max']
         )
-        
+
         # Calculate SINR
         sinr = signal_power / (noise_power + 1e-10)
         sinr_db = 10.0 * tf.math.log(sinr) / tf.math.log(10.0)
@@ -126,15 +125,14 @@ class MetricsCalculator:
             self.validation_thresholds['sinr']['min'],
             self.validation_thresholds['sinr']['max']
         )
-        
-        # Combine all metrics
+
         metrics = {
             'sinr_db': sinr_db,
             'signal_power': signal_power,
             'noise_power': noise_power,
-            **mimo_metrics  # Include MIMO metrics
+            **mimo_metrics
         }
-        
+
         return metrics
 
     def calculate_ber(self, tx_symbols: tf.Tensor, rx_symbols: tf.Tensor) -> tf.Tensor:
