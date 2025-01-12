@@ -132,7 +132,7 @@ class MIMODatasetGenerator:
             if mod_scheme == 'QPSK':
                 # Define QPSK constellation points directly as complex64
                 qpsk_points = tf.constant([
-                    [-1.0 - 1.0j, -1.0 + 1.0j, 1.0 - 1.0j, 1.0 + 1.0j]
+                [1.0 + 1.0j, 1.0 - 1.0j, -1.0 + 1.0j, -1.0 - 1.0j]
                 ], dtype=tf.complex64) / tf.cast(tf.sqrt(2.0), tf.complex64)
                 
                 # Generate random indices
