@@ -116,6 +116,9 @@ class ChannelModelManager:
     def generate_channel_samples(self, batch_size: int, snr_db: tf.Tensor) -> Dict[str, tf.Tensor]:
         """Generate channel samples with path loss and noise."""
         try:
+            # Cast SNR to float32
+            snr_db = tf.cast(snr_db, tf.float32)
+            
             # Generate and validate distances
             distances = tf.random.uniform(
                 [batch_size], 
@@ -128,20 +131,29 @@ class ChannelModelManager:
             path_loss_linear = tf.pow(10.0, -path_loss / 10.0)
             
             # Generate and normalize channel response
-            h = self.channel_model()
+            h = tf.cast(self.channel_model(), tf.complex64)  # Explicit casting
             h_normalized = normalize_complex_tensor(h)
             
-            # Apply path loss
-            h_with_path_loss = h_normalized * tf.sqrt(tf.reshape(path_loss_linear, [-1, 1, 1]))
+            # Apply path loss (ensure complex64 dtype)
+            path_loss_linear = tf.cast(path_loss_linear, tf.float32)
+            h_with_path_loss = tf.cast(
+                h_normalized * tf.complex(
+                    tf.sqrt(path_loss_linear),
+                    tf.zeros_like(path_loss_linear)
+                ),
+                tf.complex64
+            )
             
             # Add noise based on SNR
-            noise_power = tf.pow(10.0, -snr_db / 10.0)
+            noise_power = tf.cast(tf.pow(10.0, -snr_db / 10.0), tf.float32)
             noise = tf.complex(
                 tf.random.normal(tf.shape(h_with_path_loss), stddev=tf.sqrt(noise_power / 2.0)),
                 tf.random.normal(tf.shape(h_with_path_loss), stddev=tf.sqrt(noise_power / 2.0))
             )
             
-            noisy_channel = h_with_path_loss + noise
+            # Ensure noise is complex64
+            noise = tf.cast(noise, tf.complex64)
+            noisy_channel = tf.cast(h_with_path_loss + noise, tf.complex64)
             
             # Validate outputs
             self._validate_channel_response(h_with_path_loss)
@@ -149,8 +161,8 @@ class ChannelModelManager:
             return {
                 "perfect_channel": h_with_path_loss,
                 "noisy_channel": noisy_channel,
-                "path_loss": path_loss,
-                "distances": distances
+                "path_loss": tf.cast(path_loss, tf.float32),
+                "distances": tf.cast(distances, tf.float32)
             }
             
         except Exception as e:
