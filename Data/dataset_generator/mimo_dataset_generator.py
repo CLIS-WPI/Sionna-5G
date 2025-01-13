@@ -163,8 +163,8 @@ class MIMODatasetGenerator:
             
             # Scale channel response (now both complex64)
             scaled_channel = channel_response * snr_scaling / tf.cast(
-            tf.sqrt(tf.cast(self.system_params.num_tx_antennas, tf.float32)),
-            tf.complex64
+                tf.sqrt(tf.cast(self.system_params.num_tx_antennas, tf.float32)),
+                tf.complex64
             )
             
             # Calculate received symbols
@@ -181,8 +181,8 @@ class MIMODatasetGenerator:
             noise_stddev = tf.reshape(noise_stddev, [batch_size, 1])
             
             noise = tf.complex(
-            tf.random.normal(tf.shape(y_without_noise), stddev=noise_stddev),
-            tf.random.normal(tf.shape(y_without_noise), stddev=noise_stddev)
+                tf.random.normal(tf.shape(y_without_noise), stddev=noise_stddev),
+                tf.random.normal(tf.shape(y_without_noise), stddev=noise_stddev)
             )
             noise = tf.cast(noise, tf.complex64)
 
