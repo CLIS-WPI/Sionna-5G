@@ -146,20 +146,47 @@ class MetricsCalculator:
         try:
             import sionna as sn
             
-            # Get the appropriate demapper
-            demapper = self.mappers[modulation]
+            # Define modulation-specific parameters
+            modulation_params = {
+                "QPSK": {
+                    "bits_per_symbol": 2,
+                    "constellation": sn.mapping.QPSK(),
+                    "target_ber": 1e-5
+                },
+                "16QAM": {
+                    "bits_per_symbol": 4,
+                    "constellation": sn.mapping.QAM(16),
+                    "target_ber": 1e-4
+                },
+                "64QAM": {
+                    "bits_per_symbol": 6,
+                    "constellation": sn.mapping.QAM(64),
+                    "target_ber": 1e-3
+                }
+            }
             
-            # Demap received symbols
-            llr = demapper.demap(rx_symbols)
+            # Get modulation parameters
+            mod_params = modulation_params[modulation]
+            mapper = sn.mapping.Mapper(mod_params["constellation"])
+            
+            # Cast inputs
+            tx_symbols = tf.cast(tx_symbols, tf.complex64)
+            rx_symbols = tf.cast(rx_symbols, tf.complex64)
+            
+            # Demap received symbols to LLRs
+            llr = mapper.demap(rx_symbols)
+            
+            # Get transmitted bits from symbols using the same mapper
+            tx_bits = mapper.get_bits(tx_symbols)
             
             # Hard decisions on LLRs
             detected_bits = tf.cast(llr > 0, tf.int32)
             
-            # Calculate BER using Sionna's utility
+            # Calculate average BER
             ber = sn.utils.count_errors(detected_bits, tx_bits) / tf.size(tx_bits, out_type=tf.float32)
             
-            # Calculate BER at different SNR points
-            snr_points = tf.range(0, 31, delta=5, dtype=tf.float32)
+            # Calculate BER curve for different SNR points
+            snr_points = tf.range(15, 31, delta=2, dtype=tf.float32)  # Start from 15dB
             ber_curve = {}
             
             for snr in snr_points:
@@ -170,11 +197,25 @@ class MetricsCalculator:
                     ber_at_snr = sn.utils.count_errors(detected_bits_at_snr, tx_bits_at_snr) / \
                                 tf.size(tx_bits_at_snr, out_type=tf.float32)
                     ber_curve[float(snr)] = float(ber_at_snr)
+            
+            # Check BER at target SNR (15dB)
+            snr_15db_mask = tf.abs(snr_db - 15.0) < 0.5
+            if tf.reduce_any(snr_15db_mask):
+                tx_bits_at_15db = tf.boolean_mask(tx_bits, snr_15db_mask)
+                detected_bits_at_15db = tf.boolean_mask(detected_bits, snr_15db_mask)
+                ber_at_15db = sn.utils.count_errors(detected_bits_at_15db, tx_bits_at_15db) / \
+                            tf.size(tx_bits_at_15db, out_type=tf.float32)
+                target_met = ber_at_15db < mod_params["target_ber"]
+            else:
+                target_met = False
 
             return {
                 'average_ber': float(ber),
                 'ber_curve': ber_curve,
-                'all_targets_met': float(ber) < self.system_params.ber_target
+                'all_targets_met': target_met,
+                'modulation': modulation,
+                'bits_per_symbol': mod_params["bits_per_symbol"],
+                'target_ber': mod_params["target_ber"]
             }
             
         except Exception as e:
