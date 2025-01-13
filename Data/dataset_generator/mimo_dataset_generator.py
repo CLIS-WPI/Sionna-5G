@@ -201,9 +201,9 @@ class MIMODatasetGenerator:
             channel_response = tf.complex(h_real, h_imag) / normalization_factor
             
             # Apply channel
-            tx_symbols_expanded = tf.expand_dims(tx_symbols, axis=-1)
-            y_without_noise = tf.matmul(channel_response, tx_symbols_expanded)
-            y_without_noise = tf.squeeze(y_without_noise, axis=-1)
+            tx_symbols_expanded = tf.expand_dims(tx_symbols, axis=-1)  # Shape: [batch_size, num_tx_antennas, 1]
+            y_without_noise = tf.matmul(channel_response, tx_symbols_expanded)  # Shape: [batch_size, num_rx_antennas, 1]
+            y_without_noise = tf.squeeze(y_without_noise, axis=-1)  # Shape: [batch_size, num_rx_antennas]
             
             # Generate SNR values
             snr_db = tf.random.uniform(
@@ -212,20 +212,22 @@ class MIMODatasetGenerator:
                 maxval=self.system_params.max_snr_db
             )
             
-            # Convert SNR to linear scale with proper casting
-            snr_linear = tf.cast(tf.pow(10.0, snr_db/10.0), tf.float32)
+            # Convert SNR to linear scale with proper broadcasting
+            snr_linear = tf.pow(10.0, snr_db/10.0)  # Shape: [batch_size]
+            snr_linear = tf.expand_dims(snr_linear, axis=-1)  # Shape: [batch_size, 1]
             
-            # Calculate signal power
-            signal_power = tf.reduce_mean(tf.abs(y_without_noise)**2, axis=-1, keepdims=True)
+            # Calculate signal power with proper dimensions
+            signal_power = tf.reduce_mean(tf.abs(y_without_noise)**2, axis=-1, keepdims=True)  # Shape: [batch_size, 1]
             
-            # Calculate noise power based on desired SNR
-            noise_power = signal_power / snr_linear
-            noise_std = tf.sqrt(noise_power/2.0)
+            # Calculate noise power with proper broadcasting
+            noise_power = signal_power / snr_linear  # Shape: [batch_size, 1]
+            noise_std = tf.sqrt(noise_power/2.0)  # Shape: [batch_size, 1]
             
-            # Generate complex noise with proper casting
+            # Generate complex noise with correct shape
+            noise_shape = tf.shape(y_without_noise)  # Should be [batch_size, num_rx_antennas]
             noise = tf.complex(
-                tf.random.normal(tf.shape(y_without_noise)) * tf.cast(noise_std, tf.float32),
-                tf.random.normal(tf.shape(y_without_noise)) * tf.cast(noise_std, tf.float32)
+                tf.random.normal(noise_shape) * tf.cast(noise_std, tf.float32),
+                tf.random.normal(noise_shape) * tf.cast(noise_std, tf.float32)
             )
             
             # Add noise to received signal
