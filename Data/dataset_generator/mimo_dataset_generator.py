@@ -176,7 +176,7 @@ class MIMODatasetGenerator:
             bits = tf.random.uniform(
                 shape=[bits_per_batch],
                 minval=0,
-                maxval=2,
+                maxval=2, 
                 dtype=tf.int32
             )
             

@@ -113,11 +113,24 @@ class ChannelModelManager:
             self.logger.error(f"Failed to setup channel model: {str(e)}")
             raise
 
-    def generate_channel_samples(self, batch_size: int, snr_db: tf.Tensor) -> Dict[str, tf.Tensor]:
-        """Generate channel samples with path loss and noise."""
+    def generate_channel_samples(self, batch_size: int, snr_db: tf.Tensor, modulation: str = "QPSK") -> Dict[str, tf.Tensor]:
+        """Generate channel samples with path loss and noise.
+        
+        Args:
+            batch_size: Number of samples to generate
+            snr_db: Signal-to-noise ratio in dB
+            modulation: Modulation scheme ("QPSK", "16QAM", or "64QAM")
+        """
         try:
-            # Cast SNR to float32
-            snr_db = tf.cast(snr_db, tf.float32)
+            # Define modulation-specific parameters
+            modulation_params = {
+                "QPSK": {"snr_adjustment": 0, "bits_per_symbol": 2},
+                "16QAM": {"snr_adjustment": 3, "bits_per_symbol": 4},
+                "64QAM": {"snr_adjustment": 6, "bits_per_symbol": 6}
+            }
+            
+            # Adjust SNR based on modulation scheme
+            adjusted_snr_db = tf.cast(snr_db, tf.float32) - modulation_params[modulation]["snr_adjustment"]
             
             # Generate and validate distances
             distances = tf.random.uniform(
@@ -131,7 +144,7 @@ class ChannelModelManager:
             path_loss_linear = tf.pow(10.0, -path_loss / 10.0)
             
             # Generate and normalize channel response
-            h = tf.cast(self.channel_model(), tf.complex64)  # Explicit casting
+            h = tf.cast(self.channel_model(), tf.complex64)
             h_normalized = normalize_complex_tensor(h)
             
             # Apply path loss (ensure complex64 dtype)
@@ -144,8 +157,11 @@ class ChannelModelManager:
                 tf.complex64
             )
             
-            # Add noise based on SNR
-            noise_power = tf.cast(tf.pow(10.0, -snr_db / 10.0), tf.float32)
+            # Calculate noise power considering modulation scheme
+            noise_power = tf.cast(tf.pow(10.0, -adjusted_snr_db / 10.0), tf.float32)
+            noise_power = noise_power / modulation_params[modulation]["bits_per_symbol"]
+            
+            # Generate noise
             noise = tf.complex(
                 tf.random.normal(tf.shape(h_with_path_loss), stddev=tf.sqrt(noise_power / 2.0)),
                 tf.random.normal(tf.shape(h_with_path_loss), stddev=tf.sqrt(noise_power / 2.0))
@@ -162,7 +178,9 @@ class ChannelModelManager:
                 "perfect_channel": h_with_path_loss,
                 "noisy_channel": noisy_channel,
                 "path_loss": tf.cast(path_loss, tf.float32),
-                "distances": tf.cast(distances, tf.float32)
+                "distances": tf.cast(distances, tf.float32),
+                "modulation": modulation,
+                "effective_snr": tf.cast(adjusted_snr_db, tf.float32)
             }
             
         except Exception as e:
