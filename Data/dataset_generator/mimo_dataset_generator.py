@@ -83,7 +83,7 @@ class MIMODatasetGenerator:
             import sionna as sn
             from sionna.channel import RayleighBlockFading
             from sionna.mapping import Mapper
-            from sionna.ofdm import ResourceGrid, ResourceGridMapper, LSChannelEstimator
+            from sionna.ofdm import ResourceGrid, ResourceGridMapper, LSChannelEstimator, PilotPattern
 
             assert self.system_params.num_subcarriers >= 64, "Number of subcarriers must be at least 64"
             assert self.system_params.subcarrier_spacing in [15e3, 30e3, 60e3], "Invalid subcarrier spacing"
@@ -97,8 +97,49 @@ class MIMODatasetGenerator:
                 num_streams_per_tx=self.system_params.num_streams
             )
 
-            # Initialize LSChannelEstimator with basic parameters
+            # Create pilot pattern
+            # Define pilot positions (every 4th subcarrier in specific OFDM symbols)
+            pilot_ofdm_symbols = [2, 7, 11]  # Pilot symbol positions
+            pilot_spacing = 4  # Space between pilots in frequency domain
+            
+            # Create pilot mask
+            pilot_mask = np.zeros([
+                self.system_params.num_tx_antennas,
+                self.system_params.num_streams,
+                self.system_params.num_subcarriers,
+                self.system_params.num_ofdm_symbols
+            ], dtype=bool)
+            
+            # Set pilot positions in the mask
+            for tx in range(self.system_params.num_tx_antennas):
+                for stream in range(self.system_params.num_streams):
+                    for symbol in pilot_ofdm_symbols:
+                        pilot_mask[tx, stream, ::pilot_spacing, symbol] = True
+
+            # Count number of pilots per antenna/stream
+            num_pilots = np.sum(pilot_mask[0, 0])  # Count for first antenna/stream
+
+            # Generate pilot symbols (QPSK constellation points)
+            pilot_symbols = (1/np.sqrt(2)) * (np.ones([
+                self.system_params.num_tx_antennas,
+                self.system_params.num_streams,
+                num_pilots
+            ]) + 1j * np.ones([
+                self.system_params.num_tx_antennas,
+                self.system_params.num_streams,
+                num_pilots
+            ]))
+
+            # Create pilot pattern
+            pilot_pattern = PilotPattern(
+                pilot_symbols,
+                pilot_mask
+            )
+
+            # Initialize LSChannelEstimator with resource grid and pilot pattern
             self.channel_estimator = LSChannelEstimator(
+                resource_grid=self.resource_grid,
+                pilot_pattern=pilot_pattern,
                 dtype=tf.complex64
             )
 
