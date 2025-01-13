@@ -124,12 +124,12 @@ class MIMODatasetGenerator:
             # Generate channel response
             h_real = tf.random.normal([batch_size, self.system_params.num_rx_antennas, self.system_params.num_tx_antennas], dtype=tf.float32)
             h_imag = tf.random.normal([batch_size, self.system_params.num_rx_antennas, self.system_params.num_tx_antennas], dtype=tf.float32)
-            channel_response = tf.complex(h_real, h_imag) / tf.sqrt(2.0 * float(self.system_params.num_tx_antennas))
+            channel_response = tf.complex(h_real, h_imag) / tf.cast(tf.sqrt(2.0 * float(self.system_params.num_tx_antennas)), tf.complex64)
             
             # Reshape tx_symbols for matrix multiplication
             tx_symbols_expanded = tf.expand_dims(tx_symbols, axis=-1)  # Shape: [batch_size, num_tx_antennas, 1]
             
-            # Apply channel
+            # Apply channel - matrix multiplication
             y_without_noise = tf.matmul(channel_response, tx_symbols_expanded)  # Shape: [batch_size, num_rx_antennas, 1]
             y_without_noise = tf.squeeze(y_without_noise, axis=-1)  # Shape: [batch_size, num_rx_antennas]
             
@@ -149,26 +149,32 @@ class MIMODatasetGenerator:
             noise_power_expanded = tf.expand_dims(tf.expand_dims(noise_power, -1), -1)  # Shape: [batch_size, 1, 1]
             noise_std = tf.sqrt(noise_power_expanded / 2.0)
             
-            # Generate complex noise
-            noise_shape = tf.shape(y_without_noise)
+            # Generate complex noise with proper casting
             noise = tf.complex(
-                tf.random.normal(noise_shape, dtype=tf.float32) * noise_std,
-                tf.random.normal(noise_shape, dtype=tf.float32) * noise_std
+                tf.random.normal(tf.shape(y_without_noise), dtype=tf.float32) * tf.cast(noise_std, tf.float32),
+                tf.random.normal(tf.shape(y_without_noise), dtype=tf.float32) * tf.cast(noise_std, tf.float32)
             )
+            
+            # Cast all tensors to ensure consistent dtypes
+            channel_response = tf.cast(channel_response, tf.complex64)
+            tx_symbols = tf.cast(tx_symbols, tf.complex64)
+            y_without_noise = tf.cast(y_without_noise, tf.complex64)
+            noise = tf.cast(noise, tf.complex64)
             
             # Add noise to received signals
             rx_symbols = y_without_noise + noise
             
             return {
-                'channel_response': tf.cast(channel_response, tf.complex64),
-                'tx_symbols': tf.cast(tx_symbols, tf.complex64),
-                'rx_symbols': tf.cast(rx_symbols, tf.complex64),
+                'channel_response': channel_response,
+                'tx_symbols': tx_symbols,
+                'rx_symbols': rx_symbols,
                 'snr_db': tf.cast(snr_db, tf.float32)
             }
             
         except Exception as e:
             self.logger.warning(f"Error generating batch {batch_idx}: {str(e)}")
             raise
+
 
     def generate_dataset(self, save_path: str = 'dataset/mimo_dataset.h5'):
         try:
