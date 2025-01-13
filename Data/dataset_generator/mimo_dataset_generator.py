@@ -94,10 +94,10 @@ class MIMODatasetGenerator:
                 num_streams_per_tx=self.system_params.num_streams
             )
 
-            # Initialize LSChannelEstimator with only required parameters
+            # Initialize LSChannelEstimator with correct interpolation type
             self.channel_estimator = LSChannelEstimator(
                 resource_grid=self.resource_grid,
-                interpolation_type="linear"
+                interpolation_type="lin"  # Changed from "linear" to "lin"
             )
 
             # Setup modulation schemes
