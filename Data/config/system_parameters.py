@@ -52,11 +52,11 @@ class SystemParameters:
     channel_model: str = "rayleigh"          # Channel model type
     num_paths: int = 10                      # Number of multipath components
     snr_ranges: Dict[str, Tuple[float, float]] = dataclasses.field(
-        default_factory=lambda: {
-            "QPSK": (15.0, 25.0),    # More conservative range for QPSK
-            "16QAM": (20.0, 30.0),   # Higher SNR for 16QAM
-            "64QAM": (25.0, 35.0)    # Even higher for 64QAM
-        }
+    default_factory=lambda: {
+        "QPSK": (15.0, 20.0),    # Conservative range for QPSK
+        "16QAM": (20.0, 25.0),   # Mid-range for 16QAM
+        "64QAM": (25.0, 30.0)    # Upper range for 64QAM
+    }
     )
 
     @property
