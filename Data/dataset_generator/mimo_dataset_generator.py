@@ -102,9 +102,14 @@ class MIMODatasetGenerator:
             # Set pilot pattern (every 4th subcarrier in pilot symbols)
             pilot_mask[::4, :] = True
 
-            # Create pilot pattern with only the mask parameter
+            # Generate pilot symbols (QPSK pilots)
+            num_pilots = np.sum(pilot_mask)
+            pilot_symbols = (1/np.sqrt(2)) * (1 + 1j) * np.ones([num_pilots], dtype=np.complex64)
+
+            # Create pilot pattern with pilots parameter
             pilot_pattern = PilotPattern(
-                mask=pilot_mask  # Only use the mask parameter
+                pilots=pilot_symbols,  # Add the required pilots parameter
+                mask=pilot_mask
             )
 
             # Initialize LSChannelEstimator with pilot pattern
