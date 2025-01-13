@@ -169,10 +169,39 @@ class MIMODatasetGenerator:
             self.logger.warning(f"Error generating batch {batch_idx}: {str(e)}")
             raise
 
-    def _generate_batch_data(self, batch_size: int, batch_idx: int = 0) -> Dict[str, tf.Tensor]:
+    def _generate_batch_data(self, batch_size: int, batch_idx: int = 0, modulation: str = "QPSK") -> Dict[str, tf.Tensor]:
         try:
-            # Generate random bits and map to QPSK symbols
-            bits_per_batch = batch_size * self.system_params.num_tx_antennas * self.system_params.num_bits_per_symbol
+            # Define modulation-specific parameters
+            modulation_params = {
+                "QPSK": {
+                    "bits_per_symbol": 2,
+                    "constellation_points": tf.constant([1+1j, 1-1j, -1+1j, -1-1j], dtype=tf.complex64) / tf.cast(tf.sqrt(2.0), tf.complex64),
+                    "snr_adjustment": 0
+                },
+                "16QAM": {
+                    "bits_per_symbol": 4,
+                    "constellation_points": tf.constant([
+                        (-3-3j), (-3-1j), (-3+3j), (-3+1j),
+                        (-1-3j), (-1-1j), (-1+3j), (-1+1j),
+                        (3-3j), (3-1j), (3+3j), (3+1j),
+                        (1-3j), (1-1j), (1+3j), (1+1j)
+                    ], dtype=tf.complex64) / tf.cast(tf.sqrt(10.0), tf.complex64),
+                    "snr_adjustment": 3
+                },
+                "64QAM": {
+                    "bits_per_symbol": 6,
+                    "constellation_points": self._get_64qam_constellation(),
+                    "snr_adjustment": 6
+                }
+            }
+
+            # Get modulation-specific parameters
+            bits_per_symbol = modulation_params[modulation]["bits_per_symbol"]
+            constellation_points = modulation_params[modulation]["constellation_points"]
+            snr_adjustment = modulation_params[modulation]["snr_adjustment"]
+
+            # Generate random bits
+            bits_per_batch = batch_size * self.system_params.num_tx_antennas * bits_per_symbol
             bits = tf.random.uniform(
                 shape=[bits_per_batch],
                 minval=0,
@@ -180,17 +209,21 @@ class MIMODatasetGenerator:
                 dtype=tf.int32
             )
             
-            # Reshape bits for QPSK modulation
-            bits = tf.reshape(bits, [batch_size, self.system_params.num_tx_antennas, self.system_params.num_bits_per_symbol])
+            # Reshape bits for modulation
+            bits = tf.reshape(bits, [batch_size, self.system_params.num_tx_antennas, bits_per_symbol])
             
-            # Create normalized QPSK constellation points
-            constellation_points = tf.constant([
-                1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j
-            ], dtype=tf.complex64) / tf.cast(tf.sqrt(2.0), tf.complex64)
+            # Map bits to symbols based on modulation
+            bits_concat = tf.reshape(bits, [-1, bits_per_symbol])
+            if modulation == "QPSK":
+                symbol_indices = bits_concat[:, 0] * 2 + bits_concat[:, 1]
+            elif modulation == "16QAM":
+                symbol_indices = (bits_concat[:, 0] * 8 + bits_concat[:, 1] * 4 + 
+                                bits_concat[:, 2] * 2 + bits_concat[:, 3])
+            else:  # 64QAM
+                symbol_indices = (bits_concat[:, 0] * 32 + bits_concat[:, 1] * 16 + 
+                                bits_concat[:, 2] * 8 + bits_concat[:, 3] * 4 +
+                                bits_concat[:, 4] * 2 + bits_concat[:, 5])
             
-            # Map bits to symbols
-            bits_concat = tf.reshape(bits, [-1, self.system_params.num_bits_per_symbol])
-            symbol_indices = bits_concat[:, 0] * 2 + bits_concat[:, 1]
             tx_symbols = tf.gather(constellation_points, symbol_indices)
             tx_symbols = tf.reshape(tx_symbols, [batch_size, self.system_params.num_tx_antennas])
             
@@ -207,12 +240,12 @@ class MIMODatasetGenerator:
             y_without_noise = tf.matmul(channel_response, tx_symbols_expanded)
             y_without_noise = tf.squeeze(y_without_noise, axis=-1)
             
-            # Generate SNR values
+            # Generate SNR values with modulation-specific adjustment
             snr_db = tf.random.uniform(
                 [batch_size],
                 minval=self.system_params.min_snr_db,
                 maxval=self.system_params.max_snr_db
-            )
+            ) - snr_adjustment
             
             # Calculate average signal power per antenna
             signal_power = tf.reduce_mean(
@@ -232,7 +265,7 @@ class MIMODatasetGenerator:
             noise = tf.complex(
                 tf.random.normal(tf.shape(y_without_noise)) * noise_std,
                 tf.random.normal(tf.shape(y_without_noise)) * noise_std
-            ) / tf.cast(tf.sqrt(2.0), tf.complex64)  # Divide by sqrt(2) for proper complex noise power
+            ) / tf.cast(tf.sqrt(2.0), tf.complex64)
             
             # Add noise to received signal
             rx_symbols = y_without_noise + noise
@@ -242,7 +275,7 @@ class MIMODatasetGenerator:
                 actual_signal_power = tf.reduce_mean(tf.abs(y_without_noise)**2)
                 actual_noise_power = tf.reduce_mean(tf.abs(noise)**2)
                 actual_snr = 10.0 * tf.math.log(actual_signal_power/actual_noise_power) / tf.math.log(10.0)
-                tf.print("Batch 0 metrics:",
+                tf.print(f"Batch 0 metrics ({modulation}):",
                         "\nMean Signal Power:", actual_signal_power,
                         "\nMean Noise Power:", actual_noise_power,
                         "\nMean Effective SNR:", actual_snr)
@@ -251,12 +284,22 @@ class MIMODatasetGenerator:
                 'channel_response': tf.cast(channel_response, tf.complex64),
                 'tx_symbols': tf.cast(tx_symbols, tf.complex64),
                 'rx_symbols': tf.cast(rx_symbols, tf.complex64),
-                'snr_db': tf.cast(snr_db, tf.float32)
+                'snr_db': tf.cast(snr_db, tf.float32),
+                'modulation': modulation,
+                'effective_snr': tf.cast(snr_db + snr_adjustment, tf.float32)
             }
             
         except Exception as e:
             self.logger.warning(f"Error generating batch {batch_idx}: {str(e)}")
             raise
+
+    def _get_64qam_constellation(self):
+        """Generate normalized 64QAM constellation points."""
+        points = []
+        for i in range(-7, 8, 2):
+            for q in range(-7, 8, 2):
+                points.append(complex(i, q))
+        return tf.constant(points, dtype=tf.complex64) / tf.cast(tf.sqrt(42.0), tf.complex64)
 
     def generate_dataset(self, save_path: str = 'dataset/mimo_dataset.h5') -> str:
         """
