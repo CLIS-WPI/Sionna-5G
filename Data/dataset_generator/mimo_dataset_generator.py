@@ -110,10 +110,10 @@ class MIMODatasetGenerator:
             # Reshape bits for QPSK modulation
             bits = tf.reshape(bits, [batch_size, self.system_params.num_tx_antennas, self.system_params.num_bits_per_symbol])
             
-            # Create QPSK constellation points with explicit complex64 dtype
+            # Create QPSK constellation points
             constellation_points = tf.constant([
                 1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j
-            ], dtype=tf.complex64) / tf.sqrt(2.0)
+            ], dtype=tf.complex64) / tf.cast(tf.sqrt(2.0), tf.complex64)
             
             # Map bits to QPSK symbols
             bits_concat = tf.reshape(bits, [-1, self.system_params.num_bits_per_symbol])
@@ -121,47 +121,39 @@ class MIMODatasetGenerator:
             tx_symbols = tf.gather(constellation_points, symbol_indices)
             tx_symbols = tf.reshape(tx_symbols, [batch_size, self.system_params.num_tx_antennas])
             
-            # Generate channel response with proper normalization
-            channel_response = tf.complex(
-                tf.random.normal([batch_size, self.system_params.num_rx_antennas, 
-                                self.system_params.num_tx_antennas]),
-                tf.random.normal([batch_size, self.system_params.num_rx_antennas, 
-                                self.system_params.num_tx_antennas])
-            ) / tf.sqrt(2.0 * float(self.system_params.num_tx_antennas))
+            # Generate channel response
+            h_real = tf.random.normal([batch_size, self.system_params.num_rx_antennas, self.system_params.num_tx_antennas], dtype=tf.float32)
+            h_imag = tf.random.normal([batch_size, self.system_params.num_rx_antennas, self.system_params.num_tx_antennas], dtype=tf.float32)
+            channel_response = tf.complex(h_real, h_imag) / tf.cast(tf.sqrt(2.0 * float(self.system_params.num_tx_antennas)), tf.complex64)
             
             # Generate SNR values
             snr_db = tf.random.uniform(
                 [batch_size],
                 minval=self.system_params.min_snr_db,
                 maxval=self.system_params.max_snr_db,
-                dtype=tf.float32  # Explicit dtype
+                dtype=tf.float32
             )
             
-            # Convert SNR from dB to linear scale with explicit float32 dtype
-            snr_linear = tf.cast(tf.pow(10.0, snr_db / 10.0), tf.float32)
-            noise_power = tf.cast(1.0 / snr_linear, tf.float32)
+            # Convert SNR from dB to linear scale
+            snr_linear = tf.pow(10.0, snr_db / 10.0)
+            noise_power = 1.0 / snr_linear
             
             # Apply channel
             tx_symbols_expanded = tf.expand_dims(tx_symbols, axis=-1)
             y_without_noise = tf.matmul(channel_response, tx_symbols_expanded)
             y_without_noise = tf.squeeze(y_without_noise, axis=-1)
             
-            # Generate complex noise with explicit casting and proper broadcasting
-            noise_power_expanded = tf.expand_dims(tf.expand_dims(noise_power, -1), -1)
-            noise_std = tf.sqrt(noise_power_expanded / 2.0)
-            
+            # Generate and add noise
             noise_shape = tf.shape(y_without_noise)
-            noise = tf.complex(
-                tf.random.normal(noise_shape, dtype=tf.float32) * tf.cast(noise_std, tf.float32),
-                tf.random.normal(noise_shape, dtype=tf.float32) * tf.cast(noise_std, tf.float32)
-            )
+            noise_std = tf.expand_dims(tf.expand_dims(tf.sqrt(noise_power / 2.0), -1), -1)
+            noise_std = tf.cast(noise_std, tf.float32)
             
-            # Ensure all complex tensors have complex64 dtype
-            y_without_noise = tf.cast(y_without_noise, tf.complex64)
-            noise = tf.cast(noise, tf.complex64)
+            noise_real = tf.random.normal(noise_shape, dtype=tf.float32) * noise_std
+            noise_imag = tf.random.normal(noise_shape, dtype=tf.float32) * noise_std
+            noise = tf.complex(noise_real, noise_imag)
             
             # Add noise to received signals
-            rx_symbols = y_without_noise + noise
+            rx_symbols = tf.cast(y_without_noise, tf.complex64) + tf.cast(noise, tf.complex64)
             
             return {
                 'channel_response': tf.cast(channel_response, tf.complex64),
