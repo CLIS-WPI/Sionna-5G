@@ -139,7 +139,7 @@ class MIMODatasetGenerator:
                 maxval=self.system_params.max_snr_db
             )
             
-            # Calculate noise power
+            # Convert SNR from dB to linear scale
             snr_linear = tf.pow(10.0, snr_db / 10.0)
             noise_power = 1.0 / snr_linear
             
@@ -148,15 +148,13 @@ class MIMODatasetGenerator:
             y_without_noise = tf.matmul(channel_response, tx_symbols_expanded)
             y_without_noise = tf.squeeze(y_without_noise, axis=-1)
             
-            # Generate and add noise
-            noise = tf.complex(
-                tf.random.normal(tf.shape(y_without_noise)),
-                tf.random.normal(tf.shape(y_without_noise))
-            ) * tf.cast(tf.sqrt(noise_power / 2.0), tf.complex64)
-            noise = tf.expand_dims(noise, axis=-1)
+            # Generate and add noise with proper complex dtype
+            noise_real = tf.random.normal(tf.shape(y_without_noise)) * tf.cast(tf.sqrt(noise_power / 2.0), tf.float32)
+            noise_imag = tf.random.normal(tf.shape(y_without_noise)) * tf.cast(tf.sqrt(noise_power / 2.0), tf.float32)
+            noise = tf.complex(noise_real, noise_imag)
             
             # Add noise to received signals
-            rx_symbols = y_without_noise + tf.squeeze(noise, axis=-1)
+            rx_symbols = y_without_noise + noise
             
             return {
                 'channel_response': channel_response,
