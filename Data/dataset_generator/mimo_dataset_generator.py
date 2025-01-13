@@ -111,7 +111,7 @@ class MIMODatasetGenerator:
                 tf.float32
             )
             
-            # Generate channel response directly as complex64
+            # Generate channel response with correct shape [batch_size, num_rx, num_tx]
             channel_response = tf.cast(tf.complex(
                 tf.random.normal(
                     [batch_size, self.system_params.num_rx_antennas, self.system_params.num_tx_antennas]
@@ -121,7 +121,7 @@ class MIMODatasetGenerator:
                 )
             ), tf.complex64)
             
-            # Generate SNR values (ensure float32)
+            # Generate SNR values [batch_size]
             snr_db = tf.cast(
                 tf.random.uniform(
                     [batch_size], 
@@ -131,10 +131,10 @@ class MIMODatasetGenerator:
                 tf.float32
             )
             
-            # Generate QPSK symbols
+            # Generate QPSK symbols with correct shape [batch_size, num_streams]
             if mod_scheme == 'QPSK':
                 qpsk_points = tf.constant([
-                    [1.0 + 1.0j, 1.0 - 1.0j, -1.0 + 1.0j, -1.0 - 1.0j]
+                    1.0 + 1.0j, 1.0 - 1.0j, -1.0 + 1.0j, -1.0 - 1.0j
                 ], dtype=tf.complex64) / tf.cast(tf.sqrt(2.0), tf.complex64)
                 
                 indices = tf.random.uniform(
@@ -144,7 +144,7 @@ class MIMODatasetGenerator:
                     dtype=tf.int32
                 )
                 
-                tx_symbols = tf.gather(qpsk_points, indices, axis=1)
+                tx_symbols = tf.gather(qpsk_points, indices)
             else:
                 raise ValueError(f"Unsupported modulation scheme: {mod_scheme}")
 
@@ -154,22 +154,22 @@ class MIMODatasetGenerator:
                 tf.complex64
             )
             
-            # Calculate received symbols without noise
-            x = tf.expand_dims(tx_symbols, -1)
-            y_without_noise = tf.matmul(scaled_channel, x)
-            y_without_noise = tf.squeeze(y_without_noise, -1)
+            # Calculate received symbols without noise [batch_size, num_rx]
+            tx_symbols_expanded = tf.expand_dims(tx_symbols, axis=-1)  # [batch_size, num_streams, 1]
+            y_without_noise = tf.matmul(scaled_channel, tx_symbols_expanded)
+            y_without_noise = tf.squeeze(y_without_noise, axis=-1)  # [batch_size, num_rx]
 
-            # Calculate proper noise power using Sionna's utility
+            # Calculate noise power using Sionna's utility
             no = sn.utils.ebnodb2no(
                 ebno_db=snr_db,
                 num_bits_per_symbol=2,  # QPSK has 2 bits per symbol
                 coderate=1.0  # Uncoded transmission
             )
             
-            # Reshape no for broadcasting
+            # Reshape noise power for broadcasting [batch_size, 1]
             no = tf.reshape(no, [batch_size, 1])
             
-            # Apply AWGN channel with proper noise scaling
+            # Apply AWGN channel
             rx_symbols = awgn_channel([y_without_noise, no])
             
             # Calculate metrics
@@ -196,7 +196,6 @@ class MIMODatasetGenerator:
         except Exception as e:
             self.logger.error(f"Batch generation failed: {str(e)}")
             raise
-
     def generate_dataset(self, save_path: str = 'dataset/mimo_dataset.h5'):
         try:
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
