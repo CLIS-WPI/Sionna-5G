@@ -101,12 +101,28 @@ class MIMODatasetGenerator:
             # Create AWGN channel
             awgn_channel = sn.channel.AWGN()
             
-            # Use Sionna's constellation mapper with proper initialization
-            qpsk_mapper = sn.mapping.Constellation(
-                "qpsk",
-                num_bits_per_symbol=self.system_params.num_bits_per_symbol,  # Add this parameter
-                normalize=True
+            # Generate random bits for transmission
+            bits_per_batch = batch_size * self.system_params.num_tx_antennas * self.system_params.num_bits_per_symbol
+            bits = tf.random.uniform(
+                shape=[bits_per_batch],
+                minval=0,
+                maxval=2,
+                dtype=tf.int32
             )
+            
+            # Reshape bits for QPSK modulation
+            bits = tf.reshape(bits, [batch_size, self.system_params.num_tx_antennas, self.system_params.num_bits_per_symbol])
+            
+            # Create QPSK constellation points
+            constellation_points = tf.constant([
+                1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j
+            ], dtype=tf.complex64) / tf.sqrt(2.0)
+            
+            # Map bits to QPSK symbols
+            bits_concat = tf.reshape(bits, [-1, self.system_params.num_bits_per_symbol])
+            symbol_indices = bits_concat[:, 0] * 2 + bits_concat[:, 1]
+            tx_symbols = tf.gather(constellation_points, symbol_indices)
+            tx_symbols = tf.reshape(tx_symbols, [batch_size, self.system_params.num_tx_antennas])
             
             # Generate channel response with proper normalization
             channel_response = tf.complex(
@@ -115,29 +131,32 @@ class MIMODatasetGenerator:
                 tf.random.normal([batch_size, self.system_params.num_rx_antennas, 
                                 self.system_params.num_tx_antennas])
             ) / tf.sqrt(2.0 * float(self.system_params.num_tx_antennas))
-        
+            
             # Generate SNR values
             snr_db = tf.random.uniform(
                 [batch_size],
-                self.system_params.min_snr_db,
-                self.system_params.max_snr_db
+                minval=self.system_params.min_snr_db,
+                maxval=self.system_params.max_snr_db
             )
             
             # Calculate noise power
-            no = sn.utils.ebnodb2no(
-                ebno_db=snr_db,
-                num_bits_per_symbol=self.system_params.num_bits_per_symbol,
-                coderate=self.system_params.coderate
-            )
+            snr_linear = tf.pow(10.0, snr_db / 10.0)
+            noise_power = 1.0 / snr_linear
             
-            # Apply channel and add noise
+            # Apply channel
             tx_symbols_expanded = tf.expand_dims(tx_symbols, axis=-1)
             y_without_noise = tf.matmul(channel_response, tx_symbols_expanded)
             y_without_noise = tf.squeeze(y_without_noise, axis=-1)
             
-            # Add noise
-            no = tf.reshape(no, [batch_size, 1])
-            rx_symbols = awgn_channel([y_without_noise, no])
+            # Generate and add noise
+            noise = tf.complex(
+                tf.random.normal(tf.shape(y_without_noise)),
+                tf.random.normal(tf.shape(y_without_noise))
+            ) * tf.cast(tf.sqrt(noise_power / 2.0), tf.complex64)
+            noise = tf.expand_dims(noise, axis=-1)
+            
+            # Add noise to received signals
+            rx_symbols = y_without_noise + tf.squeeze(noise, axis=-1)
             
             return {
                 'channel_response': channel_response,
@@ -149,7 +168,7 @@ class MIMODatasetGenerator:
         except Exception as e:
             self.logger.error(f"Batch generation failed: {str(e)}")
             raise
-        
+
     def generate_dataset(self, save_path: str = 'dataset/mimo_dataset.h5'):
         try:
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
