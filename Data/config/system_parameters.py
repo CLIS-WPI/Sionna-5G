@@ -83,6 +83,10 @@ class SystemParameters:
     spectral_efficiency_min: float = 4.0  # Minimum target: 4 bits/s/Hz
     spectral_efficiency_max: float = 8.0  # Maximum target: 8 bits/s/Hz
 
+    # Add Sionna-specific parameters
+    num_bits_per_symbol: int = 2  # For QPSK modulation
+    coderate: float = 1.0         # For uncoded transmission
+
     def __post_init__(self):
         """Validate and initialize dependent parameters"""
         # Calculate samples per modulation if not specified
@@ -137,7 +141,7 @@ class SystemParameters:
         assert self.subcarrier_spacing > 0, "Subcarrier spacing must be positive."
 
         # Validate SNR range
-        assert -20 <= self.snr_range[0] < self.snr_range[1] <= 40, "Unrealistic SNR range."
+        assert -20 <= self.snr_range[0] < self.snr_range[1] <= 40, "SNR range must be appropriate for Eb/N0 calculation"
 
         # Validate element spacing
         assert 0.1 <= self.element_spacing <= 1.0, "Element spacing must be between 0.1 and 1.0 wavelengths."
@@ -153,6 +157,11 @@ class SystemParameters:
         assert 10 <= self.sinr_target <= 30, "SINR target must be between 10 and 30 dB"
         assert 0 < self.spectral_efficiency_min < self.spectral_efficiency_max <= 10, "Invalid spectral efficiency range"
         assert 0 <= self.snr_range[0] < self.snr_range[1] <= 20, "SNR range must be between 0 and 20 dB"
+
+        # Add validation for Sionna-specific parameters
+        assert self.num_bits_per_symbol > 0, "Number of bits per symbol must be positive"
+        assert 0 < self.coderate <= 1.0, "Code rate must be between 0 and 1"
+
     def set_global_seeds(self):
         """
         Set global random seeds for reproducibility.
