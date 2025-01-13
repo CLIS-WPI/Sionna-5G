@@ -101,96 +101,58 @@ class MIMODatasetGenerator:
             # Create AWGN channel
             awgn_channel = sn.channel.AWGN()
             
-            # Generate distances and path loss (ensure float32)
-            distances = tf.cast(
-                tf.random.uniform([batch_size], minval=10.0, maxval=500.0),
-                tf.float32
-            )
-            path_loss_db = tf.cast(
-                self.path_loss_manager.calculate_free_space_path_loss(distances),
-                tf.float32
-            )
+            # Use Sionna's constellation mapper
+            qpsk_mapper = sn.mapping.Constellation("qpsk", normalize=True)
             
-            # Generate channel response with correct shape [batch_size, num_rx, num_tx]
-            channel_response = tf.cast(tf.complex(
-                tf.random.normal(
-                    [batch_size, self.system_params.num_rx_antennas, self.system_params.num_tx_antennas]
-                ),
-                tf.random.normal(
-                    [batch_size, self.system_params.num_rx_antennas, self.system_params.num_tx_antennas]
-                )
-            ), tf.complex64)
-            
-            # Generate SNR values [batch_size]
-            snr_db = tf.cast(
-                tf.random.uniform(
-                    [batch_size], 
-                    self.system_params.min_snr_db,
-                    self.system_params.max_snr_db
-                ),
-                tf.float32
+            # Generate random bits
+            num_bits_per_symbol = 2  # QPSK
+            bits = tf.random.uniform(
+                [batch_size, self.system_params.num_streams * num_bits_per_symbol],
+                minval=0,
+                maxval=2,
+                dtype=tf.int32
             )
             
-            # Generate QPSK symbols with correct shape [batch_size, num_streams]
-            if mod_scheme == 'QPSK':
-                qpsk_points = tf.constant([
-                    1.0 + 1.0j, 1.0 - 1.0j, -1.0 + 1.0j, -1.0 - 1.0j
-                ], dtype=tf.complex64) / tf.cast(tf.sqrt(2.0), tf.complex64)
-                
-                indices = tf.random.uniform(
-                    [batch_size, self.system_params.num_streams],
-                    minval=0,
-                    maxval=4,
-                    dtype=tf.int32
-                )
-                
-                tx_symbols = tf.gather(qpsk_points, indices)
-            else:
-                raise ValueError(f"Unsupported modulation scheme: {mod_scheme}")
-
-            # Scale channel response for normalization
-            scaled_channel = channel_response / tf.cast(
-                tf.sqrt(tf.cast(self.system_params.num_tx_antennas, tf.float32)),
-                tf.complex64
+            # Map bits to symbols using Sionna's mapper
+            tx_symbols = qpsk_mapper.modulate(bits)
+            tx_symbols = tf.reshape(tx_symbols, [batch_size, self.system_params.num_streams])
+            
+            # Generate channel response with proper normalization
+            channel_response = tf.complex(
+                tf.random.normal([batch_size, self.system_params.num_rx_antennas, 
+                                self.system_params.num_tx_antennas]),
+                tf.random.normal([batch_size, self.system_params.num_rx_antennas, 
+                                self.system_params.num_tx_antennas])
+            ) / tf.sqrt(2.0 * float(self.system_params.num_tx_antennas))
+            
+            # Generate SNR values
+            snr_db = tf.random.uniform(
+                [batch_size],
+                self.system_params.min_snr_db,
+                self.system_params.max_snr_db
             )
             
-            # Calculate received symbols without noise [batch_size, num_rx]
-            tx_symbols_expanded = tf.expand_dims(tx_symbols, axis=-1)  # [batch_size, num_streams, 1]
-            y_without_noise = tf.matmul(scaled_channel, tx_symbols_expanded)
-            y_without_noise = tf.squeeze(y_without_noise, axis=-1)  # [batch_size, num_rx]
-
             # Calculate noise power using Sionna's utility
             no = sn.utils.ebnodb2no(
                 ebno_db=snr_db,
-                num_bits_per_symbol=2,  # QPSK has 2 bits per symbol
-                coderate=1.0  # Uncoded transmission
+                num_bits_per_symbol=self.system_params.num_bits_per_symbol,
+                coderate=self.system_params.coderate
             )
             
-            # Reshape noise power for broadcasting [batch_size, 1]
-            no = tf.reshape(no, [batch_size, 1])
+            # Apply channel
+            tx_symbols_expanded = tf.expand_dims(tx_symbols, axis=-1)
+            y_without_noise = tf.matmul(channel_response, tx_symbols_expanded)
+            y_without_noise = tf.squeeze(y_without_noise, axis=-1)
             
-            # Apply AWGN channel
+            # Add noise with proper scaling
+            no = tf.reshape(no, [batch_size, 1])
             rx_symbols = awgn_channel([y_without_noise, no])
             
-            # Calculate metrics
-            metrics = self.metrics_calculator.calculate_enhanced_metrics(
-                channel_response=scaled_channel,
-                tx_symbols=tx_symbols,
-                rx_symbols=rx_symbols,
-                snr_db=snr_db
-            )
-            
             return {
-                'channel_response': scaled_channel,
-                'path_loss_db': path_loss_db,
-                'distances': distances,
-                'modulation_scheme': mod_scheme,
+                'channel_response': channel_response,
                 'tx_symbols': tx_symbols,
                 'rx_symbols': rx_symbols,
-                'snr_db': snr_db,
-                'effective_snr': tf.cast(metrics['effective_snr'], tf.float32),
-                'spectral_efficiency': tf.cast(metrics['spectral_efficiency'], tf.float32),
-                'condition_number': tf.cast(metrics['condition_number'], tf.float32)
+                'snr_db': snr_db
             }
             
         except Exception as e:
