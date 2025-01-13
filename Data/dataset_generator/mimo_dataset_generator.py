@@ -98,48 +98,43 @@ class MIMODatasetGenerator:
             )
 
             # Create pilot pattern
-            # Define pilot positions (every 4th subcarrier in specific OFDM symbols)
             pilot_ofdm_symbols = [2, 7, 11]  # Pilot symbol positions
             pilot_spacing = 4  # Space between pilots in frequency domain
             
-            # Create pilot mask
+            # Create pilot mask with correct dimensions [num_tx, num_streams_per_tx, num_ofdm_symbols, num_subcarriers]
             pilot_mask = np.zeros([
                 self.system_params.num_tx_antennas,
                 self.system_params.num_streams,
-                self.system_params.num_subcarriers,
-                self.system_params.num_ofdm_symbols
+                self.system_params.num_ofdm_symbols,
+                self.system_params.num_subcarriers
             ], dtype=bool)
             
             # Set pilot positions in the mask
             for tx in range(self.system_params.num_tx_antennas):
                 for stream in range(self.system_params.num_streams):
                     for symbol in pilot_ofdm_symbols:
-                        pilot_mask[tx, stream, ::pilot_spacing, symbol] = True
+                        pilot_mask[tx, stream, symbol, ::pilot_spacing] = True
 
             # Count number of pilots per antenna/stream
             num_pilots = np.sum(pilot_mask[0, 0])  # Count for first antenna/stream
 
             # Generate pilot symbols (QPSK constellation points)
-            pilot_symbols = (1/np.sqrt(2)) * (np.ones([
+            pilot_symbols = (1/np.sqrt(2)) * (1 + 1j) * np.ones([
                 self.system_params.num_tx_antennas,
                 self.system_params.num_streams,
                 num_pilots
-            ]) + 1j * np.ones([
-                self.system_params.num_tx_antennas,
-                self.system_params.num_streams,
-                num_pilots
-            ]))
+            ], dtype=np.complex64)
 
             # Create pilot pattern
-            pilot_pattern = PilotPattern(
-                pilot_symbols,
-                pilot_mask
+            self.pilot_pattern = PilotPattern(
+                mask=pilot_mask,
+                pilots=pilot_symbols
             )
 
-            # Initialize LSChannelEstimator with resource grid and pilot pattern
+            # Initialize LSChannelEstimator with correct parameters
             self.channel_estimator = LSChannelEstimator(
                 resource_grid=self.resource_grid,
-                pilot_pattern=pilot_pattern,
+                interpolation_type="nn",  # Using nearest neighbor interpolation
                 dtype=tf.complex64
             )
 
