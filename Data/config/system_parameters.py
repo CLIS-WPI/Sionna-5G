@@ -77,6 +77,7 @@ class SystemParameters:
     # Dataset Generation Parameters
     total_samples: int = 1_320_000           # Total number of samples to generate
     batch_size: int = 1000                   # Processing batch size
+    num_batches: int = None                  # Number of batches (will be calculated)
     samples_per_modulation: int = None       # Samples per modulation scheme
     random_seed: int = 42                    # Random seed for reproducibility
 
@@ -94,36 +95,33 @@ class SystemParameters:
     coderate: float = 0.5         # coding rate for better error performance
 
     def __post_init__(self):
-        """Validate and initialize dependent parameters"""
+        """
+        Post-initialization validation and calculations.
+        """
         # Calculate samples per modulation if not specified
         if self.samples_per_modulation is None:
             self.samples_per_modulation = self.total_samples // len(self.modulation_schemes)
 
-        # Validate MIMO configuration
-        assert self.num_streams <= min(self.num_tx_antennas, self.num_rx_antennas), \
-            "Number of streams cannot exceed min(num_tx_antennas, num_rx_antennas)"
+        # Calculate num_batches
+        self.num_batches = self.total_samples // self.batch_size
+        if self.total_samples % self.batch_size != 0:
+            self.num_batches += 1  # Add one more batch for remaining samples
 
-        # Validate SNR range
-        assert self.snr_range[0] < self.snr_range[1], \
-            "Invalid SNR range: min should be less than max"
-
-        # Validate batch size
+        # Basic validations
         assert self.batch_size <= self.total_samples, \
             "Batch size cannot exceed total samples"
+        
+        assert self.num_streams <= min(self.num_tx_antennas, self.num_rx_antennas), \
+            "Number of streams cannot exceed min(num_tx_antennas, num_rx_antennas)"
+        
         # Validate dtypes
         assert self.channel_dtype in [tf.complex64, tf.complex128], \
             "Channel dtype must be complex64 or complex128"
+        
         assert self.compute_dtype in [tf.float32, tf.float64], \
             "Compute dtype must be float32 or float64"
-    def __post_init__(self):
-        """
-        Post-initialization validation and calculations.
-        """
-        # Automatically calculate samples per modulation if not specified
-        if self.samples_per_modulation is None:
-            self.samples_per_modulation = self.total_samples // len(self.modulation_schemes)
 
-        # Validate parameters
+        # Run comprehensive parameter validation
         self._validate_parameters()
 
         # Set global random seeds
