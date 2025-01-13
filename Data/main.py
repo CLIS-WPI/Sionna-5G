@@ -14,6 +14,7 @@ import numpy as np
 import random
 from core.metrics_calculator import MetricsCalculator
 import matplotlib.pyplot as plt
+
 def configure_gpu_environment():
     """Configure GPU environment with memory growth and mixed precision."""
     try:
