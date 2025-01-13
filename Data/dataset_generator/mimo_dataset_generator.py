@@ -245,6 +245,92 @@ class MIMODatasetGenerator:
         except Exception as e:
             self.logger.warning(f"Error generating batch {batch_idx}: {str(e)}")
             raise
+        
+    def generate_dataset(self, save_path: str = 'dataset/mimo_dataset.h5') -> str:
+        """
+        Generate and save the MIMO dataset to an HDF5 file.
+        
+        Args:
+            save_path (str): Path where the dataset will be saved
+            
+        Returns:
+            str: Path to the saved dataset file
+        """
+        try:
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            
+            # Calculate number of batches
+            num_batches = self.system_params.total_samples // self.system_params.batch_size
+            
+            with h5py.File(save_path, 'w') as f:
+                # Create channel data group
+                channel_group = f.create_group('channel_data')
+                
+                # Create datasets with full size
+                channel_response_dataset = channel_group.create_dataset(
+                    'channel_response',
+                    shape=(self.system_params.total_samples, 
+                        self.system_params.num_rx_antennas,
+                        self.system_params.num_tx_antennas),
+                    dtype=np.complex64
+                )
+                
+                tx_symbols_dataset = channel_group.create_dataset(
+                    'tx_symbols',
+                    shape=(self.system_params.total_samples, 
+                        self.system_params.num_tx_antennas),
+                    dtype=np.complex64
+                )
+                
+                rx_symbols_dataset = channel_group.create_dataset(
+                    'rx_symbols',
+                    shape=(self.system_params.total_samples, 
+                        self.system_params.num_rx_antennas),
+                    dtype=np.complex64
+                )
+                
+                snr_db_dataset = channel_group.create_dataset(
+                    'snr_db',
+                    shape=(self.system_params.total_samples,),
+                    dtype=np.float32
+                )
+                
+                # Generate and save data in batches
+                from tqdm import tqdm
+                for batch_idx in tqdm(range(num_batches), desc="Generating samples"):
+                    start_idx = batch_idx * self.system_params.batch_size
+                    end_idx = start_idx + self.system_params.batch_size
+                    
+                    try:
+                        batch_data = self._generate_batch_data(
+                            batch_size=self.system_params.batch_size,
+                            batch_idx=batch_idx
+                        )
+                        
+                        # Save batch data to datasets
+                        channel_response_dataset[start_idx:end_idx] = batch_data['channel_response'].numpy()
+                        tx_symbols_dataset[start_idx:end_idx] = batch_data['tx_symbols'].numpy()
+                        rx_symbols_dataset[start_idx:end_idx] = batch_data['rx_symbols'].numpy()
+                        snr_db_dataset[start_idx:end_idx] = batch_data['snr_db'].numpy()
+                        
+                    except Exception as e:
+                        self.logger.error(f"Error generating batch {batch_idx}: {str(e)}")
+                        raise
+                
+                # Save system parameters
+                config_group = f.create_group('config')
+                for key, value in self.system_params.get_config_dict().items():
+                    if isinstance(value, (int, float, str)):
+                        config_group.attrs[key] = value
+                
+                self.logger.info(f"Dataset successfully generated and saved to {save_path}")
+                return save_path
+                
+        except Exception as e:
+            self.logger.error(f"Error generating dataset: {str(e)}")
+            raise
+
     def verify_complex_data(self, file_path):
         """Verify complex data types in the dataset.
         
