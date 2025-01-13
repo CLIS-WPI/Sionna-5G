@@ -98,9 +98,6 @@ class MIMODatasetGenerator:
 
     def _generate_batch_data(self, batch_size: int, mod_scheme: str = 'QPSK') -> Dict[str, tf.Tensor]:
         try:
-            # Create AWGN channel
-            awgn_channel = sn.channel.AWGN()
-            
             # Generate random bits for transmission
             bits_per_batch = batch_size * self.system_params.num_tx_antennas * self.system_params.num_bits_per_symbol
             bits = tf.random.uniform(
@@ -113,7 +110,7 @@ class MIMODatasetGenerator:
             # Reshape bits for QPSK modulation
             bits = tf.reshape(bits, [batch_size, self.system_params.num_tx_antennas, self.system_params.num_bits_per_symbol])
             
-            # Create QPSK constellation points
+            # Create QPSK constellation points with explicit complex64 dtype
             constellation_points = tf.constant([
                 1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j
             ], dtype=tf.complex64) / tf.sqrt(2.0)
@@ -136,31 +133,41 @@ class MIMODatasetGenerator:
             snr_db = tf.random.uniform(
                 [batch_size],
                 minval=self.system_params.min_snr_db,
-                maxval=self.system_params.max_snr_db
+                maxval=self.system_params.max_snr_db,
+                dtype=tf.float32  # Explicit dtype
             )
             
-            # Convert SNR from dB to linear scale
-            snr_linear = tf.pow(10.0, snr_db / 10.0)
-            noise_power = 1.0 / snr_linear
+            # Convert SNR from dB to linear scale with explicit float32 dtype
+            snr_linear = tf.cast(tf.pow(10.0, snr_db / 10.0), tf.float32)
+            noise_power = tf.cast(1.0 / snr_linear, tf.float32)
             
             # Apply channel
             tx_symbols_expanded = tf.expand_dims(tx_symbols, axis=-1)
             y_without_noise = tf.matmul(channel_response, tx_symbols_expanded)
             y_without_noise = tf.squeeze(y_without_noise, axis=-1)
             
-            # Generate and add noise with proper complex dtype
-            noise_real = tf.random.normal(tf.shape(y_without_noise)) * tf.cast(tf.sqrt(noise_power / 2.0), tf.float32)
-            noise_imag = tf.random.normal(tf.shape(y_without_noise)) * tf.cast(tf.sqrt(noise_power / 2.0), tf.float32)
-            noise = tf.complex(noise_real, noise_imag)
+            # Generate complex noise with explicit casting and proper broadcasting
+            noise_power_expanded = tf.expand_dims(tf.expand_dims(noise_power, -1), -1)
+            noise_std = tf.sqrt(noise_power_expanded / 2.0)
+            
+            noise_shape = tf.shape(y_without_noise)
+            noise = tf.complex(
+                tf.random.normal(noise_shape, dtype=tf.float32) * tf.cast(noise_std, tf.float32),
+                tf.random.normal(noise_shape, dtype=tf.float32) * tf.cast(noise_std, tf.float32)
+            )
+            
+            # Ensure all complex tensors have complex64 dtype
+            y_without_noise = tf.cast(y_without_noise, tf.complex64)
+            noise = tf.cast(noise, tf.complex64)
             
             # Add noise to received signals
             rx_symbols = y_without_noise + noise
             
             return {
-                'channel_response': channel_response,
-                'tx_symbols': tx_symbols,
-                'rx_symbols': rx_symbols,
-                'snr_db': snr_db
+                'channel_response': tf.cast(channel_response, tf.complex64),
+                'tx_symbols': tf.cast(tx_symbols, tf.complex64),
+                'rx_symbols': tf.cast(rx_symbols, tf.complex64),
+                'snr_db': tf.cast(snr_db, tf.float32)
             }
             
         except Exception as e:
