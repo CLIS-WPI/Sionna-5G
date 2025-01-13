@@ -51,7 +51,7 @@ class SystemParameters:
     # Channel Model Parameters
     channel_model: str = "rayleigh"          # Channel model type
     num_paths: int = 10                      # Number of multipath components
-    snr_range: Tuple[float, float] = (5.0, 30.0)  # Signal-to-Noise Ratio range in dB
+    snr_range: Tuple[float, float] = (0.0, 30.0)  # Signal-to-Noise Ratio range in dB
 
     @property
     def min_snr_db(self) -> float:
@@ -78,11 +78,11 @@ class SystemParameters:
     compute_dtype: tf.DType = tf.float32
 
     # Performance Targets (from simulation plan)
-    ber_target: float = 1e-3        # BER Target: < 10^-5 at 15 dB SNR
+    ber_target: float = 1e-5        # BER Target: < 10^-5 at 15 dB SNR
     sinr_target: float = 15.0       # SINR Target: > 15 dB
-    spectral_efficiency_min: float = 2.0  # Minimum target: 4 bits/s/Hz
+    spectral_efficiency_min: float = 4.0  # Minimum target: 4 bits/s/Hz
     spectral_efficiency_max: float = 8.0  # Maximum target: 8 bits/s/Hz
-
+    throughput_target: float = 0.95         # > 95% of theoretical maximum
     # Add Sionna-specific parameters
     num_bits_per_symbol: int = 2  # For QPSK modulation
     coderate: float = 0.5         # coding rate for better error performance
