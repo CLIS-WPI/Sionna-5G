@@ -169,9 +169,9 @@ class MIMODatasetGenerator:
             self.logger.warning(f"Error generating batch {batch_idx}: {str(e)}")
             raise
 
-    def _generate_batch_data(self, batch_size: int, batch_idx: int = 0, mod_scheme: str = 'QPSK') -> Dict[str, tf.Tensor]:
+    def _generate_batch_data(self, batch_size: int, batch_idx: int = 0) -> Dict[str, tf.Tensor]:
         try:
-            # Generate random bits for transmission
+            # Generate random bits and map to QPSK symbols
             bits_per_batch = batch_size * self.system_params.num_tx_antennas * self.system_params.num_bits_per_symbol
             bits = tf.random.uniform(
                 shape=[bits_per_batch],
@@ -183,65 +183,59 @@ class MIMODatasetGenerator:
             # Reshape bits for QPSK modulation
             bits = tf.reshape(bits, [batch_size, self.system_params.num_tx_antennas, self.system_params.num_bits_per_symbol])
             
-            # Create QPSK constellation points
+            # Create normalized QPSK constellation points
             constellation_points = tf.constant([
                 1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j
-            ], dtype=tf.complex64) / tf.cast(tf.sqrt(2.0), tf.complex64)
+            ], dtype=tf.complex64) / tf.sqrt(2.0)
             
-            # Map bits to QPSK symbols
+            # Map bits to symbols
             bits_concat = tf.reshape(bits, [-1, self.system_params.num_bits_per_symbol])
             symbol_indices = bits_concat[:, 0] * 2 + bits_concat[:, 1]
             tx_symbols = tf.gather(constellation_points, symbol_indices)
             tx_symbols = tf.reshape(tx_symbols, [batch_size, self.system_params.num_tx_antennas])
             
-            # Generate channel response with correct shape
-            h_real = tf.random.normal([batch_size, self.system_params.num_rx_antennas, self.system_params.num_tx_antennas], dtype=tf.float32)
-            h_imag = tf.random.normal([batch_size, self.system_params.num_rx_antennas, self.system_params.num_tx_antennas], dtype=tf.float32)
-            normalization_factor = tf.cast(tf.sqrt(2.0 * float(self.system_params.num_tx_antennas)), tf.complex64)
-            channel_response = tf.complex(h_real, h_imag) / normalization_factor
-            # Reshape tx_symbols for matrix multiplication
-            tx_symbols_expanded = tf.expand_dims(tx_symbols, axis=-1)  # Shape: [batch_size, num_tx_antennas, 1]
+            # Generate channel response
+            h_real = tf.random.normal([batch_size, self.system_params.num_rx_antennas, self.system_params.num_tx_antennas])
+            h_imag = tf.random.normal([batch_size, self.system_params.num_rx_antennas, self.system_params.num_tx_antennas])
+            channel_response = tf.complex(h_real, h_imag) / tf.sqrt(2.0 * float(self.system_params.num_tx_antennas))
             
-            # Apply channel - matrix multiplication
-            y_without_noise = tf.matmul(channel_response, tx_symbols_expanded)  # Shape: [batch_size, num_rx_antennas, 1]
-            y_without_noise = tf.squeeze(y_without_noise, axis=-1)  # Shape: [batch_size, num_rx_antennas]
+            # Apply channel
+            tx_symbols_expanded = tf.expand_dims(tx_symbols, axis=-1)
+            y_without_noise = tf.matmul(channel_response, tx_symbols_expanded)
+            y_without_noise = tf.squeeze(y_without_noise, axis=-1)
             
-            # Generate SNR values
+            # Generate SNR values properly
             snr_db = tf.random.uniform(
                 [batch_size],
                 minval=self.system_params.min_snr_db,
-                maxval=self.system_params.max_snr_db,
-                dtype=tf.float32
+                maxval=self.system_params.max_snr_db
             )
             
-            # Convert SNR from dB to linear scale with explicit casting
-            snr_db = tf.cast(snr_db, tf.float32)
-            snr_linear = tf.pow(10.0, snr_db / 10.0)
-            noise_power = 1.0 / snr_linear
-
-            # Generate and add noise with proper broadcasting and dtype handling
-            noise_power_expanded = tf.expand_dims(noise_power, -1)  # Shape: [batch_size, 1]
-            noise_std = tf.sqrt(noise_power_expanded / 2.0)
-
-            # Generate complex noise with matching dtype
-            noise_real = tf.random.normal(tf.shape(y_without_noise), dtype=tf.float32) * noise_std
-            noise_imag = tf.random.normal(tf.shape(y_without_noise), dtype=tf.float32) * noise_std
-            noise = tf.complex(noise_real, noise_imag)
-
-            # Ensure all tensors have consistent dtypes
-            noise = tf.cast(noise, tf.complex64)
-            y_without_noise = tf.cast(y_without_noise, tf.complex64)
+            # Convert SNR to linear scale correctly
+            snr_linear = tf.pow(10.0, snr_db/10.0)
             
-            # Add noise to received signals
+            # Calculate signal power
+            signal_power = tf.reduce_mean(tf.abs(y_without_noise)**2, axis=-1, keepdims=True)
+            
+            # Calculate noise power based on desired SNR
+            noise_power = signal_power / snr_linear
+            noise_std = tf.sqrt(noise_power/2.0)
+            
+            # Generate complex noise with proper scaling
+            noise_real = tf.random.normal(tf.shape(y_without_noise)) * tf.cast(noise_std, tf.float32)
+            noise_imag = tf.random.normal(tf.shape(y_without_noise)) * tf.cast(noise_std, tf.float32)
+            noise = tf.complex(noise_real, noise_imag)
+            
+            # Add noise to received signal
             rx_symbols = y_without_noise + noise
 
             return {
-                'channel_response': tf.cast(channel_response, tf.complex64),
-                'tx_symbols': tf.cast(tx_symbols, tf.complex64),
-                'rx_symbols': tf.cast(rx_symbols, tf.complex64),
-                'snr_db': tf.cast(snr_db, tf.float32)
+                'channel_response': channel_response,
+                'tx_symbols': tx_symbols,
+                'rx_symbols': rx_symbols,
+                'snr_db': snr_db
             }
-
+            
         except Exception as e:
             self.logger.warning(f"Error generating batch {batch_idx}: {str(e)}")
             raise
