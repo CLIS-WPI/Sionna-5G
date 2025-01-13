@@ -121,10 +121,10 @@ class MIMODatasetGenerator:
             tx_symbols = tf.gather(constellation_points, symbol_indices)
             tx_symbols = tf.reshape(tx_symbols, [batch_size, self.system_params.num_tx_antennas])
             
-            # Generate channel response
+            # Generate channel response with correct shape
             h_real = tf.random.normal([batch_size, self.system_params.num_rx_antennas, self.system_params.num_tx_antennas], dtype=tf.float32)
             h_imag = tf.random.normal([batch_size, self.system_params.num_rx_antennas, self.system_params.num_tx_antennas], dtype=tf.float32)
-            channel_response = tf.complex(h_real, h_imag) / tf.cast(tf.sqrt(2.0 * float(self.system_params.num_tx_antennas)), tf.complex64)
+            channel_response = tf.complex(h_real, h_imag) / tf.sqrt(2.0 * float(self.system_params.num_tx_antennas))
             
             # Reshape tx_symbols for matrix multiplication
             tx_symbols_expanded = tf.expand_dims(tx_symbols, axis=-1)  # Shape: [batch_size, num_tx_antennas, 1]
@@ -146,28 +146,22 @@ class MIMODatasetGenerator:
             noise_power = 1.0 / snr_linear
             
             # Generate and add noise with proper broadcasting
-            noise_power_expanded = tf.expand_dims(tf.expand_dims(noise_power, -1), -1)  # Shape: [batch_size, 1, 1]
+            noise_power_expanded = tf.expand_dims(noise_power, axis=-1)  # Shape: [batch_size, 1]
             noise_std = tf.sqrt(noise_power_expanded / 2.0)
             
-            # Generate complex noise with proper casting
+            # Generate complex noise with correct shape
             noise = tf.complex(
-                tf.random.normal(tf.shape(y_without_noise), dtype=tf.float32) * tf.cast(noise_std, tf.float32),
-                tf.random.normal(tf.shape(y_without_noise), dtype=tf.float32) * tf.cast(noise_std, tf.float32)
+                tf.random.normal([batch_size, self.system_params.num_rx_antennas], dtype=tf.float32) * noise_std,
+                tf.random.normal([batch_size, self.system_params.num_rx_antennas], dtype=tf.float32) * noise_std
             )
-            
-            # Cast all tensors to ensure consistent dtypes
-            channel_response = tf.cast(channel_response, tf.complex64)
-            tx_symbols = tf.cast(tx_symbols, tf.complex64)
-            y_without_noise = tf.cast(y_without_noise, tf.complex64)
-            noise = tf.cast(noise, tf.complex64)
             
             # Add noise to received signals
             rx_symbols = y_without_noise + noise
             
             return {
-                'channel_response': channel_response,
-                'tx_symbols': tx_symbols,
-                'rx_symbols': rx_symbols,
+                'channel_response': tf.cast(channel_response, tf.complex64),
+                'tx_symbols': tf.cast(tx_symbols, tf.complex64),
+                'rx_symbols': tf.cast(rx_symbols, tf.complex64),
                 'snr_db': tf.cast(snr_db, tf.float32)
             }
             
@@ -175,80 +169,81 @@ class MIMODatasetGenerator:
             self.logger.warning(f"Error generating batch {batch_idx}: {str(e)}")
             raise
 
-
-    def generate_dataset(self, save_path: str = 'dataset/mimo_dataset.h5'):
+    def _generate_batch_data(self, batch_size: int, batch_idx: int = 0, mod_scheme: str = 'QPSK') -> Dict[str, tf.Tensor]:
         try:
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            # Generate random bits for transmission
+            bits_per_batch = batch_size * self.system_params.num_tx_antennas * self.system_params.num_bits_per_symbol
+            bits = tf.random.uniform(
+                shape=[bits_per_batch],
+                minval=0,
+                maxval=2,
+                dtype=tf.int32
+            )
             
-            total_samples = self.system_params.total_samples
-            batch_size = self.system_params.batch_size
-            num_batches = total_samples // batch_size
+            # Reshape bits for QPSK modulation
+            bits = tf.reshape(bits, [batch_size, self.system_params.num_tx_antennas, self.system_params.num_bits_per_symbol])
             
-            with h5py.File(save_path, 'w') as f:
-                # Create main data group
-                data_group = f.create_group('channel_data')
-                
-                # Initialize datasets once
-                datasets = {
-                    'channel_response': {
-                        'shape': (total_samples, self.system_params.num_rx_antennas,
-                                self.system_params.num_tx_antennas),
-                        'dtype': np.complex64
-                    },
-                    'path_loss_db': {'shape': (total_samples,), 'dtype': np.float32},
-                    'distances': {'shape': (total_samples,), 'dtype': np.float32},
-                    'tx_symbols': {
-                        'shape': (total_samples, self.system_params.num_streams),
-                        'dtype': np.complex64
-                    },
-                    'rx_symbols': {
-                        'shape': (total_samples, self.system_params.num_streams),
-                        'dtype': np.complex64
-                    },
-                    'snr_db': {'shape': (total_samples,), 'dtype': np.float32},
-                    'spectral_efficiency': {'shape': (total_samples,), 'dtype': np.float32},
-                    'effective_snr': {'shape': (total_samples,), 'dtype': np.float32},
-                    'condition_number': {'shape': (total_samples,), 'dtype': np.float32}
-                }
-                
-                # Create datasets
-                for name, config in datasets.items():
-                    data_group.create_dataset(name, shape=config['shape'],
-                                        dtype=config['dtype'])
-                
-                # Generate and store data in batches
-                with tqdm(total=total_samples, desc="Generating samples") as pbar:
-                    for batch_idx in range(num_batches):
-                        start_idx = batch_idx * batch_size
-                        try:
-                            batch_data = self._generate_batch_data(batch_size)
-                            end_idx = start_idx + batch_size
-                            
-                            # Store batch data
-                            for name, data in batch_data.items():
-                                if name != 'modulation_scheme':
-                                    data_group[name][start_idx:end_idx] = data
-                            
-                            pbar.update(batch_size)
-                            
-                        except Exception as e:
-                            self.logger.warning(f"Error generating batch {start_idx}: {str(e)}")
-                            continue
-                
-                # Add configuration
-                config_group = f.create_group('configuration')
-                config_dict = self.system_params.get_config_dict()
-                for key, value in config_dict.items():
-                    if isinstance(value, (int, float, str)):
-                        config_group.attrs[key] = value
-                    elif isinstance(value, (list, tuple)):
-                        config_group.create_dataset(key, data=value)
-                
-            self.logger.info(f"Dataset generated successfully: {save_path}")
-            return save_path
+            # Create QPSK constellation points
+            constellation_points = tf.constant([
+                1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j
+            ], dtype=tf.complex64) / tf.cast(tf.sqrt(2.0), tf.complex64)
             
+            # Map bits to QPSK symbols
+            bits_concat = tf.reshape(bits, [-1, self.system_params.num_bits_per_symbol])
+            symbol_indices = bits_concat[:, 0] * 2 + bits_concat[:, 1]
+            tx_symbols = tf.gather(constellation_points, symbol_indices)
+            tx_symbols = tf.reshape(tx_symbols, [batch_size, self.system_params.num_tx_antennas])
+            
+            # Generate channel response with correct shape
+            h_real = tf.random.normal([batch_size, self.system_params.num_rx_antennas, self.system_params.num_tx_antennas], dtype=tf.float32)
+            h_imag = tf.random.normal([batch_size, self.system_params.num_rx_antennas, self.system_params.num_tx_antennas], dtype=tf.float32)
+            channel_response = tf.complex(h_real, h_imag) / tf.sqrt(2.0 * float(self.system_params.num_tx_antennas))
+            
+            # Reshape tx_symbols for matrix multiplication
+            tx_symbols_expanded = tf.expand_dims(tx_symbols, axis=-1)  # Shape: [batch_size, num_tx_antennas, 1]
+            
+            # Apply channel - matrix multiplication
+            y_without_noise = tf.matmul(channel_response, tx_symbols_expanded)  # Shape: [batch_size, num_rx_antennas, 1]
+            y_without_noise = tf.squeeze(y_without_noise, axis=-1)  # Shape: [batch_size, num_rx_antennas]
+            
+            # Generate SNR values
+            snr_db = tf.random.uniform(
+                [batch_size],
+                minval=self.system_params.min_snr_db,
+                maxval=self.system_params.max_snr_db,
+                dtype=tf.float32
+            )
+            
+            # Convert SNR from dB to linear scale with explicit casting
+            snr_db = tf.cast(snr_db, tf.float32)
+            snr_linear = tf.pow(10.0, snr_db / 10.0)
+            noise_power = 1.0 / snr_linear
+
+            # Generate and add noise with proper broadcasting and dtype handling
+            noise_power_expanded = tf.expand_dims(noise_power, -1)  # Shape: [batch_size, 1]
+            noise_std = tf.sqrt(noise_power_expanded / 2.0)
+
+            # Generate complex noise with matching dtype
+            noise_real = tf.random.normal(tf.shape(y_without_noise), dtype=tf.float32) * noise_std
+            noise_imag = tf.random.normal(tf.shape(y_without_noise), dtype=tf.float32) * noise_std
+            noise = tf.complex(noise_real, noise_imag)
+
+            # Ensure all tensors have consistent dtypes
+            noise = tf.cast(noise, tf.complex64)
+            y_without_noise = tf.cast(y_without_noise, tf.complex64)
+            
+            # Add noise to received signals
+            rx_symbols = y_without_noise + noise
+
+            return {
+                'channel_response': tf.cast(channel_response, tf.complex64),
+                'tx_symbols': tf.cast(tx_symbols, tf.complex64),
+                'rx_symbols': tf.cast(rx_symbols, tf.complex64),
+                'snr_db': tf.cast(snr_db, tf.float32)
+            }
+
         except Exception as e:
-            self.logger.error(f"Failed to generate dataset: {str(e)}")
+            self.logger.warning(f"Error generating batch {batch_idx}: {str(e)}")
             raise
     def verify_complex_data(self, file_path):
         """Verify complex data types in the dataset.
