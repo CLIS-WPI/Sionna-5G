@@ -44,7 +44,7 @@ from utill.tensor_shape_validator import validate_mimo_tensor_shapes
 from utill.tensor_shape_validator import validate_mimo_metrics
 from tqdm import tqdm
 from core.path_loss_model import PathLossManager
-
+import sionna as sn
 
 class MIMODatasetGenerator:
     def __init__(
@@ -98,6 +98,9 @@ class MIMODatasetGenerator:
 
     def _generate_batch_data(self, batch_size: int, mod_scheme: str = 'QPSK') -> Dict[str, tf.Tensor]:
         try:
+            # Create AWGN channel
+            awgn_channel = sn.channel.AWGN()
+            
             # Generate distances and path loss (ensure float32)
             distances = tf.cast(
                 tf.random.uniform([batch_size], minval=10.0, maxval=500.0),
@@ -145,49 +148,29 @@ class MIMODatasetGenerator:
             else:
                 raise ValueError(f"Unsupported modulation scheme: {mod_scheme}")
 
-            # Calculate signal power
-            signal_power = tf.cast(tf.reduce_mean(tf.abs(tx_symbols) ** 2), tf.float32)
-
-            # Convert SNR from dB to linear scale and prepare for complex multiplication
-            snr_linear = tf.pow(10.0, snr_db/10.0)
-            snr_scaling = tf.cast(
-                tf.complex(
-                    tf.sqrt(snr_linear),
-                    tf.zeros_like(snr_linear)
-                ),
-                tf.complex64
-            )
-            
-            # Reshape SNR scaling for broadcasting
-            snr_scaling = tf.reshape(snr_scaling, [batch_size, 1, 1])
-            
-            # Scale channel response (now both complex64)
-            scaled_channel = channel_response * snr_scaling / tf.cast(
+            # Scale channel response for normalization
+            scaled_channel = channel_response / tf.cast(
                 tf.sqrt(tf.cast(self.system_params.num_tx_antennas, tf.float32)),
                 tf.complex64
             )
             
-            # Calculate received symbols
+            # Calculate received symbols without noise
             x = tf.expand_dims(tx_symbols, -1)
             y_without_noise = tf.matmul(scaled_channel, x)
             y_without_noise = tf.squeeze(y_without_noise, -1)
 
-            # Calculate noise power and stddev
-            noise_power = tf.cast(signal_power / snr_linear, tf.float32)
-            noise_stddev = tf.sqrt(noise_power/2.0)
-            
-            # Generate complex noise with proper shape and scaling
-            noise_shape = tf.shape(y_without_noise)
-            noise_stddev = tf.reshape(noise_stddev, [batch_size, 1])
-            
-            noise = tf.complex(
-                tf.random.normal(tf.shape(y_without_noise), stddev=noise_stddev),
-                tf.random.normal(tf.shape(y_without_noise), stddev=noise_stddev)
+            # Calculate proper noise power using Sionna's utility
+            no = sn.utils.ebnodb2no(
+                ebno_db=snr_db,
+                num_bits_per_symbol=2,  # QPSK has 2 bits per symbol
+                coderate=1.0  # Uncoded transmission
             )
-            noise = tf.cast(noise, tf.complex64)
-
-            # Add noise
-            rx_symbols = y_without_noise + noise
+            
+            # Reshape no for broadcasting
+            no = tf.reshape(no, [batch_size, 1])
+            
+            # Apply AWGN channel with proper noise scaling
+            rx_symbols = awgn_channel([y_without_noise, no])
             
             # Calculate metrics
             metrics = self.metrics_calculator.calculate_enhanced_metrics(
