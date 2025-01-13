@@ -101,21 +101,12 @@ class MIMODatasetGenerator:
             # Create AWGN channel
             awgn_channel = sn.channel.AWGN()
             
-            # Use Sionna's constellation mapper
-            qpsk_mapper = sn.mapping.Constellation("qpsk", normalize=True)
-            
-            # Generate random bits
-            num_bits_per_symbol = 2  # QPSK
-            bits = tf.random.uniform(
-                [batch_size, self.system_params.num_streams * num_bits_per_symbol],
-                minval=0,
-                maxval=2,
-                dtype=tf.int32
+            # Use Sionna's constellation mapper with proper initialization
+            qpsk_mapper = sn.mapping.Constellation(
+                "qpsk",
+                num_bits_per_symbol=self.system_params.num_bits_per_symbol,  # Add this parameter
+                normalize=True
             )
-            
-            # Map bits to symbols using Sionna's mapper
-            tx_symbols = qpsk_mapper.modulate(bits)
-            tx_symbols = tf.reshape(tx_symbols, [batch_size, self.system_params.num_streams])
             
             # Generate channel response with proper normalization
             channel_response = tf.complex(
@@ -124,7 +115,7 @@ class MIMODatasetGenerator:
                 tf.random.normal([batch_size, self.system_params.num_rx_antennas, 
                                 self.system_params.num_tx_antennas])
             ) / tf.sqrt(2.0 * float(self.system_params.num_tx_antennas))
-            
+        
             # Generate SNR values
             snr_db = tf.random.uniform(
                 [batch_size],
@@ -132,19 +123,19 @@ class MIMODatasetGenerator:
                 self.system_params.max_snr_db
             )
             
-            # Calculate noise power using Sionna's utility
+            # Calculate noise power
             no = sn.utils.ebnodb2no(
                 ebno_db=snr_db,
                 num_bits_per_symbol=self.system_params.num_bits_per_symbol,
                 coderate=self.system_params.coderate
             )
             
-            # Apply channel
+            # Apply channel and add noise
             tx_symbols_expanded = tf.expand_dims(tx_symbols, axis=-1)
             y_without_noise = tf.matmul(channel_response, tx_symbols_expanded)
             y_without_noise = tf.squeeze(y_without_noise, axis=-1)
             
-            # Add noise with proper scaling
+            # Add noise
             no = tf.reshape(no, [batch_size, 1])
             rx_symbols = awgn_channel([y_without_noise, no])
             
@@ -158,6 +149,7 @@ class MIMODatasetGenerator:
         except Exception as e:
             self.logger.error(f"Batch generation failed: {str(e)}")
             raise
+        
     def generate_dataset(self, save_path: str = 'dataset/mimo_dataset.h5'):
         try:
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
