@@ -183,10 +183,10 @@ class MIMODatasetGenerator:
             # Reshape bits for QPSK modulation
             bits = tf.reshape(bits, [batch_size, self.system_params.num_tx_antennas, self.system_params.num_bits_per_symbol])
             
-            # Create normalized QPSK constellation points with proper dtype handling
+            # Create normalized QPSK constellation points
             constellation_points = tf.constant([
                 1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j
-            ], dtype=tf.complex64) / tf.cast(tf.sqrt(2.0), tf.complex64)  # Cast the denominator to complex64
+            ], dtype=tf.complex64) / tf.cast(tf.sqrt(2.0), tf.complex64)
             
             # Map bits to symbols
             bits_concat = tf.reshape(bits, [-1, self.system_params.num_bits_per_symbol])
@@ -194,16 +194,18 @@ class MIMODatasetGenerator:
             tx_symbols = tf.gather(constellation_points, symbol_indices)
             tx_symbols = tf.reshape(tx_symbols, [batch_size, self.system_params.num_tx_antennas])
             
-            # Generate channel response with proper dtype handling
+            # Generate channel response with proper normalization
             h_real = tf.random.normal([batch_size, self.system_params.num_rx_antennas, self.system_params.num_tx_antennas])
             h_imag = tf.random.normal([batch_size, self.system_params.num_rx_antennas, self.system_params.num_tx_antennas])
-            normalization_factor = tf.cast(tf.sqrt(2.0 * float(self.system_params.num_tx_antennas)), tf.complex64)
-            channel_response = tf.complex(h_real, h_imag) / normalization_factor
+            channel_response = tf.complex(h_real, h_imag) / tf.cast(
+                tf.sqrt(float(self.system_params.num_tx_antennas)), 
+                tf.complex64
+            )
             
             # Apply channel
-            tx_symbols_expanded = tf.expand_dims(tx_symbols, axis=-1)  # Shape: [batch_size, num_tx_antennas, 1]
-            y_without_noise = tf.matmul(channel_response, tx_symbols_expanded)  # Shape: [batch_size, num_rx_antennas, 1]
-            y_without_noise = tf.squeeze(y_without_noise, axis=-1)  # Shape: [batch_size, num_rx_antennas]
+            tx_symbols_expanded = tf.expand_dims(tx_symbols, axis=-1)
+            y_without_noise = tf.matmul(channel_response, tx_symbols_expanded)
+            y_without_noise = tf.squeeze(y_without_noise, axis=-1)
             
             # Generate SNR values
             snr_db = tf.random.uniform(
@@ -212,26 +214,38 @@ class MIMODatasetGenerator:
                 maxval=self.system_params.max_snr_db
             )
             
-            # Convert SNR to linear scale with proper broadcasting
-            snr_linear = tf.pow(10.0, snr_db/10.0)  # Shape: [batch_size]
-            snr_linear = tf.expand_dims(snr_linear, axis=-1)  # Shape: [batch_size, 1]
-            
-            # Calculate signal power with proper dimensions
-            signal_power = tf.reduce_mean(tf.abs(y_without_noise)**2, axis=-1, keepdims=True)  # Shape: [batch_size, 1]
-            
-            # Calculate noise power with proper broadcasting
-            noise_power = signal_power / snr_linear  # Shape: [batch_size, 1]
-            noise_std = tf.sqrt(noise_power/2.0)  # Shape: [batch_size, 1]
-            
-            # Generate complex noise with correct shape
-            noise_shape = tf.shape(y_without_noise)  # Should be [batch_size, num_rx_antennas]
-            noise = tf.complex(
-                tf.random.normal(noise_shape) * tf.cast(noise_std, tf.float32),
-                tf.random.normal(noise_shape) * tf.cast(noise_std, tf.float32)
+            # Calculate average signal power per antenna
+            signal_power = tf.reduce_mean(
+                tf.abs(y_without_noise)**2,
+                axis=-1,
+                keepdims=True
             )
+            
+            # Convert SNR to linear scale
+            snr_linear = tf.expand_dims(tf.pow(10.0, snr_db/10.0), axis=-1)
+            
+            # Calculate noise power to achieve target SNR
+            noise_power = signal_power / snr_linear
+            noise_std = tf.sqrt(noise_power)
+            
+            # Generate complex Gaussian noise
+            noise = tf.complex(
+                tf.random.normal(tf.shape(y_without_noise)) * noise_std,
+                tf.random.normal(tf.shape(y_without_noise)) * noise_std
+            ) / tf.cast(tf.sqrt(2.0), tf.complex64)  # Divide by sqrt(2) for proper complex noise power
             
             # Add noise to received signal
             rx_symbols = y_without_noise + noise
+            
+            # Debug prints for first batch
+            if batch_idx == 0:
+                actual_signal_power = tf.reduce_mean(tf.abs(y_without_noise)**2)
+                actual_noise_power = tf.reduce_mean(tf.abs(noise)**2)
+                actual_snr = 10.0 * tf.math.log(actual_signal_power/actual_noise_power) / tf.math.log(10.0)
+                tf.print("Batch 0 metrics:",
+                        "\nMean Signal Power:", actual_signal_power,
+                        "\nMean Noise Power:", actual_noise_power,
+                        "\nMean Effective SNR:", actual_snr)
 
             return {
                 'channel_response': tf.cast(channel_response, tf.complex64),
@@ -243,7 +257,7 @@ class MIMODatasetGenerator:
         except Exception as e:
             self.logger.warning(f"Error generating batch {batch_idx}: {str(e)}")
             raise
-        
+
     def generate_dataset(self, save_path: str = 'dataset/mimo_dataset.h5') -> str:
         """
         Generate and save the MIMO dataset to an HDF5 file.
