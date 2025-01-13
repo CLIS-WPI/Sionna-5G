@@ -79,16 +79,40 @@ class MIMODatasetGenerator:
     def _setup_sionna_components(self):
         """Setup Sionna channel models and antenna arrays"""
         try:
-            self.logger.debug(f"SNR Range: {self.system_params.snr_range}")
-            self.logger.debug(f"Min SNR: {self.system_params.min_snr_db}")
-            self.logger.debug(f"Max SNR: {self.system_params.max_snr_db}")
-            
-            # Initialize Rayleigh channel model with ALL required parameters
-            self.channel_model = sn.channel.RayleighBlockFading(
-                num_rx=1,                                      # Number of receivers
-                num_rx_ant=self.system_params.num_rx_antennas, # Number of receive antennas
-                num_tx=1,                                      # Number of transmitters
-                num_tx_ant=self.system_params.num_tx_antennas, # Number of transmit antennas
+            # Import required Sionna components
+            import sionna as sn
+            from sionna.channel import RayleighBlockFading
+            from sionna.mapping import Mapper, SymbolSource
+            from sionna.ofdm import ResourceGrid, ResourceGridMapper
+
+            # Create OFDM Resource Grid
+            self.resource_grid = ResourceGrid(
+                num_ofdm_symbols=self.system_params.num_ofdm_symbols,
+                fft_size=self.system_params.num_subcarriers,
+                subcarrier_spacing=self.system_params.subcarrier_spacing,
+                num_tx=self.system_params.num_tx_antennas,
+                num_streams_per_tx=self.system_params.num_streams
+            )
+
+            # Setup modulation schemes
+            self.modulation_schemes = {
+                "QPSK": sn.mapping.QPSK(),
+                "16QAM": sn.mapping.QAM(16),
+                "64QAM": sn.mapping.QAM(64)
+            }
+
+            # Initialize mappers for each modulation
+            self.mappers = {
+                mod: Mapper(constellation=scheme)
+                for mod, scheme in self.modulation_schemes.items()
+            }
+
+            # Setup channel model
+            self.channel_model = RayleighBlockFading(
+                num_rx=1,
+                num_rx_ant=self.system_params.num_rx_antennas,
+                num_tx=1,
+                num_tx_ant=self.system_params.num_tx_antennas,
                 dtype=tf.complex64
             )
 
@@ -171,126 +195,64 @@ class MIMODatasetGenerator:
 
     def _generate_batch_data(self, batch_size: int, batch_idx: int = 0, modulation: str = "QPSK") -> Dict[str, tf.Tensor]:
         try:
-            # Define modulation-specific parameters
-            modulation_params = {
-                "QPSK": {
-                    "bits_per_symbol": 2,
-                    "constellation_points": tf.constant([1+1j, 1-1j, -1+1j, -1-1j], dtype=tf.complex64) / tf.cast(tf.sqrt(2.0), tf.complex64),
-                    "snr_adjustment": 0
-                },
-                "16QAM": {
-                    "bits_per_symbol": 4,
-                    "constellation_points": tf.constant([
-                        (-3-3j), (-3-1j), (-3+3j), (-3+1j),
-                        (-1-3j), (-1-1j), (-1+3j), (-1+1j),
-                        (3-3j), (3-1j), (3+3j), (3+1j),
-                        (1-3j), (1-1j), (1+3j), (1+1j)
-                    ], dtype=tf.complex64) / tf.cast(tf.sqrt(10.0), tf.complex64),
-                    "snr_adjustment": 3
-                },
-                "64QAM": {
-                    "bits_per_symbol": 6,
-                    "constellation_points": self._get_64qam_constellation(),
-                    "snr_adjustment": 6
-                }
-            }
-
-            # Get modulation-specific parameters
-            bits_per_symbol = modulation_params[modulation]["bits_per_symbol"]
-            constellation_points = modulation_params[modulation]["constellation_points"]
-            snr_adjustment = modulation_params[modulation]["snr_adjustment"]
-
+            # Get the appropriate mapper
+            mapper = self.mappers[modulation]
+            
+            # Generate random bits based on modulation order
+            bits_per_symbol = {
+                "QPSK": 2,
+                "16QAM": 4,
+                "64QAM": 6
+            }[modulation]
+            
+            num_bits = batch_size * self.system_params.num_tx_antennas * bits_per_symbol
+            
             # Generate random bits
-            bits_per_batch = batch_size * self.system_params.num_tx_antennas * bits_per_symbol
             bits = tf.random.uniform(
-                shape=[bits_per_batch],
+                [num_bits],
                 minval=0,
-                maxval=2, 
+                maxval=2,
                 dtype=tf.int32
             )
             
-            # Reshape bits for modulation
-            bits = tf.reshape(bits, [batch_size, self.system_params.num_tx_antennas, bits_per_symbol])
-            
-            # Map bits to symbols based on modulation
-            bits_concat = tf.reshape(bits, [-1, bits_per_symbol])
-            if modulation == "QPSK":
-                symbol_indices = bits_concat[:, 0] * 2 + bits_concat[:, 1]
-            elif modulation == "16QAM":
-                symbol_indices = (bits_concat[:, 0] * 8 + bits_concat[:, 1] * 4 + 
-                                bits_concat[:, 2] * 2 + bits_concat[:, 3])
-            else:  # 64QAM
-                symbol_indices = (bits_concat[:, 0] * 32 + bits_concat[:, 1] * 16 + 
-                                bits_concat[:, 2] * 8 + bits_concat[:, 3] * 4 +
-                                bits_concat[:, 4] * 2 + bits_concat[:, 5])
-            
-            tx_symbols = tf.gather(constellation_points, symbol_indices)
-            tx_symbols = tf.reshape(tx_symbols, [batch_size, self.system_params.num_tx_antennas])
-            
-            # Generate channel response with proper normalization
-            h_real = tf.random.normal([batch_size, self.system_params.num_rx_antennas, self.system_params.num_tx_antennas])
-            h_imag = tf.random.normal([batch_size, self.system_params.num_rx_antennas, self.system_params.num_tx_antennas])
-            channel_response = tf.complex(h_real, h_imag) / tf.cast(
-                tf.sqrt(float(self.system_params.num_tx_antennas)), 
-                tf.complex64
-            )
-            
-            # Apply channel
-            tx_symbols_expanded = tf.expand_dims(tx_symbols, axis=-1)
-            y_without_noise = tf.matmul(channel_response, tx_symbols_expanded)
-            y_without_noise = tf.squeeze(y_without_noise, axis=-1)
-            
-            # Generate SNR values with modulation-specific adjustment
+            # Map bits to symbols using Sionna
+            tx_symbols = mapper(bits)
+            tx_symbols = tf.reshape(tx_symbols, 
+                [batch_size, self.system_params.num_tx_antennas, -1])
+
+            # Generate SNR values with proper range
             snr_db = tf.random.uniform(
                 [batch_size],
-                minval=self.system_params.min_snr_db,
+                minval=max(15.0, self.system_params.min_snr_db),  # Ensure minimum 15dB
                 maxval=self.system_params.max_snr_db
-            ) - snr_adjustment
-            
-            # Calculate average signal power per antenna
-            signal_power = tf.reduce_mean(
-                tf.abs(y_without_noise)**2,
-                axis=-1,
-                keepdims=True
             )
+
+            # Generate channel response using Sionna
+            h = self.channel_model()
             
-            # Convert SNR to linear scale
-            snr_linear = tf.expand_dims(tf.pow(10.0, snr_db/10.0), axis=-1)
+            # Apply channel
+            noise_variance = tf.pow(10.0, -snr_db/10.0)
+            noise_variance = tf.reshape(noise_variance, [-1, 1, 1])
             
-            # Calculate noise power to achieve target SNR
-            noise_power = signal_power / snr_linear
-            noise_std = tf.sqrt(noise_power)
-            
-            # Generate complex Gaussian noise
+            # Generate noise using Sionna's utility
             noise = tf.complex(
-                tf.random.normal(tf.shape(y_without_noise)) * noise_std,
-                tf.random.normal(tf.shape(y_without_noise)) * noise_std
-            ) / tf.cast(tf.sqrt(2.0), tf.complex64)
-            
-            # Add noise to received signal
-            rx_symbols = y_without_noise + noise
-            
-            # Debug prints for first batch
-            if batch_idx == 0:
-                actual_signal_power = tf.reduce_mean(tf.abs(y_without_noise)**2)
-                actual_noise_power = tf.reduce_mean(tf.abs(noise)**2)
-                actual_snr = 10.0 * tf.math.log(actual_signal_power/actual_noise_power) / tf.math.log(10.0)
-                tf.print(f"Batch 0 metrics ({modulation}):",
-                        "\nMean Signal Power:", actual_signal_power,
-                        "\nMean Noise Power:", actual_noise_power,
-                        "\nMean Effective SNR:", actual_snr)
+                tf.random.normal(tf.shape(h), stddev=tf.sqrt(noise_variance/2)),
+                tf.random.normal(tf.shape(h), stddev=tf.sqrt(noise_variance/2))
+            )
+
+            # Apply channel and add noise
+            rx_symbols = tf.matmul(h, tf.expand_dims(tx_symbols, -1))[:, :, 0] + noise
 
             return {
-                'channel_response': tf.cast(channel_response, tf.complex64),
+                'channel_response': tf.cast(h, tf.complex64),
                 'tx_symbols': tf.cast(tx_symbols, tf.complex64),
                 'rx_symbols': tf.cast(rx_symbols, tf.complex64),
                 'snr_db': tf.cast(snr_db, tf.float32),
-                'modulation': modulation,
-                'effective_snr': tf.cast(snr_db + snr_adjustment, tf.float32)
+                'modulation': modulation
             }
-            
+
         except Exception as e:
-            self.logger.warning(f"Error generating batch {batch_idx}: {str(e)}")
+            self.logger.error(f"Error in batch generation: {str(e)}")
             raise
 
     def _get_64qam_constellation(self):

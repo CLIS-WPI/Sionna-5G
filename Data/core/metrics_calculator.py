@@ -140,94 +140,42 @@ class MetricsCalculator:
 
         return metrics
 
-    def calculate_ber(self, tx_symbols: tf.Tensor, rx_symbols: tf.Tensor, snr_db: tf.Tensor, modulation: str = "QPSK") -> Dict[str, tf.Tensor]:
-        """
-        Calculate BER using Sionna's built-in utilities
-        
-        Args:
-            tx_symbols: Transmitted symbols
-            rx_symbols: Received symbols
-            snr_db: Signal-to-noise ratio in dB
-            modulation: Modulation scheme ("QPSK", "16QAM", or "64QAM")
-        """
+    def calculate_ber(self, tx_symbols: tf.Tensor, rx_symbols: tf.Tensor, 
+        snr_db: tf.Tensor, modulation: str = "QPSK") -> Dict[str, tf.Tensor]:
+        """Calculate BER using Sionna's built-in metrics"""
         try:
-            metrics = {}
+            import sionna as sn
             
-            # Define modulation-specific parameters
-            modulation_params = {
-                "QPSK": {
-                    "bits_per_symbol": 2,
-                    "constellation_points": [-1-1j, -1+1j, 1-1j, 1+1j],
-                    "target_ber": 1e-5
-                },
-                "16QAM": {
-                    "bits_per_symbol": 4,
-                    "target_ber": 1e-4
-                },
-                "64QAM": {
-                    "bits_per_symbol": 6,
-                    "target_ber": 1e-3
-                }
-            }
+            # Get the appropriate demapper
+            demapper = self.mappers[modulation]
             
-            # Cast inputs to appropriate types
-            tx_symbols = tf.cast(tx_symbols, tf.complex64)
-            rx_symbols = tf.cast(rx_symbols, tf.complex64)
+            # Demap received symbols
+            llr = demapper.demap(rx_symbols)
             
-            if modulation == "QPSK":
-                # Convert complex symbols to binary decisions for QPSK
-                tx_bits_real = tf.cast(tf.math.real(tx_symbols) > 0, tf.float32)
-                tx_bits_imag = tf.cast(tf.math.imag(tx_symbols) > 0, tf.float32)
-                rx_bits_real = tf.cast(tf.math.real(rx_symbols) > 0, tf.float32)
-                rx_bits_imag = tf.cast(tf.math.imag(rx_symbols) > 0, tf.float32)
-                
-                # Stack bits for complete sequence
-                tx_bits = tf.stack([tx_bits_real, tx_bits_imag], axis=-1)
-                rx_bits = tf.stack([rx_bits_real, rx_bits_imag], axis=-1)
-                
-            else:  # 16QAM or 64QAM
-                # For higher order modulations, use constellation demapping
-                bits_per_symbol = modulation_params[modulation]["bits_per_symbol"]
-                
-                # Reshape symbols to handle bits per symbol
-                tx_bits = tf.reshape(tx_symbols, [-1, bits_per_symbol])
-                rx_bits = tf.reshape(rx_symbols, [-1, bits_per_symbol])
+            # Hard decisions on LLRs
+            detected_bits = tf.cast(llr > 0, tf.int32)
             
-            # Use Sionna's compute_ber function
-            metrics['average_ber'] = compute_ber(tx_bits, rx_bits)
+            # Calculate BER using Sionna's utility
+            ber = sn.utils.count_errors(detected_bits, tx_bits) / tf.size(tx_bits, out_type=tf.float32)
             
-            # Calculate BER per SNR level
-            snr_levels = tf.cast(tf.round(snr_db), tf.int32)
-            unique_snrs = tf.sort(tf.unique(snr_levels)[0])
-            
+            # Calculate BER at different SNR points
+            snr_points = tf.range(0, 31, delta=5, dtype=tf.float32)
             ber_curve = {}
-            for snr in unique_snrs:
-                mask = tf.equal(snr_levels, snr)
-                tx_bits_at_snr = tf.boolean_mask(tx_bits, mask)
-                rx_bits_at_snr = tf.boolean_mask(rx_bits, mask)
-                if tf.size(tx_bits_at_snr) > 0:
-                    ber_at_snr = compute_ber(tx_bits_at_snr, rx_bits_at_snr)
-                    ber_curve[int(snr.numpy())] = float(ber_at_snr.numpy())
             
-            metrics['ber_curve'] = ber_curve
-            
-            # Check BER target at 15dB SNR with modulation-specific target
-            snr_15db_mask = tf.abs(snr_db - 15.0) < 0.5
-            tx_bits_at_15db = tf.boolean_mask(tx_bits, snr_15db_mask)
-            rx_bits_at_15db = tf.boolean_mask(rx_bits, snr_15db_mask)
-            
-            if tf.size(tx_bits_at_15db) > 0:
-                ber_at_15db = compute_ber(tx_bits_at_15db, rx_bits_at_15db)
-                metrics['all_targets_met'] = ber_at_15db < modulation_params[modulation]["target_ber"]
-            else:
-                metrics['all_targets_met'] = False
-            
-            # Add modulation-specific information to metrics
-            metrics['modulation'] = modulation
-            metrics['bits_per_symbol'] = modulation_params[modulation]["bits_per_symbol"]
-            metrics['target_ber'] = modulation_params[modulation]["target_ber"]
-                
-            return metrics
+            for snr in snr_points:
+                mask = tf.abs(snr_db - snr) < 0.5
+                if tf.reduce_any(mask):
+                    tx_bits_at_snr = tf.boolean_mask(tx_bits, mask)
+                    detected_bits_at_snr = tf.boolean_mask(detected_bits, mask)
+                    ber_at_snr = sn.utils.count_errors(detected_bits_at_snr, tx_bits_at_snr) / \
+                                tf.size(tx_bits_at_snr, out_type=tf.float32)
+                    ber_curve[float(snr)] = float(ber_at_snr)
+
+            return {
+                'average_ber': float(ber),
+                'ber_curve': ber_curve,
+                'all_targets_met': float(ber) < self.system_params.ber_target
+            }
             
         except Exception as e:
             self.logger.error(f"Error in BER calculation: {str(e)}")

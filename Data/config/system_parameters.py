@@ -51,7 +51,13 @@ class SystemParameters:
     # Channel Model Parameters
     channel_model: str = "rayleigh"          # Channel model type
     num_paths: int = 10                      # Number of multipath components
-    snr_range: Tuple[float, float] = (0.0, 30.0)  # Signal-to-Noise Ratio range in dB
+    snr_ranges: Dict[str, Tuple[float, float]] = dataclasses.field(
+        default_factory=lambda: {
+            "QPSK": (15.0, 25.0),    # More conservative range for QPSK
+            "16QAM": (20.0, 30.0),   # Higher SNR for 16QAM
+            "64QAM": (25.0, 35.0)    # Even higher for 64QAM
+        }
+    )
 
     @property
     def min_snr_db(self) -> float:
@@ -156,7 +162,7 @@ class SystemParameters:
         assert 0 < self.ber_target <= 1e-4, "BER target must be positive and <= 1e-4"
         assert 10 <= self.sinr_target <= 30, "SINR target must be between 10 and 30 dB"
         assert 0 < self.spectral_efficiency_min < self.spectral_efficiency_max <= 10, "Invalid spectral efficiency range"
-        assert 0 <= self.snr_range[0] < self.snr_range[1] <= 30, "SNR range must be between 0 and 20 dB"
+        assert 15 <= self.snr_range[0] < self.snr_range[1] <= 30, "SNR range must be between 15 and 30 dB"
 
         # Add validation for Sionna-specific parameters
         assert self.num_bits_per_symbol > 0, "Number of bits per symbol must be positive"
