@@ -140,27 +140,58 @@ class MetricsCalculator:
 
         return metrics
 
-    def calculate_ber(self, tx_symbols: tf.Tensor, rx_symbols: tf.Tensor, snr_db: tf.Tensor) -> Dict[str, tf.Tensor]:
+    def calculate_ber(self, tx_symbols: tf.Tensor, rx_symbols: tf.Tensor, snr_db: tf.Tensor, modulation: str = "QPSK") -> Dict[str, tf.Tensor]:
         """
         Calculate BER using Sionna's built-in utilities
+        
+        Args:
+            tx_symbols: Transmitted symbols
+            rx_symbols: Received symbols
+            snr_db: Signal-to-noise ratio in dB
+            modulation: Modulation scheme ("QPSK", "16QAM", or "64QAM")
         """
         try:
             metrics = {}
+            
+            # Define modulation-specific parameters
+            modulation_params = {
+                "QPSK": {
+                    "bits_per_symbol": 2,
+                    "constellation_points": [-1-1j, -1+1j, 1-1j, 1+1j],
+                    "target_ber": 1e-5
+                },
+                "16QAM": {
+                    "bits_per_symbol": 4,
+                    "target_ber": 1e-4
+                },
+                "64QAM": {
+                    "bits_per_symbol": 6,
+                    "target_ber": 1e-3
+                }
+            }
             
             # Cast inputs to appropriate types
             tx_symbols = tf.cast(tx_symbols, tf.complex64)
             rx_symbols = tf.cast(rx_symbols, tf.complex64)
             
-            # Convert complex symbols to binary decisions
-            # For QPSK, each symbol represents 2 bits
-            tx_bits_real = tf.cast(tf.math.real(tx_symbols) > 0, tf.float32)
-            tx_bits_imag = tf.cast(tf.math.imag(tx_symbols) > 0, tf.float32)
-            rx_bits_real = tf.cast(tf.math.real(rx_symbols) > 0, tf.float32)
-            rx_bits_imag = tf.cast(tf.math.imag(rx_symbols) > 0, tf.float32)
-            
-            # Stack bits for complete sequence
-            tx_bits = tf.stack([tx_bits_real, tx_bits_imag], axis=-1)
-            rx_bits = tf.stack([rx_bits_real, rx_bits_imag], axis=-1)
+            if modulation == "QPSK":
+                # Convert complex symbols to binary decisions for QPSK
+                tx_bits_real = tf.cast(tf.math.real(tx_symbols) > 0, tf.float32)
+                tx_bits_imag = tf.cast(tf.math.imag(tx_symbols) > 0, tf.float32)
+                rx_bits_real = tf.cast(tf.math.real(rx_symbols) > 0, tf.float32)
+                rx_bits_imag = tf.cast(tf.math.imag(rx_symbols) > 0, tf.float32)
+                
+                # Stack bits for complete sequence
+                tx_bits = tf.stack([tx_bits_real, tx_bits_imag], axis=-1)
+                rx_bits = tf.stack([rx_bits_real, rx_bits_imag], axis=-1)
+                
+            else:  # 16QAM or 64QAM
+                # For higher order modulations, use constellation demapping
+                bits_per_symbol = modulation_params[modulation]["bits_per_symbol"]
+                
+                # Reshape symbols to handle bits per symbol
+                tx_bits = tf.reshape(tx_symbols, [-1, bits_per_symbol])
+                rx_bits = tf.reshape(rx_symbols, [-1, bits_per_symbol])
             
             # Use Sionna's compute_ber function
             metrics['average_ber'] = compute_ber(tx_bits, rx_bits)
@@ -180,16 +211,21 @@ class MetricsCalculator:
             
             metrics['ber_curve'] = ber_curve
             
-            # Check BER target at 15dB SNR
+            # Check BER target at 15dB SNR with modulation-specific target
             snr_15db_mask = tf.abs(snr_db - 15.0) < 0.5
             tx_bits_at_15db = tf.boolean_mask(tx_bits, snr_15db_mask)
             rx_bits_at_15db = tf.boolean_mask(rx_bits, snr_15db_mask)
             
             if tf.size(tx_bits_at_15db) > 0:
                 ber_at_15db = compute_ber(tx_bits_at_15db, rx_bits_at_15db)
-                metrics['all_targets_met'] = ber_at_15db < self.system_params.ber_target
+                metrics['all_targets_met'] = ber_at_15db < modulation_params[modulation]["target_ber"]
             else:
                 metrics['all_targets_met'] = False
+            
+            # Add modulation-specific information to metrics
+            metrics['modulation'] = modulation
+            metrics['bits_per_symbol'] = modulation_params[modulation]["bits_per_symbol"]
+            metrics['target_ber'] = modulation_params[modulation]["target_ber"]
                 
             return metrics
             
