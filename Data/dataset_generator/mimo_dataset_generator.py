@@ -102,10 +102,8 @@ class MIMODatasetGenerator:
             # Set pilot pattern (every 4th subcarrier in pilot symbols)
             pilot_mask[::4, :] = True
 
-            # Create pilot pattern without resource_grid argument
+            # Create pilot pattern with correct parameters
             pilot_pattern = PilotPattern(
-                num_tx=self.system_params.num_tx_antennas,
-                num_streams_per_tx=self.system_params.num_streams,
                 pilot_ofdm_symbol_indices=[2, 11],  # Pilot symbols in positions 2 and 11
                 pilot_pattern_mask=pilot_mask
             )
@@ -143,7 +141,6 @@ class MIMODatasetGenerator:
         except Exception as e:
             self.logger.error(f"Failed to setup Sionna components: {str(e)}")
             raise
-
     def _generate_batch_data(self, batch_size: int, batch_idx: int = 0, modulation: str = "QPSK") -> Dict[str, tf.Tensor]:
         try:
             # Add this check at the start of the method
