@@ -97,11 +97,11 @@ class MIMODatasetGenerator:
                 num_streams_per_tx=self.system_params.num_streams
             )
 
-            # Create pilot pattern
-            pilot_ofdm_symbols = [2, 7, 11]  # Pilot symbol positions
-            pilot_spacing = 4  # Space between pilots in frequency domain
+            # Create pilot pattern with more frequent pilots
+            pilot_ofdm_symbols = list(range(0, self.system_params.num_ofdm_symbols, 2))  # Every other symbol
+            pilot_spacing = 2  # Reduced spacing between pilots
             
-            # Create pilot mask with correct dimensions [num_tx, num_streams_per_tx, num_ofdm_symbols, num_subcarriers]
+            # Create pilot mask with correct dimensions
             pilot_mask = np.zeros([
                 self.system_params.num_tx_antennas,
                 self.system_params.num_streams,
@@ -109,15 +109,16 @@ class MIMODatasetGenerator:
                 self.system_params.num_subcarriers
             ], dtype=bool)
             
-            # Set pilot positions in the mask
+            # Set pilot positions in the mask with more pilots
             for tx in range(self.system_params.num_tx_antennas):
                 for stream in range(self.system_params.num_streams):
                     for symbol in pilot_ofdm_symbols:
                         pilot_mask[tx, stream, symbol, ::pilot_spacing] = True
 
-            # Count number of pilots per antenna/stream
-            num_pilots = np.sum(pilot_mask[0, 0])  # Count for first antenna/stream
-
+            # Verify that we have pilots
+            num_pilots = np.sum(pilot_mask[0, 0])
+            assert num_pilots > 0, "No pilots were created in the mask"
+            
             # Generate pilot symbols (QPSK constellation points)
             pilot_symbols = (1/np.sqrt(2)) * (1 + 1j) * np.ones([
                 self.system_params.num_tx_antennas,
@@ -125,16 +126,20 @@ class MIMODatasetGenerator:
                 num_pilots
             ], dtype=np.complex64)
 
-            # Create pilot pattern
+            # Create pilot pattern and verify it's not empty
             self.pilot_pattern = PilotPattern(
                 mask=pilot_mask,
                 pilots=pilot_symbols
             )
+            
+            # Verify pilot pattern is not empty
+            assert hasattr(self.pilot_pattern, 'num_pilot_symbols') and self.pilot_pattern.num_pilot_symbols > 0, \
+                "Pilot pattern is empty after creation"
 
-            # Initialize LSChannelEstimator with correct parameters
+            # Initialize LSChannelEstimator with pilot pattern
             self.channel_estimator = LSChannelEstimator(
                 resource_grid=self.resource_grid,
-                interpolation_type="nn",  # Using nearest neighbor interpolation
+                interpolation_type="nn",
                 dtype=tf.complex64
             )
 
@@ -159,6 +164,10 @@ class MIMODatasetGenerator:
                 num_tx_ant=self.system_params.num_tx_antennas,
                 dtype=tf.complex64
             )
+
+            # Log successful setup
+            self.logger.info("Sionna components setup successfully")
+            self.logger.info(f"Number of pilots per antenna/stream: {num_pilots}")
 
         except Exception as e:
             self.logger.error(f"Failed to setup Sionna components: {str(e)}")
