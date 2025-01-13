@@ -97,19 +97,35 @@ class MIMODatasetGenerator:
                 num_streams_per_tx=self.system_params.num_streams
             )
 
-            # Create pilot pattern mask
-            pilot_mask = np.zeros([self.system_params.num_subcarriers, 2], dtype=bool)
+            # Create pilot pattern mask with four dimensions
+            pilot_mask = np.zeros([
+                self.system_params.num_tx_antennas,
+                self.system_params.num_streams,
+                self.system_params.num_subcarriers,
+                self.system_params.num_ofdm_symbols
+            ], dtype=bool)
+
             # Set pilot pattern (every 4th subcarrier in pilot symbols)
-            pilot_mask[::4, :] = True
+            pilot_symbols = [2, 11]  # Pilot symbol positions
+            for tx in range(self.system_params.num_tx_antennas):
+                for stream in range(self.system_params.num_streams):
+                    for symbol in pilot_symbols:
+                        pilot_mask[tx, stream, ::4, symbol] = True
 
-            # Generate pilot symbols (QPSK pilots)
-            num_pilots = np.sum(pilot_mask)
-            pilot_symbols = (1/np.sqrt(2)) * (1 + 1j) * np.ones([num_pilots], dtype=np.complex64)
+            # Count number of pilots per antenna/stream
+            pilots_per_antenna_stream = np.sum(pilot_mask[0, 0])  # Count for first antenna/stream
 
-            # Create pilot pattern with pilots parameter
+            # Generate pilot symbols with three dimensions [num_tx, num_streams, num_pilots]
+            pilot_symbols = (1/np.sqrt(2)) * (1 + 1j) * np.ones([
+                self.system_params.num_tx_antennas,
+                self.system_params.num_streams,
+                pilots_per_antenna_stream
+            ], dtype=np.complex64)
+
+            # Create pilot pattern with both required parameters
             pilot_pattern = PilotPattern(
-                pilots=pilot_symbols,  # Add the required pilots parameter
-                mask=pilot_mask
+                pilots=pilot_symbols,  # Shape: [num_tx, num_streams, num_pilots]
+                mask=pilot_mask       # Shape: [num_tx, num_streams, num_subcarriers, num_ofdm_symbols]
             )
 
             # Initialize LSChannelEstimator with pilot pattern
