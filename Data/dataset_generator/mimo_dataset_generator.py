@@ -80,10 +80,13 @@ class MIMODatasetGenerator:
         """Setup Sionna channel models and antenna arrays"""
         try:
             # Import required Sionna components
+            from sionna.channel import LSChannelEstimator
             import sionna as sn
             from sionna.channel import RayleighBlockFading
             from sionna.mapping import Mapper, SymbolSource
             from sionna.ofdm import ResourceGrid, ResourceGridMapper
+            assert self.system_params.num_subcarriers >= 64, "Number of subcarriers must be at least 64"
+            assert self.system_params.subcarrier_spacing in [15e3, 30e3, 60e3], "Invalid subcarrier spacing"
 
             # Create OFDM Resource Grid
             self.resource_grid = ResourceGrid(
@@ -93,6 +96,8 @@ class MIMODatasetGenerator:
                 num_tx=self.system_params.num_tx_antennas,
                 num_streams_per_tx=self.system_params.num_streams
             )
+            
+            self.channel_estimator = LSChannelEstimator(self.resource_grid)
 
             # Setup modulation schemes
             self.modulation_schemes = {
@@ -120,8 +125,12 @@ class MIMODatasetGenerator:
             self.logger.error(f"Failed to setup Sionna components: {str(e)}")
             raise
 
-    def _generate_batch_data(self, batch_size: int, batch_idx: int = 0, mod_scheme: str = 'QPSK') -> Dict[str, tf.Tensor]:
+    def _generate_batch_data(self, batch_size: int, batch_idx: int = 0, modulation: str = "QPSK") -> Dict[str, tf.Tensor]:
         try:
+            # Add this check at the start of the method
+            if modulation not in self.modulation_schemes:
+                raise ValueError(f"Unsupported modulation scheme: {modulation}")
+
             # Generate random bits for transmission
             bits_per_batch = batch_size * self.system_params.num_tx_antennas * self.system_params.num_bits_per_symbol
             bits = tf.random.uniform(
