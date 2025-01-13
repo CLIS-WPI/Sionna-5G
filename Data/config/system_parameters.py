@@ -61,13 +61,13 @@ class SystemParameters:
 
     @property
     def min_snr_db(self) -> float:
-        """Minimum SNR in dB"""
-        return self.snr_range[0]
-    
+        """Minimum SNR in dB across all modulation schemes"""
+        return min(range[0] for range in self.snr_ranges.values())
+
     @property
     def max_snr_db(self) -> float:
-        """Maximum SNR in dB"""
-        return self.snr_range[1]
+        """Maximum SNR in dB across all modulation schemes"""
+        return max(range[1] for range in self.snr_ranges.values())
     
     # Modulation Configuration
     modulation_schemes: List[str] = dataclasses.field(
@@ -133,40 +133,60 @@ class SystemParameters:
         """
         Validate system parameters for consistency and physical plausibility.
         """
-        # Validate antenna configuration
-        assert self.num_tx_antennas > 0, "Number of transmit antennas must be positive."
-        assert self.num_rx_antennas > 0, "Number of receive antennas must be positive."
-        assert 1 <= self.num_streams <= min(self.num_tx_antennas, self.num_rx_antennas), "Invalid number of streams."
+        try:
+            # Validate antenna configuration
+            assert self.num_tx_antennas > 0, "Number of transmit antennas must be positive."
+            assert self.num_rx_antennas > 0, "Number of receive antennas must be positive."
+            assert 1 <= self.num_streams <= min(self.num_tx_antennas, self.num_rx_antennas), "Invalid number of streams."
 
-        # Validate frequency
-        assert 1e9 <= self.carrier_frequency <= 6e9, "Carrier frequency must be in the 1-6 GHz range."
+            # Validate frequency
+            assert 1e9 <= self.carrier_frequency <= 6e9, "Carrier frequency must be in the 1-6 GHz range."
 
-        # Validate OFDM configuration
-        assert self.num_subcarriers > 0, "Number of subcarriers must be positive."
-        assert self.num_ofdm_symbols > 0, "Number of OFDM symbols must be positive."
-        assert self.subcarrier_spacing > 0, "Subcarrier spacing must be positive."
+            # Validate OFDM configuration
+            assert self.num_subcarriers >= 64, "Number of subcarriers must be at least 64."
+            assert self.num_ofdm_symbols > 0, "Number of OFDM symbols must be positive."
+            assert self.subcarrier_spacing in [15e3, 30e3, 60e3], "Subcarrier spacing must be 15, 30, or 60 kHz."
 
-        # Validate SNR range
-        assert -20 <= self.snr_range[0] < self.snr_range[1] <= 40, "SNR range must be appropriate for Eb/N0 calculation"
+            # Validate SNR ranges for each modulation scheme
+            valid_schemes = {"QPSK", "16QAM", "64QAM"}
+            for modulation, (min_snr, max_snr) in self.snr_ranges.items():
+                assert modulation in valid_schemes, f"Invalid modulation scheme: {modulation}"
+                assert -20 <= min_snr < max_snr <= 40, f"SNR range for {modulation} must be between -20 and 40 dB"
 
-        # Validate element spacing
-        assert 0.1 <= self.element_spacing <= 1.0, "Element spacing must be between 0.1 and 1.0 wavelengths."
+            # Validate overall SNR ranges
+            min_snr = min(range[0] for range in self.snr_ranges.values())
+            max_snr = max(range[1] for range in self.snr_ranges.values())
+            assert 15 <= min_snr < max_snr <= 30, "Overall SNR range must be between 15 and 30 dB"
 
-        # Validate modulation schemes
-        valid_schemes = {"BPSK", "QPSK", "16QAM", "64QAM", "256QAM"}
-        for scheme in self.modulation_schemes:
-            if scheme.upper() not in valid_schemes:
-                raise ValueError(f"Invalid modulation scheme: {scheme}")
-        
-        # Validate performance targets
-        assert 0 < self.ber_target <= 1e-4, "BER target must be positive and <= 1e-4"
-        assert 10 <= self.sinr_target <= 30, "SINR target must be between 10 and 30 dB"
-        assert 0 < self.spectral_efficiency_min < self.spectral_efficiency_max <= 10, "Invalid spectral efficiency range"
-        assert 15 <= self.snr_range[0] < self.snr_range[1] <= 30, "SNR range must be between 15 and 30 dB"
+            # Validate element spacing
+            assert 0.1 <= self.element_spacing <= 1.0, "Element spacing must be between 0.1 and 1.0 wavelengths."
 
-        # Add validation for Sionna-specific parameters
-        assert self.num_bits_per_symbol > 0, "Number of bits per symbol must be positive"
-        assert 0 < self.coderate <= 0.5, "Code rate must be between 0 and 1"
+            # Validate modulation schemes
+            for scheme in self.modulation_schemes:
+                if scheme not in valid_schemes:
+                    raise ValueError(f"Invalid modulation scheme: {scheme}")
+            
+            # Validate performance targets
+            assert 0 < self.ber_target <= 1e-4, "BER target must be positive and <= 1e-4"
+            assert 10 <= self.sinr_target <= 30, "SINR target must be between 10 and 30 dB"
+            assert 0 < self.spectral_efficiency_min < self.spectral_efficiency_max <= 10, "Invalid spectral efficiency range"
+
+            # Validate Sionna-specific parameters
+            assert self.num_bits_per_symbol > 0, "Number of bits per symbol must be positive"
+            assert 0 < self.coderate <= 0.5, "Code rate must be between 0 and 0.5"
+
+            # Validate batch and dataset size
+            assert self.batch_size > 0, "Batch size must be positive"
+            assert self.num_batches > 0, "Number of batches must be positive"
+
+            # Validate coherence time if present
+            if hasattr(self, 'coherence_time'):
+                assert self.coherence_time > 0, "Coherence time must be positive"
+
+        except AssertionError as e:
+            raise ValueError(f"Parameter validation failed: {str(e)}")
+        except Exception as e:
+            raise RuntimeError(f"Unexpected error during parameter validation: {str(e)}")
 
     def set_global_seeds(self):
         """
