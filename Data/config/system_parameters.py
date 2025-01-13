@@ -51,7 +51,7 @@ class SystemParameters:
     # Channel Model Parameters
     channel_model: str = "rayleigh"          # Channel model type
     num_paths: int = 10                      # Number of multipath components
-    snr_range: Tuple[float, float] = (0.0, 30.0)  # Signal-to-Noise Ratio range in dB
+    snr_range: Tuple[float, float] = (0.0, 20.0)  # Signal-to-Noise Ratio range in dB
 
     @property
     def min_snr_db(self) -> float:
@@ -152,7 +152,7 @@ class SystemParameters:
         assert 0 < self.ber_target <= 1e-4, "BER target must be positive and <= 1e-4"
         assert 10 <= self.sinr_target <= 30, "SINR target must be between 10 and 30 dB"
         assert 0 < self.spectral_efficiency_min < self.spectral_efficiency_max <= 10, "Invalid spectral efficiency range"
-
+        assert 0 <= self.snr_range[0] < self.snr_range[1] <= 20, "SNR range must be between 0 and 20 dB"
     def set_global_seeds(self):
         """
         Set global random seeds for reproducibility.
