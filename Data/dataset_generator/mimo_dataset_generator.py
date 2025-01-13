@@ -82,8 +82,8 @@ class MIMODatasetGenerator:
             # Import required Sionna components
             import sionna as sn
             from sionna.channel import RayleighBlockFading
-            from sionna.mapping import Mapper  # Remove SymbolSource import
-            from sionna.ofdm import ResourceGrid, ResourceGridMapper, LSChannelEstimator
+            from sionna.mapping import Mapper
+            from sionna.ofdm import ResourceGrid, ResourceGridMapper, LSChannelEstimator, PilotPattern
 
             assert self.system_params.num_subcarriers >= 64, "Number of subcarriers must be at least 64"
             assert self.system_params.subcarrier_spacing in [15e3, 30e3, 60e3], "Invalid subcarrier spacing"
@@ -97,9 +97,21 @@ class MIMODatasetGenerator:
                 num_streams_per_tx=self.system_params.num_streams
             )
 
-            # Initialize LSChannelEstimator
+            # Create pilot pattern
+            # Define pilot indices for a basic pattern
+            pilot_pattern = PilotPattern(
+                resource_grid=self.resource_grid,
+                pilot_ofdm_symbol_indices=[2, 11],  # Pilot symbols in positions 2 and 11
+                pilot_pattern_mask=np.zeros([self.system_params.num_subcarriers, 2], dtype=bool)
+            )
+            
+            # Set pilot pattern (every 4th subcarrier in pilot symbols)
+            pilot_pattern.mask[::4, :] = True
+
+            # Initialize LSChannelEstimator with pilot pattern
             self.channel_estimator = LSChannelEstimator(
                 self.resource_grid,
+                pilot_pattern=pilot_pattern,
                 interpolation_type='nn',  # Using nearest neighbor interpolation
                 dtype=tf.complex64
             )
