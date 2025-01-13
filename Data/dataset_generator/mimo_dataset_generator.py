@@ -83,7 +83,7 @@ class MIMODatasetGenerator:
             import sionna as sn
             from sionna.channel import RayleighBlockFading
             from sionna.mapping import Mapper
-            from sionna.ofdm import ResourceGrid, ResourceGridMapper, LSChannelEstimator, PilotPattern
+            from sionna.ofdm import ResourceGrid, ResourceGridMapper, LSChannelEstimator
 
             # Create OFDM Resource Grid
             self.resource_grid = ResourceGrid(
@@ -94,45 +94,9 @@ class MIMODatasetGenerator:
                 num_streams_per_tx=self.system_params.num_streams
             )
 
-            # Create pilot pattern manually
-            # Define pilot positions
-            pilot_ofdm_symbols = [2, 7, 11]  # Pilot positions in time
-            pilot_freq_spacing = 4  # Every 4th subcarrier
-            
-            # Create pilot mask
-            pilot_mask = np.zeros([
-                self.system_params.num_tx_antennas,
-                self.system_params.num_streams,
-                self.system_params.num_ofdm_symbols,
-                self.system_params.num_subcarriers
-            ], dtype=bool)
-            
-            # Set pilot positions
-            for tx in range(self.system_params.num_tx_antennas):
-                for stream in range(self.system_params.num_streams):
-                    for symbol in pilot_ofdm_symbols:
-                        pilot_mask[tx, stream, symbol, ::pilot_freq_spacing] = True
-
-            # Count number of pilots
-            num_pilots = np.sum(pilot_mask[0, 0])  # Count for first antenna/stream
-            
-            # Generate pilot symbols (using QPSK constellation)
-            pilot_symbols = (1/np.sqrt(2)) * (1 + 1j) * np.ones([
-                self.system_params.num_tx_antennas,
-                self.system_params.num_streams,
-                num_pilots
-            ], dtype=np.complex64)
-
-            # Create pilot pattern
-            pilot_pattern = PilotPattern(
-                mask=pilot_mask,
-                pilots=pilot_symbols
-            )
-
-            # Initialize LSChannelEstimator with the pilot pattern
+            # Initialize LSChannelEstimator with only required parameters
             self.channel_estimator = LSChannelEstimator(
                 resource_grid=self.resource_grid,
-                pilot_pattern=pilot_pattern,
                 interpolation_type="linear"
             )
 
