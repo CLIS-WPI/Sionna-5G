@@ -398,6 +398,14 @@ class MIMODatasetGenerator:
                         rx_symbols_dataset[start_idx:end_idx] = batch_data['rx_symbols'].numpy()
                         snr_db_dataset[start_idx:end_idx] = batch_data['snr_db'].numpy()
                         
+                        # Add progress logging every 10 batches
+                        if batch_idx % 10 == 0:
+                            self.mimo_logger.log_generation_progress(
+                                batch_idx=batch_idx,
+                                total_batches=num_batches,
+                                current_metrics=batch_data
+                            )
+                        
                     except Exception as e:
                         self.logger.error(f"Error generating batch {batch_idx}: {str(e)}")
                         raise
@@ -468,6 +476,11 @@ class MIMODatasetGenerator:
                 self.system_params.num_rx_antennas
                 ):
                 return False
+            
+            self.mimo_logger.log_channel_stats(
+            channel_response,            
+            metrics.get('snr_db', 0),  # Default SNR if not in metrics
+            )
             
             return True
             
