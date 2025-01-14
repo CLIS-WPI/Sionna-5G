@@ -7,6 +7,9 @@ import logging
 import sys
 from typing import Optional, Union, TextIO
 import os
+from datetime import datetime
+import tensorflow as tf
+
 def configure_logging(
     log_level: Union[int, str] = logging.INFO,
     log_file: Optional[str] = None,
@@ -123,6 +126,113 @@ def create_dataset_logger(
         log_format=f'%(asctime)s - {dataset_name} - %(levelname)s - %(message)s'
     )
     return logger
+
+def create_channel_logger(log_dir: str = 'logs/channel') -> logging.Logger:
+    """
+    Creates a specialized logger for channel-related debugging
+    
+    Args:
+        log_dir (str): Directory for channel logs
+    
+    Returns:
+        logging.Logger: Configured channel logger
+    """
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, f'channel_debug_{datetime.now():%Y%m%d_%H%M%S}.log')
+    
+    logger = logging.getLogger('channel_debug')
+    logger.setLevel(logging.DEBUG)
+    
+    # Detailed formatter for channel analysis
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - [%(filename)s:%(lineno)d] - %(levelname)s - %(message)s'
+    )
+    
+    # File handler with detailed debug information
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(formatter)
+    
+    # Console handler with less verbose output
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
+    
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    return logger
+
+def create_ber_logger(log_dir: str = 'logs/ber') -> logging.Logger:
+    """
+    Creates a specialized logger for BER analysis
+    
+    Args:
+        log_dir (str): Directory for BER logs
+    
+    Returns:
+        logging.Logger: Configured BER logger
+    """
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, f'ber_analysis_{datetime.now():%Y%m%d_%H%M%S}.log')
+    
+    logger = logging.getLogger('ber_analysis')
+    logger.setLevel(logging.DEBUG)
+    
+    # Detailed formatter for BER metrics
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - SNR:%(snr).2f - BER:%(ber).2e - %(message)s'
+    )
+    
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(formatter)
+    
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(formatter)
+    
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    return logger
+
+class MIMOLogger:
+    """
+    Centralized logging management for MIMO system components
+    """
+    def __init__(self, base_log_dir: str = 'logs'):
+        self.base_log_dir = base_log_dir
+        self.channel_logger = create_channel_logger(os.path.join(base_log_dir, 'channel'))
+        self.ber_logger = create_ber_logger(os.path.join(base_log_dir, 'ber'))
+        
+    def log_channel_stats(self, channel_response, snr):
+        """Log detailed channel statistics"""
+        stats = {
+            'magnitude_mean': tf.reduce_mean(tf.abs(channel_response)).numpy(),
+            'magnitude_std': tf.std(tf.abs(channel_response)).numpy(),
+            'snr_db': float(snr)
+        }
+        
+        self.channel_logger.debug(
+            "Channel Statistics: mean=%(magnitude_mean).4f, std=%(magnitude_std).4f, SNR=%(snr_db).2f dB",
+            stats
+        )
+        
+    def log_ber_measurement(self, ber_value, snr_db, additional_info=None):
+        """Log BER measurements with context"""
+        context = {
+            'ber': float(ber_value),
+            'snr': float(snr_db)
+        }
+        
+        if additional_info:
+            context.update(additional_info)
+            
+        self.ber_logger.debug(
+            "BER Measurement",
+            extra=context
+        )
 
 # Example usage
 def main():
