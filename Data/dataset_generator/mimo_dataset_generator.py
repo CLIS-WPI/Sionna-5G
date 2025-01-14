@@ -82,10 +82,14 @@ class MIMODatasetGenerator:
         }
         
     def _setup_sionna_components(self):
+        """Setup Sionna channel models and antenna arrays"""
         try:
             import sionna as sn
+            from sionna.channel import RayleighBlockFading
+            from sionna.mapping import Mapper
             from sionna.ofdm import ResourceGrid, LSChannelEstimator, PilotPattern
             import numpy as np
+            import tensorflow as tf
 
             print("[DEBUG] Initializing OFDM Resource Grid...")
             self.resource_grid = ResourceGrid(
@@ -96,7 +100,8 @@ class MIMODatasetGenerator:
                 num_streams_per_tx=self.system_params.num_streams
             )
 
-            # Create pilot mask
+            # Create pilot pattern
+            print("[DEBUG] Creating pilot mask...")
             pilot_mask = np.zeros([
                 self.system_params.num_tx_antennas,
                 self.system_params.num_streams,
@@ -104,8 +109,9 @@ class MIMODatasetGenerator:
                 self.system_params.num_subcarriers
             ], dtype=bool)
 
-            pilot_freq_spacing = 2
-            pilot_time_spacing = 1
+            # Set pilot positions - using denser spacing
+            pilot_freq_spacing = 4  # Adjusted for better pilot density
+            pilot_time_spacing = 2
             time_indices = range(0, self.system_params.num_ofdm_symbols, pilot_time_spacing)
             freq_indices = range(0, self.system_params.num_subcarriers, pilot_freq_spacing)
 
@@ -116,22 +122,26 @@ class MIMODatasetGenerator:
                             pilot_mask[tx, stream, t, f] = True
 
             num_pilots = np.sum(pilot_mask[0, 0])
+            print(f"[DEBUG] Number of pilots per stream: {num_pilots}")
+
+            # Generate pilot symbols using complex64 dtype
+            print("[DEBUG] Generating pilot symbols...")
+            qpsk_symbols = np.array([1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j]) / np.sqrt(2)
+            rng = np.random.default_rng(42)  # For reproducibility
             pilot_symbols = np.zeros([
                 self.system_params.num_tx_antennas,
                 self.system_params.num_streams,
                 num_pilots
             ], dtype=np.complex64)
-
-            qpsk_symbols = np.array([1+1j, 1-1j, -1+1j, -1-1j]) / np.sqrt(2)
-            rng = np.random.default_rng(42)
             for tx in range(self.system_params.num_tx_antennas):
                 for stream in range(self.system_params.num_streams):
                     pilot_symbols[tx, stream] = rng.choice(qpsk_symbols, num_pilots)
 
-            print(f"[DEBUG] Pilot mask shape: {pilot_mask.shape}, Num True: {np.sum(pilot_mask)}")
             print(f"[DEBUG] Pilot symbols shape: {pilot_symbols.shape}")
+            print(f"[DEBUG] Pilot mask shape: {pilot_mask.shape}")
+            print(f"[DEBUG] Number of True values in mask: {np.sum(pilot_mask)}")
 
-            # Verify pilot mask and symbols
+            # Validate pilot mask and symbols
             assert pilot_mask.shape == (
                 self.system_params.num_tx_antennas,
                 self.system_params.num_streams,
@@ -146,17 +156,47 @@ class MIMODatasetGenerator:
             ), "Pilot symbols shape mismatch with pilot mask."
 
             # Create pilot pattern
-            pilot_pattern = PilotPattern(pilot_mask, pilot_symbols)
-            assert pilot_pattern.num_pilot_symbols > 0, "Pilot pattern has no valid symbols."
+            print("[DEBUG] Creating pilot pattern...")
+            self.pilot_pattern = PilotPattern(pilot_mask, pilot_symbols)
+            
+            # Verify pilot pattern
+            print(f"[DEBUG] Pilot pattern num_pilot_symbols: {self.pilot_pattern.num_pilot_symbols}")
+            if self.pilot_pattern.num_pilot_symbols == 0:
+                raise ValueError("Pilot pattern has no pilots")
 
-            # Initialize channel estimator
+            # Create channel estimator and immediately set pilot pattern
+            print("[DEBUG] Initializing channel estimator...")
             self.channel_estimator = LSChannelEstimator(
                 resource_grid=self.resource_grid,
                 interpolation_type="lin"
             )
-            self.channel_estimator.set_pilot_pattern(pilot_pattern)
+            self.channel_estimator.set_pilot_pattern(self.pilot_pattern)
 
             print("[DEBUG] Channel estimator and pilot pattern set successfully.")
+
+            # Setup remaining components
+            print("[DEBUG] Setting up modulation schemes and mappers...")
+            self.modulation_schemes = {
+                "QPSK": sn.mapping.QPSK(),
+                "16QAM": sn.mapping.QAM(16),
+                "64QAM": sn.mapping.QAM(64)
+            }
+
+            self.mappers = {
+                mod: Mapper(constellation=scheme)
+                for mod, scheme in self.modulation_schemes.items()
+            }
+
+            print("[DEBUG] Setting up channel model...")
+            self.channel_model = RayleighBlockFading(
+                num_rx=1,
+                num_rx_ant=self.system_params.num_rx_antennas,
+                num_tx=1,
+                num_tx_ant=self.system_params.num_tx_antennas,
+                dtype=tf.complex64
+            )
+
+            print("[DEBUG] Sionna components setup completed successfully")
 
         except Exception as e:
             print(f"[ERROR] Failed to setup Sionna components: {str(e)}")
