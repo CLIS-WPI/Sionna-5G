@@ -101,10 +101,7 @@ class MIMODatasetGenerator:
                 num_streams_per_tx=self.system_params.num_streams
             )
 
-            # Create pilot pattern
-            num_pilot_symbols = (self.system_params.num_ofdm_symbols // 3) * (self.system_params.num_subcarriers // 4)
-            
-            # Create pilot mask with more frequent pilots
+            # Create pilot pattern with more frequent pilots
             pilot_mask = np.zeros([
                 self.system_params.num_tx_antennas,
                 self.system_params.num_streams,
@@ -113,31 +110,45 @@ class MIMODatasetGenerator:
             ], dtype=bool)
 
             # Set pilot positions
+            pilot_freq_spacing = 4  # Every 4th subcarrier
+            pilot_time_spacing = 3  # Every 3rd OFDM symbol
+            
+            # First, set the pilot positions in the mask
             for tx in range(self.system_params.num_tx_antennas):
                 for stream in range(self.system_params.num_streams):
-                    # Place pilots every 4th subcarrier and every 3rd OFDM symbol
-                    pilot_mask[tx, stream, ::3, ::4] = True
+                    for t in range(0, self.system_params.num_ofdm_symbols, pilot_time_spacing):
+                        for f in range(0, self.system_params.num_subcarriers, pilot_freq_spacing):
+                            pilot_mask[tx, stream, t, f] = True
 
-            # Generate pilot symbols (QPSK)
-            pilot_symbols = (1/np.sqrt(2)) * np.ones([
+            # Calculate the exact number of pilots per antenna/stream
+            num_pilots_per_stream = np.sum(pilot_mask[0, 0])  # Count pilots in first antenna/stream
+            total_num_pilots = num_pilots_per_stream  # This is the number we need for the last dimension
+
+            # Generate pilot symbols with matching dimensions
+            pilot_symbols = (1/np.sqrt(2)) * (1 + 1j) * np.ones([
                 self.system_params.num_tx_antennas,
                 self.system_params.num_streams,
-                num_pilot_symbols
-            ], dtype=np.complex64) * (1 + 1j)
+                total_num_pilots  # This must match the number of True values in pilot_mask per antenna/stream
+            ], dtype=np.complex64)
 
-            # Create and verify pilot pattern
-            pilot_pattern = PilotPattern(pilot_mask, pilot_symbols)
-            
-            if pilot_pattern.num_pilot_symbols == 0:
-                raise ValueError("No pilot symbols were created")
+            # Log the dimensions for debugging
+            self.logger.info(f"Pilot mask shape: {pilot_mask.shape}")
+            self.logger.info(f"Number of pilots per stream: {num_pilots_per_stream}")
+            self.logger.info(f"Pilot symbols shape: {pilot_symbols.shape}")
 
-            # Initialize channel estimator with pilot pattern
+            # Create pilot pattern
+            pilot_pattern = PilotPattern(
+                pilot_mask,
+                pilot_symbols
+            )
+
+            # Initialize LSChannelEstimator
             self.channel_estimator = LSChannelEstimator(
                 resource_grid=self.resource_grid,
                 interpolation_type="lin"
             )
             
-            # Set pilot pattern after initialization
+            # Set the pilot pattern
             self.channel_estimator.set_pilot_pattern(pilot_pattern)
 
             # Setup modulation schemes
