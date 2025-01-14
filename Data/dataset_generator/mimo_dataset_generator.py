@@ -101,7 +101,7 @@ class MIMODatasetGenerator:
                 num_streams_per_tx=self.system_params.num_streams
             )
 
-            # Create pilot pattern
+            # Create pilot pattern with explicit positioning
             pilot_mask = np.zeros([
                 self.system_params.num_tx_antennas,
                 self.system_params.num_streams,
@@ -109,55 +109,60 @@ class MIMODatasetGenerator:
                 self.system_params.num_subcarriers
             ], dtype=bool)
 
-            # Set pilot positions with reduced spacing
+            # Set pilot positions more explicitly
             pilot_freq_spacing = 4  # Every 4th subcarrier
             pilot_time_spacing = 3  # Every 3rd OFDM symbol
-
-            # Create pilot positions using broadcasting
-            time_indices = np.arange(0, self.system_params.num_ofdm_symbols, pilot_time_spacing)
-            freq_indices = np.arange(0, self.system_params.num_subcarriers, pilot_freq_spacing)
             
+            # Calculate pilot positions explicitly
+            time_positions = list(range(0, self.system_params.num_ofdm_symbols, pilot_time_spacing))
+            freq_positions = list(range(0, self.system_params.num_subcarriers, pilot_freq_spacing))
+            
+            # Set pilot positions explicitly for each antenna and stream
             for tx in range(self.system_params.num_tx_antennas):
                 for stream in range(self.system_params.num_streams):
-                    pilot_mask[tx, stream, time_indices[:, None], freq_indices] = True
+                    for t in time_positions:
+                        for f in freq_positions:
+                            pilot_mask[tx, stream, t, f] = True
 
-            # Count pilots and create pilot symbols
-            num_pilots_per_stream = np.sum(pilot_mask[0, 0])
+            # Count actual number of pilots per antenna/stream
+            num_pilots_per_stream = len(time_positions) * len(freq_positions)
             
-            # Create QPSK pilot symbols
-            pilot_symbols = np.ones([
+            # Create pilot symbols with matching dimensions
+            pilot_symbols = np.zeros([
                 self.system_params.num_tx_antennas,
                 self.system_params.num_streams,
                 num_pilots_per_stream
             ], dtype=np.complex64)
-            
-            # Normalize pilot symbols
-            pilot_symbols *= (1/np.sqrt(2)) * (1 + 1j)
 
-            # Log dimensions for debugging
+            # Generate QPSK pilot symbols
+            qpsk_symbols = np.array([1+1j, 1-1j, -1+1j, -1-1j]) / np.sqrt(2)
+            for tx in range(self.system_params.num_tx_antennas):
+                for stream in range(self.system_params.num_streams):
+                    pilot_symbols[tx, stream] = np.random.choice(qpsk_symbols, num_pilots_per_stream)
+
+            # Verify and log dimensions
             self.logger.info(f"Pilot mask shape: {pilot_mask.shape}")
             self.logger.info(f"Number of pilots per stream: {num_pilots_per_stream}")
             self.logger.info(f"Pilot symbols shape: {pilot_symbols.shape}")
+            self.logger.info(f"Number of True values in mask: {np.sum(pilot_mask[0, 0])}")
 
             # Verify pilot mask has non-zero entries
             if not np.any(pilot_mask):
                 raise ValueError("Pilot mask is empty")
 
-            # Create pilot pattern first
+            # Create pilot pattern
             pilot_pattern = PilotPattern(pilot_mask, pilot_symbols)
 
-            # Verify pilot pattern is valid
-            if pilot_pattern.num_pilot_symbols == 0:
-                raise ValueError("Created pilot pattern has no pilot symbols")
-
-            # First create channel estimator
+            # Create channel estimator
             self.channel_estimator = LSChannelEstimator(
                 resource_grid=self.resource_grid,
                 interpolation_type="lin"
             )
 
-            # Then set the pilot pattern
+            # Set the pilot pattern
             self.channel_estimator.set_pilot_pattern(pilot_pattern)
+
+            self.logger.info("Sionna components setup successfully")
 
             # Setup modulation schemes
             self.modulation_schemes = {
