@@ -109,30 +109,30 @@ class MIMODatasetGenerator:
                 self.system_params.num_subcarriers
             ], dtype=bool)
 
-            # Set pilot positions - using denser spacing
-            pilot_freq_spacing = 4  # Adjusted for better pilot density
-            pilot_time_spacing = 2
-            time_indices = range(0, self.system_params.num_ofdm_symbols, pilot_time_spacing)
-            freq_indices = range(0, self.system_params.num_subcarriers, pilot_freq_spacing)
-
+            # Set pilot positions - using a more structured pattern
+            pilot_time_spacing = 2  # Every 2nd OFDM symbol
+            pilot_freq_spacing = 8  # Every 8th subcarrier
+            
             for tx in range(self.system_params.num_tx_antennas):
                 for stream in range(self.system_params.num_streams):
-                    for t in time_indices:
-                        for f in freq_indices:
+                    for t in range(0, self.system_params.num_ofdm_symbols, pilot_time_spacing):
+                        for f in range(0, self.system_params.num_subcarriers, pilot_freq_spacing):
                             pilot_mask[tx, stream, t, f] = True
 
-            num_pilots = np.sum(pilot_mask[0, 0])
+            num_pilots = np.sum(pilot_mask[0, 0])  # Count pilots in first antenna/stream
             print(f"[DEBUG] Number of pilots per stream: {num_pilots}")
 
-            # Generate pilot symbols using complex64 dtype
+            # Generate pilot symbols using QPSK constellation
             print("[DEBUG] Generating pilot symbols...")
-            qpsk_symbols = np.array([1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j]) / np.sqrt(2)
-            rng = np.random.default_rng(42)  # For reproducibility
+            qpsk_symbols = np.array([1+1j, 1-1j, -1+1j, -1-1j]) / np.sqrt(2)
             pilot_symbols = np.zeros([
                 self.system_params.num_tx_antennas,
                 self.system_params.num_streams,
                 num_pilots
             ], dtype=np.complex64)
+
+            # Fill pilot symbols with QPSK constellation points
+            rng = np.random.default_rng(42)  # For reproducibility
             for tx in range(self.system_params.num_tx_antennas):
                 for stream in range(self.system_params.num_streams):
                     pilot_symbols[tx, stream] = rng.choice(qpsk_symbols, num_pilots)
@@ -141,41 +141,26 @@ class MIMODatasetGenerator:
             print(f"[DEBUG] Pilot mask shape: {pilot_mask.shape}")
             print(f"[DEBUG] Number of True values in mask: {np.sum(pilot_mask)}")
 
-            # Validate pilot mask and symbols
-            assert pilot_mask.shape == (
-                self.system_params.num_tx_antennas,
-                self.system_params.num_streams,
-                self.system_params.num_ofdm_symbols,
-                self.system_params.num_subcarriers
-            ), "Pilot mask shape mismatch with ResourceGrid configuration."
-
-            assert pilot_symbols.shape == (
-                self.system_params.num_tx_antennas,
-                self.system_params.num_streams,
-                num_pilots
-            ), "Pilot symbols shape mismatch with pilot mask."
-
             # Create pilot pattern
             print("[DEBUG] Creating pilot pattern...")
-            self.pilot_pattern = PilotPattern(pilot_mask, pilot_symbols)
+            self.pilot_pattern = PilotPattern(
+                mask=tf.cast(pilot_mask, tf.bool),
+                pilots=tf.cast(pilot_symbols, tf.complex64)
+            )
             
-            # Verify pilot pattern
             print(f"[DEBUG] Pilot pattern num_pilot_symbols: {self.pilot_pattern.num_pilot_symbols}")
-            if self.pilot_pattern.num_pilot_symbols == 0:
-                raise ValueError("Pilot pattern has no pilots")
+            print(f"[DEBUG] Pilot pattern mask shape: {self.pilot_pattern.mask.shape}")
 
-            # Create channel estimator and immediately set pilot pattern
+            # Create channel estimator with pilot pattern
             print("[DEBUG] Initializing channel estimator...")
             self.channel_estimator = LSChannelEstimator(
                 resource_grid=self.resource_grid,
-                interpolation_type="lin"
+                interpolation_type="lin",
+                pilot_pattern=self.pilot_pattern  # Pass pilot pattern directly
             )
-            self.channel_estimator.set_pilot_pattern(self.pilot_pattern)
 
-            print("[DEBUG] Channel estimator and pilot pattern set successfully.")
-
-            # Setup remaining components
-            print("[DEBUG] Setting up modulation schemes and mappers...")
+            # Setup remaining components...
+            print("[DEBUG] Setting up remaining components...")
             self.modulation_schemes = {
                 "QPSK": sn.mapping.QPSK(),
                 "16QAM": sn.mapping.QAM(16),
@@ -187,7 +172,6 @@ class MIMODatasetGenerator:
                 for mod, scheme in self.modulation_schemes.items()
             }
 
-            print("[DEBUG] Setting up channel model...")
             self.channel_model = RayleighBlockFading(
                 num_rx=1,
                 num_rx_ant=self.system_params.num_rx_antennas,
@@ -201,7 +185,6 @@ class MIMODatasetGenerator:
         except Exception as e:
             print(f"[ERROR] Failed to setup Sionna components: {str(e)}")
             raise
-
 
     def _generate_batch_data(self, batch_size: int, batch_idx: int = 0, modulation: str = "QPSK") -> Dict[str, tf.Tensor]:
         try:
