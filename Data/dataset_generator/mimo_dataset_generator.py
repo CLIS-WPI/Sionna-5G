@@ -100,8 +100,17 @@ class MIMODatasetGenerator:
                 num_streams_per_tx=self.system_params.num_streams
             )
 
-            # Create pilot pattern
-            print("[DEBUG] Creating pilot mask...")
+            # Log ResourceGrid attributes
+            print("\n[DEBUG] ResourceGrid Attributes:")
+            print(f"num_ofdm_symbols: {self.resource_grid.num_ofdm_symbols}")
+            print(f"fft_size: {self.resource_grid.fft_size}")
+            print(f"num_subcarriers: {self.resource_grid.num_subcarriers}")
+            print(f"num_tx: {self.resource_grid.num_tx}")
+            print(f"num_streams_per_tx: {self.resource_grid.num_streams_per_tx}")
+            print(f"pilot_pattern: {self.resource_grid.pilot_pattern}")
+
+            # Create pilot pattern with denser spacing
+            print("\n[DEBUG] Creating pilot mask...")
             pilot_mask = np.zeros([
                 self.system_params.num_tx_antennas,
                 self.system_params.num_streams,
@@ -110,8 +119,8 @@ class MIMODatasetGenerator:
             ], dtype=bool)
 
             # Set pilot positions with denser spacing
-            pilot_time_spacing = 2  # Every 2nd OFDM symbol
-            pilot_freq_spacing = 8  # Every 8th subcarrier
+            pilot_time_spacing = 4  # Increased spacing
+            pilot_freq_spacing = 4  # Increased spacing
             
             for tx in range(self.system_params.num_tx_antennas):
                 for stream in range(self.system_params.num_streams):
@@ -137,22 +146,30 @@ class MIMODatasetGenerator:
                 for stream in range(self.system_params.num_streams):
                     pilot_symbols[tx, stream] = rng.choice(qpsk_symbols, num_pilots)
 
-            print(f"[DEBUG] Pilot symbols shape: {pilot_symbols.shape}")
-            print(f"[DEBUG] Pilot mask shape: {pilot_mask.shape}")
-            print(f"[DEBUG] Number of True values in mask: {np.sum(pilot_mask)}")
+            # Log shapes and dimensions
+            print("\n[DEBUG] Shape Information:")
+            print(f"Pilot symbols shape: {pilot_symbols.shape}")
+            print(f"Pilot mask shape: {pilot_mask.shape}")
+            print(f"Number of True values in mask: {np.sum(pilot_mask)}")
+            print(f"ResourceGrid shape: [{self.resource_grid.num_tx}, {self.resource_grid.num_streams_per_tx}, {self.resource_grid.num_ofdm_symbols}, {self.resource_grid.num_subcarriers}]")
 
             # Create pilot pattern
-            print("[DEBUG] Creating pilot pattern...")
+            print("\n[DEBUG] Creating pilot pattern...")
             self.pilot_pattern = PilotPattern(
                 mask=tf.cast(pilot_mask, tf.bool),
                 pilots=tf.cast(pilot_symbols, tf.complex64)
             )
             
-            print(f"[DEBUG] Pilot pattern num_pilot_symbols: {self.pilot_pattern.num_pilot_symbols}")
-            print(f"[DEBUG] Pilot pattern mask shape: {self.pilot_pattern.mask.shape}")
+            # Log PilotPattern attributes
+            print("\n[DEBUG] PilotPattern Attributes:")
+            print(f"Pilot pattern num_pilot_symbols: {self.pilot_pattern.num_pilot_symbols}")
+            print(f"Pilot pattern mask shape: {self.pilot_pattern.mask.shape}")
+            print(f"Pilot pattern pilots shape: {self.pilot_pattern.pilots.shape}")
+            print(f"Mask dtype: {self.pilot_pattern.mask.dtype}")
+            print(f"Pilots dtype: {self.pilot_pattern.pilots.dtype}")
 
-            # Initialize channel estimator and set pilot pattern
-            print("[DEBUG] Initializing channel estimator...")
+            # Initialize channel estimator
+            print("\n[DEBUG] Initializing channel estimator...")
             self.channel_estimator = LSChannelEstimator(
                 resource_grid=self.resource_grid,
                 interpolation_type="lin"
@@ -162,7 +179,7 @@ class MIMODatasetGenerator:
             self.channel_estimator.set_pilot_pattern(self.pilot_pattern)
 
             # Setup remaining components
-            print("[DEBUG] Setting up remaining components...")
+            print("\n[DEBUG] Setting up remaining components...")
             self.modulation_schemes = {
                 "QPSK": sn.mapping.QPSK(),
                 "16QAM": sn.mapping.QAM(16),
