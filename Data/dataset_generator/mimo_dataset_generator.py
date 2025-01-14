@@ -100,7 +100,6 @@ class MIMODatasetGenerator:
                 num_tx=self.system_params.num_tx_antennas,
                 num_streams_per_tx=self.system_params.num_streams
             )
-            print(f"[DEBUG] Resource Grid initialized with shape: {self.resource_grid.shape}")
 
             # Step 2: Create pilot mask
             print("[DEBUG] Creating pilot mask...")
