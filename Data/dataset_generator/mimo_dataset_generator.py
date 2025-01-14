@@ -28,6 +28,11 @@
 # - Real-time updates and advanced user mobility models are excluded for simplicity.
 
 import os
+import sys
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
+from Data.dataset_generator.mimo_dataset_generator import MIMODatasetGenerator
+from Data.utill.logging_config import configure_logging, LoggerManager
 from datetime import datetime
 from typing import Dict, List, Optional, Union, Any
 import h5py
@@ -36,7 +41,7 @@ import tensorflow as tf
 import sionna as sn
 from sionna.channel.tr38901 import AntennaArray
 from config.system_parameters import SystemParameters
-from Data.utill.logging_config import MIMOLogger, LoggerManager
+from ..utill.logging_config import MIMOLogger, LoggerManager
 from core.metrics_calculator import MetricsCalculator
 from config.system_parameters import SystemParameters
 from integrity.dataset_integrity_checker import MIMODatasetIntegrityChecker
