@@ -101,7 +101,7 @@ class MIMODatasetGenerator:
                 num_streams_per_tx=self.system_params.num_streams
             )
 
-            # Create pilot pattern with more frequent pilots
+            # Create pilot pattern
             pilot_mask = np.zeros([
                 self.system_params.num_tx_antennas,
                 self.system_params.num_streams,
@@ -109,47 +109,53 @@ class MIMODatasetGenerator:
                 self.system_params.num_subcarriers
             ], dtype=bool)
 
-            # Set pilot positions
+            # Set pilot positions with reduced spacing
             pilot_freq_spacing = 4  # Every 4th subcarrier
             pilot_time_spacing = 3  # Every 3rd OFDM symbol
+
+            # Create pilot positions using broadcasting
+            time_indices = np.arange(0, self.system_params.num_ofdm_symbols, pilot_time_spacing)
+            freq_indices = np.arange(0, self.system_params.num_subcarriers, pilot_freq_spacing)
             
-            # First, set the pilot positions in the mask
             for tx in range(self.system_params.num_tx_antennas):
                 for stream in range(self.system_params.num_streams):
-                    for t in range(0, self.system_params.num_ofdm_symbols, pilot_time_spacing):
-                        for f in range(0, self.system_params.num_subcarriers, pilot_freq_spacing):
-                            pilot_mask[tx, stream, t, f] = True
+                    pilot_mask[tx, stream, time_indices[:, None], freq_indices] = True
 
-            # Calculate the exact number of pilots per antenna/stream
-            num_pilots_per_stream = np.sum(pilot_mask[0, 0])  # Count pilots in first antenna/stream
-            total_num_pilots = num_pilots_per_stream  # This is the number we need for the last dimension
-
-            # Generate pilot symbols with matching dimensions
-            pilot_symbols = (1/np.sqrt(2)) * (1 + 1j) * np.ones([
+            # Count pilots and create pilot symbols
+            num_pilots_per_stream = np.sum(pilot_mask[0, 0])
+            
+            # Create QPSK pilot symbols
+            pilot_symbols = np.ones([
                 self.system_params.num_tx_antennas,
                 self.system_params.num_streams,
-                total_num_pilots  # This must match the number of True values in pilot_mask per antenna/stream
+                num_pilots_per_stream
             ], dtype=np.complex64)
+            
+            # Normalize pilot symbols
+            pilot_symbols *= (1/np.sqrt(2)) * (1 + 1j)
 
-            # Log the dimensions for debugging
+            # Log dimensions for debugging
             self.logger.info(f"Pilot mask shape: {pilot_mask.shape}")
             self.logger.info(f"Number of pilots per stream: {num_pilots_per_stream}")
             self.logger.info(f"Pilot symbols shape: {pilot_symbols.shape}")
 
-            # Create pilot pattern
-            pilot_pattern = PilotPattern(
-                pilot_mask,
-                pilot_symbols
-            )
+            # Verify pilot mask has non-zero entries
+            if not np.any(pilot_mask):
+                raise ValueError("Pilot mask is empty")
 
-            # Initialize LSChannelEstimator
+            # Create pilot pattern first
+            pilot_pattern = PilotPattern(pilot_mask, pilot_symbols)
+
+            # Verify pilot pattern is valid
+            if pilot_pattern.num_pilot_symbols == 0:
+                raise ValueError("Created pilot pattern has no pilot symbols")
+
+            # Create channel estimator with verified pilot pattern
             self.channel_estimator = LSChannelEstimator(
                 resource_grid=self.resource_grid,
-                interpolation_type="lin"
+                interpolation_type="lin",
+                pilot_pattern=pilot_pattern  # Pass pilot pattern directly during initialization
             )
-            
-            # Set the pilot pattern
-            self.channel_estimator.set_pilot_pattern(pilot_pattern)
 
             # Setup modulation schemes
             self.modulation_schemes = {
@@ -158,7 +164,7 @@ class MIMODatasetGenerator:
                 "64QAM": sn.mapping.QAM(64)
             }
 
-            # Initialize mappers for each modulation
+            # Initialize mappers
             self.mappers = {
                 mod: Mapper(constellation=scheme)
                 for mod, scheme in self.modulation_schemes.items()
