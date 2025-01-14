@@ -31,7 +31,6 @@ import os
 import sys
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
-from Data.dataset_generator.mimo_dataset_generator import MIMODatasetGenerator
 from Data.utill.logging_config import configure_logging, LoggerManager
 from datetime import datetime
 from typing import Dict, List, Optional, Union, Any
@@ -89,7 +88,7 @@ class MIMODatasetGenerator:
             import sionna as sn
             from sionna.channel import RayleighBlockFading
             from sionna.mapping import Mapper
-            from sionna.ofdm import ResourceGrid, ResourceGridMapper, LSChannelEstimator, PilotPattern
+            from sionna.ofdm import ResourceGrid, LSChannelEstimator, PilotPattern
 
             # Create OFDM Resource Grid
             self.resource_grid = ResourceGrid(
@@ -101,7 +100,6 @@ class MIMODatasetGenerator:
             )
 
             # Create pilot pattern
-            # Define pilot positions (every 4th subcarrier, every 3rd OFDM symbol)
             pilot_mask = np.zeros([
                 self.system_params.num_tx_antennas,
                 self.system_params.num_streams,
@@ -134,12 +132,14 @@ class MIMODatasetGenerator:
                 pilot_symbols
             )
 
-            # Initialize LSChannelEstimator with the pilot pattern
+            # Initialize LSChannelEstimator
             self.channel_estimator = LSChannelEstimator(
                 resource_grid=self.resource_grid,
-                interpolation_type="lin",
-                pilot_pattern=pilot_pattern
+                interpolation_type="lin"
             )
+            
+            # Set the pilot pattern
+            self.channel_estimator.set_pilot_pattern(pilot_pattern)
 
             # Setup modulation schemes
             self.modulation_schemes = {
