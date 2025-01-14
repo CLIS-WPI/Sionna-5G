@@ -143,12 +143,14 @@ class MIMODatasetGenerator:
             # Create pilot pattern first
             self.pilot_pattern = PilotPattern(pilot_mask, pilot_symbols)
 
-            # Create channel estimator with pilot pattern
+            # First create channel estimator with only required parameters
             self.channel_estimator = LSChannelEstimator(
                 resource_grid=self.resource_grid,
-                interpolation_type="lin",
-                pilot_pattern=self.pilot_pattern  # Pass pilot pattern directly here
+                interpolation_type="lin"
             )
+
+            # Then set the pilot pattern
+            self.channel_estimator.set_pilot_pattern(self.pilot_pattern)
 
             # Setup modulation schemes
             self.modulation_schemes = {
