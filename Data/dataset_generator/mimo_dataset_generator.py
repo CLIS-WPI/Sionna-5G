@@ -91,7 +91,6 @@ class MIMODatasetGenerator:
             import numpy as np
             import tensorflow as tf
 
-            # Step 1: Create OFDM Resource Grid
             print("[DEBUG] Initializing OFDM Resource Grid...")
             self.resource_grid = ResourceGrid(
                 num_ofdm_symbols=self.system_params.num_ofdm_symbols,
@@ -101,7 +100,7 @@ class MIMODatasetGenerator:
                 num_streams_per_tx=self.system_params.num_streams
             )
 
-            # Step 2: Create pilot mask
+            # Create pilot pattern with explicit positioning
             print("[DEBUG] Creating pilot mask...")
             pilot_mask = np.zeros([
                 self.system_params.num_tx_antennas,
@@ -111,25 +110,25 @@ class MIMODatasetGenerator:
             ], dtype=bool)
             print(f"[DEBUG] Pilot mask initialized with shape: {pilot_mask.shape}")
 
-            # Step 3: Set pilot positions
-            pilot_freq_spacing = 8
-            pilot_time_spacing = 2
-            time_indices = np.arange(0, self.system_params.num_ofdm_symbols, pilot_time_spacing)
-            freq_indices = np.arange(0, self.system_params.num_subcarriers, pilot_freq_spacing)
-
+            # Set pilot positions with denser spacing
+            pilot_freq_spacing = 4  # Reduced from 8
+            pilot_time_spacing = 1  # Reduced from 2
+            
+            # Calculate pilot positions
+            time_indices = range(0, self.system_params.num_ofdm_symbols, pilot_time_spacing)
+            freq_indices = range(0, self.system_params.num_subcarriers, pilot_freq_spacing)
+            
+            # Set pilot positions for each antenna and stream
             for tx in range(self.system_params.num_tx_antennas):
                 for stream in range(self.system_params.num_streams):
                     for t in time_indices:
                         for f in freq_indices:
                             pilot_mask[tx, stream, t, f] = True
 
-            print(f"[DEBUG] Pilot mask filled. Number of True values: {np.sum(pilot_mask)}")
-
-            # Step 4: Calculate actual number of pilots
-            num_pilots = np.sum(pilot_mask[0, 0])
+            num_pilots = np.sum(pilot_mask[0, 0])  # Count pilots in first antenna/stream
             print(f"[DEBUG] Number of pilots per stream: {num_pilots}")
 
-            # Step 5: Create QPSK pilot symbols
+            # Create pilot symbols with correct dimensionality
             print("[DEBUG] Generating QPSK pilot symbols...")
             pilot_symbols = np.zeros([
                 self.system_params.num_tx_antennas,
@@ -137,35 +136,42 @@ class MIMODatasetGenerator:
                 num_pilots
             ], dtype=np.complex64)
 
+            # Generate QPSK pilot symbols
             qpsk_symbols = np.array([1+1j, 1-1j, -1+1j, -1-1j]) / np.sqrt(2)
+            rng = np.random.default_rng(42)  # For reproducibility
             for tx in range(self.system_params.num_tx_antennas):
                 for stream in range(self.system_params.num_streams):
-                    pilot_symbols[tx, stream] = np.random.choice(qpsk_symbols, num_pilots)
+                    pilot_symbols[tx, stream] = rng.choice(qpsk_symbols, num_pilots)
+
             print(f"[DEBUG] Pilot symbols generated with shape: {pilot_symbols.shape}")
 
-            # Step 6: Verify pilot mask
+            # Verify pilot mask is not empty
             print("[DEBUG] Verifying pilot mask...")
             if not np.any(pilot_mask):
                 raise ValueError("Pilot mask is empty - no pilot positions set")
             print("[DEBUG] Pilot mask is valid.")
 
-            # Step 7: Create and verify pilot pattern
+            # Create pilot pattern
             print("[DEBUG] Creating pilot pattern...")
             pilot_pattern = PilotPattern(pilot_mask, pilot_symbols)
-            print(f"[DEBUG] Pilot pattern created with num_pilot_symbols: {pilot_pattern.num_pilot_symbols}")
+            
+            # Verify pilot pattern
             if pilot_pattern.num_pilot_symbols == 0:
                 raise ValueError("Created pilot pattern has no pilots")
+            print(f"[DEBUG] Pilot pattern created with num_pilot_symbols: {pilot_pattern.num_pilot_symbols}")
 
-            # Step 8: Create channel estimator
+            # Create channel estimator with pilot pattern
             print("[DEBUG] Initializing channel estimator...")
             self.channel_estimator = LSChannelEstimator(
                 resource_grid=self.resource_grid,
                 interpolation_type="lin"
             )
+            
+            # Set pilot pattern after initialization
             self.channel_estimator.set_pilot_pattern(pilot_pattern)
             print("[DEBUG] Channel estimator initialized successfully.")
 
-            # Step 9: Setup remaining components
+            # Setup remaining components
             print("[DEBUG] Setting up modulation schemes and mappers...")
             self.modulation_schemes = {
                 "QPSK": sn.mapping.QPSK(),
@@ -178,10 +184,7 @@ class MIMODatasetGenerator:
                 for mod, scheme in self.modulation_schemes.items()
             }
 
-            print("[DEBUG] Modulation schemes and mappers set up successfully.")
-
-            # Step 10: Setup channel model
-            print("[DEBUG] Initializing channel model...")
+            print("[DEBUG] Setting up channel model...")
             self.channel_model = RayleighBlockFading(
                 num_rx=1,
                 num_rx_ant=self.system_params.num_rx_antennas,
@@ -189,12 +192,12 @@ class MIMODatasetGenerator:
                 num_tx_ant=self.system_params.num_tx_antennas,
                 dtype=tf.complex64
             )
-            print("[DEBUG] Channel model initialized successfully.")
+
+            print("[DEBUG] Sionna components setup completed successfully.")
 
         except Exception as e:
             print(f"[ERROR] Failed to setup Sionna components: {str(e)}")
             raise
-
 
     def _generate_batch_data(self, batch_size: int, batch_idx: int = 0, modulation: str = "QPSK") -> Dict[str, tf.Tensor]:
         try:
