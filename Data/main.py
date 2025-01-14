@@ -6,17 +6,23 @@ import argparse
 import logging
 from datetime import datetime
 import random
+
 # Third-party imports
 import h5py
 import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
-# Local imports
-from .config.system_parameters import SystemParameters
-from .dataset_generator.mimo_dataset_generator import MIMODatasetGenerator
-from .utill.logging_config import configure_logging, LoggerManager
-from .integrity.dataset_integrity_checker import MIMODatasetIntegrityChecker
-from .core.metrics_calculator import MetricsCalculator
+
+# Add the project root directory to Python path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
+
+# Local imports (using absolute imports)
+from Data.config.system_parameters import SystemParameters
+from Data.dataset_generator.mimo_dataset_generator import MIMODatasetGenerator
+from Data.utill.logging_config import configure_logging, LoggerManager
+from Data.integrity.dataset_integrity_checker import MIMODatasetIntegrityChecker
+from Data.core.metrics_calculator import MetricsCalculator
 
 def configure_gpu_environment():
     """Configure GPU environment with memory growth and mixed precision."""
