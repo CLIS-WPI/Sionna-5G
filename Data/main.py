@@ -1,21 +1,17 @@
 # main.py
-# main.py
+# Standard library imports
 import os
 import sys
 import argparse
 import logging
 from datetime import datetime
+import random
+# Third-party imports
 import h5py
 import tensorflow as tf
 import numpy as np
-import random
 import matplotlib.pyplot as plt
-
-# Add the project root directory to Python path
-project_root = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.dirname(project_root))
-
-# Update imports to use relative paths from Data directory
+# Local imports
 from .config.system_parameters import SystemParameters
 from .dataset_generator.mimo_dataset_generator import MIMODatasetGenerator
 from .utill.logging_config import configure_logging, LoggerManager
