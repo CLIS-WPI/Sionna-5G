@@ -36,7 +36,7 @@ import tensorflow as tf
 import sionna as sn
 from sionna.channel.tr38901 import AntennaArray
 from config.system_parameters import SystemParameters
-from utill.logging_config import LoggerManager
+from Data.utill.logging_config import MIMOLogger, LoggerManager
 from core.metrics_calculator import MetricsCalculator
 from config.system_parameters import SystemParameters
 from integrity.dataset_integrity_checker import MIMODatasetIntegrityChecker
@@ -45,7 +45,6 @@ from utill.tensor_shape_validator import validate_mimo_metrics
 from tqdm import tqdm
 from core.path_loss_model import PathLossManager
 import sionna as sn
-from utill.logging_config import MIMOLogger
 class MIMODatasetGenerator:
     def __init__(
         self, 
