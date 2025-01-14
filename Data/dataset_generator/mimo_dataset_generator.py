@@ -45,7 +45,7 @@ from utill.tensor_shape_validator import validate_mimo_metrics
 from tqdm import tqdm
 from core.path_loss_model import PathLossManager
 import sionna as sn
-
+from utill.logging_config import MIMOLogger
 class MIMODatasetGenerator:
     def __init__(
         self, 
@@ -58,6 +58,7 @@ class MIMODatasetGenerator:
             log_level='INFO'
         )
         
+        self.mimo_logger = MIMOLogger()
         self.system_params = system_params or SystemParameters()
         self.metrics_calculator = MetricsCalculator(self.system_params)
         
@@ -276,7 +277,8 @@ class MIMODatasetGenerator:
 
             # Generate channel response using Sionna
             h = self.channel_model()
-            
+            self.mimo_logger.log_channel_stats(h, snr_db)
+
             # Apply channel
             noise_variance = tf.pow(10.0, -snr_db/10.0)
             noise_variance = tf.reshape(noise_variance, [-1, 1, 1])
@@ -289,6 +291,25 @@ class MIMODatasetGenerator:
 
             # Apply channel and add noise
             rx_symbols = tf.matmul(h, tf.expand_dims(tx_symbols, -1))[:, :, 0] + noise
+            
+            # Calculate BER if needed
+            if hasattr(self, 'metrics_calculator'):
+                ber = self.metrics_calculator.calculate_ber(
+                    tx_symbols=tx_symbols,
+                    rx_symbols=rx_symbols,
+                    snr_db=snr_db
+                )
+
+            # Log BER measurements
+            self.mimo_logger.log_ber_measurement(
+                ber_value=ber,
+                snr_db=snr_db,
+                additional_info={
+                    'modulation': modulation,
+                    'num_symbols': batch_size * self.system_params.num_tx_antennas,
+                    'batch_idx': batch_idx
+                }
+            )
 
             return {
                 'channel_response': tf.cast(h, tf.complex64),
