@@ -108,64 +108,73 @@ class MIMODatasetGenerator:
                 self.system_params.num_subcarriers
             ], dtype=bool)
 
-            # Set pilot positions more explicitly
-            pilot_freq_spacing = 4
-            pilot_time_spacing = 3
+            # Set pilot positions with smaller spacing to ensure enough pilots
+            pilot_freq_spacing = 8  # Reduced from previous value
+            pilot_time_spacing = 2  # Reduced from previous value
             
-            time_positions = list(range(0, self.system_params.num_ofdm_symbols, pilot_time_spacing))
-            freq_positions = list(range(0, self.system_params.num_subcarriers, pilot_freq_spacing))
+            # Calculate pilot positions
+            time_indices = np.arange(0, self.system_params.num_ofdm_symbols, pilot_time_spacing)
+            freq_indices = np.arange(0, self.system_params.num_subcarriers, pilot_freq_spacing)
             
-            # Set pilot positions explicitly for each antenna and stream
+            # Set pilot positions for each antenna and stream
             for tx in range(self.system_params.num_tx_antennas):
                 for stream in range(self.system_params.num_streams):
-                    for t in time_positions:
-                        for f in freq_positions:
+                    for t in time_indices:
+                        for f in freq_indices:
                             pilot_mask[tx, stream, t, f] = True
 
-            num_pilots_per_stream = len(time_positions) * len(freq_positions)
+            # Calculate actual number of pilots
+            num_pilots = np.sum(pilot_mask[0, 0])  # Count pilots in first antenna/stream
             
-            # Create pilot symbols with matching dimensions
-            pilot_symbols = np.ones([
+            # Create QPSK pilot symbols
+            pilot_symbols = np.zeros([
                 self.system_params.num_tx_antennas,
                 self.system_params.num_streams,
-                num_pilots_per_stream
+                num_pilots
             ], dtype=np.complex64)
 
-            # Normalize pilot symbols
-            pilot_symbols *= (1/np.sqrt(2)) * (1 + 1j)
+            # Generate QPSK symbols for pilots
+            qpsk_symbols = np.array([1+1j, 1-1j, -1+1j, -1-1j]) / np.sqrt(2)
+            for tx in range(self.system_params.num_tx_antennas):
+                for stream in range(self.system_params.num_streams):
+                    pilot_symbols[tx, stream] = np.random.choice(qpsk_symbols, num_pilots)
 
-            # Verify and log dimensions
+            # Log verification info
             self.logger.info(f"Pilot mask shape: {pilot_mask.shape}")
-            self.logger.info(f"Number of pilots per stream: {num_pilots_per_stream}")
+            self.logger.info(f"Number of pilots per stream: {num_pilots}")
             self.logger.info(f"Pilot symbols shape: {pilot_symbols.shape}")
             self.logger.info(f"Number of True values in mask: {np.sum(pilot_mask[0, 0])}")
 
-            # Create pilot pattern first
-            self.pilot_pattern = PilotPattern(pilot_mask, pilot_symbols)
+            # Verify pilot mask has pilots
+            if not np.any(pilot_mask):
+                raise ValueError("Pilot mask is empty - no pilot positions set")
 
-            # First create channel estimator with only required parameters
+            # Create and verify pilot pattern
+            pilot_pattern = PilotPattern(pilot_mask, pilot_symbols)
+            
+            # Verify pilot pattern is not empty
+            if pilot_pattern.num_pilot_symbols == 0:
+                raise ValueError("Created pilot pattern has no pilots")
+
+            # Create channel estimator and immediately set pilot pattern
             self.channel_estimator = LSChannelEstimator(
                 resource_grid=self.resource_grid,
                 interpolation_type="lin"
             )
+            self.channel_estimator.set_pilot_pattern(pilot_pattern)
 
-            # Then set the pilot pattern
-            self.channel_estimator.set_pilot_pattern(self.pilot_pattern)
-
-            # Setup modulation schemes
+            # Setup remaining components...
             self.modulation_schemes = {
                 "QPSK": sn.mapping.QPSK(),
                 "16QAM": sn.mapping.QAM(16),
                 "64QAM": sn.mapping.QAM(64)
             }
 
-            # Initialize mappers
             self.mappers = {
                 mod: Mapper(constellation=scheme)
                 for mod, scheme in self.modulation_schemes.items()
             }
 
-            # Setup channel model
             self.channel_model = RayleighBlockFading(
                 num_rx=1,
                 num_rx_ant=self.system_params.num_rx_antennas,
