@@ -84,7 +84,6 @@ class MIMODatasetGenerator:
     def _setup_sionna_components(self):
         """Setup Sionna channel models and antenna arrays"""
         try:
-            # Import required Sionna components
             import sionna as sn
             from sionna.channel import RayleighBlockFading
             from sionna.mapping import Mapper
@@ -110,10 +109,9 @@ class MIMODatasetGenerator:
             ], dtype=bool)
 
             # Set pilot positions more explicitly
-            pilot_freq_spacing = 4  # Every 4th subcarrier
-            pilot_time_spacing = 3  # Every 3rd OFDM symbol
+            pilot_freq_spacing = 4
+            pilot_time_spacing = 3
             
-            # Calculate pilot positions explicitly
             time_positions = list(range(0, self.system_params.num_ofdm_symbols, pilot_time_spacing))
             freq_positions = list(range(0, self.system_params.num_subcarriers, pilot_freq_spacing))
             
@@ -124,21 +122,17 @@ class MIMODatasetGenerator:
                         for f in freq_positions:
                             pilot_mask[tx, stream, t, f] = True
 
-            # Count actual number of pilots per antenna/stream
             num_pilots_per_stream = len(time_positions) * len(freq_positions)
             
             # Create pilot symbols with matching dimensions
-            pilot_symbols = np.zeros([
+            pilot_symbols = np.ones([
                 self.system_params.num_tx_antennas,
                 self.system_params.num_streams,
                 num_pilots_per_stream
             ], dtype=np.complex64)
 
-            # Generate QPSK pilot symbols
-            qpsk_symbols = np.array([1+1j, 1-1j, -1+1j, -1-1j]) / np.sqrt(2)
-            for tx in range(self.system_params.num_tx_antennas):
-                for stream in range(self.system_params.num_streams):
-                    pilot_symbols[tx, stream] = np.random.choice(qpsk_symbols, num_pilots_per_stream)
+            # Normalize pilot symbols
+            pilot_symbols *= (1/np.sqrt(2)) * (1 + 1j)
 
             # Verify and log dimensions
             self.logger.info(f"Pilot mask shape: {pilot_mask.shape}")
@@ -146,23 +140,15 @@ class MIMODatasetGenerator:
             self.logger.info(f"Pilot symbols shape: {pilot_symbols.shape}")
             self.logger.info(f"Number of True values in mask: {np.sum(pilot_mask[0, 0])}")
 
-            # Verify pilot mask has non-zero entries
-            if not np.any(pilot_mask):
-                raise ValueError("Pilot mask is empty")
+            # Create pilot pattern first
+            self.pilot_pattern = PilotPattern(pilot_mask, pilot_symbols)
 
-            # Create pilot pattern
-            pilot_pattern = PilotPattern(pilot_mask, pilot_symbols)
-
-            # Create channel estimator
+            # Create channel estimator with pilot pattern
             self.channel_estimator = LSChannelEstimator(
                 resource_grid=self.resource_grid,
-                interpolation_type="lin"
+                interpolation_type="lin",
+                pilot_pattern=self.pilot_pattern  # Pass pilot pattern directly here
             )
-
-            # Set the pilot pattern
-            self.channel_estimator.set_pilot_pattern(pilot_pattern)
-
-            self.logger.info("Sionna components setup successfully")
 
             # Setup modulation schemes
             self.modulation_schemes = {
