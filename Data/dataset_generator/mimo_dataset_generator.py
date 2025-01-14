@@ -109,7 +109,7 @@ class MIMODatasetGenerator:
                 self.system_params.num_subcarriers
             ], dtype=bool)
 
-            # Set pilot positions - using a more structured pattern
+            # Set pilot positions with denser spacing
             pilot_time_spacing = 2  # Every 2nd OFDM symbol
             pilot_freq_spacing = 8  # Every 8th subcarrier
             
@@ -119,10 +119,10 @@ class MIMODatasetGenerator:
                         for f in range(0, self.system_params.num_subcarriers, pilot_freq_spacing):
                             pilot_mask[tx, stream, t, f] = True
 
-            num_pilots = np.sum(pilot_mask[0, 0])  # Count pilots in first antenna/stream
+            num_pilots = np.sum(pilot_mask[0, 0])
             print(f"[DEBUG] Number of pilots per stream: {num_pilots}")
 
-            # Generate pilot symbols using QPSK constellation
+            # Generate pilot symbols
             print("[DEBUG] Generating pilot symbols...")
             qpsk_symbols = np.array([1+1j, 1-1j, -1+1j, -1-1j]) / np.sqrt(2)
             pilot_symbols = np.zeros([
@@ -131,8 +131,8 @@ class MIMODatasetGenerator:
                 num_pilots
             ], dtype=np.complex64)
 
-            # Fill pilot symbols with QPSK constellation points
-            rng = np.random.default_rng(42)  # For reproducibility
+            # Fill pilot symbols
+            rng = np.random.default_rng(42)
             for tx in range(self.system_params.num_tx_antennas):
                 for stream in range(self.system_params.num_streams):
                     pilot_symbols[tx, stream] = rng.choice(qpsk_symbols, num_pilots)
@@ -151,15 +151,17 @@ class MIMODatasetGenerator:
             print(f"[DEBUG] Pilot pattern num_pilot_symbols: {self.pilot_pattern.num_pilot_symbols}")
             print(f"[DEBUG] Pilot pattern mask shape: {self.pilot_pattern.mask.shape}")
 
-            # Create channel estimator with pilot pattern
+            # Initialize channel estimator and set pilot pattern
             print("[DEBUG] Initializing channel estimator...")
             self.channel_estimator = LSChannelEstimator(
                 resource_grid=self.resource_grid,
-                interpolation_type="lin",
-                pilot_pattern=self.pilot_pattern  # Pass pilot pattern directly
+                interpolation_type="lin"
             )
+            
+            print("[DEBUG] Setting pilot pattern...")
+            self.channel_estimator.set_pilot_pattern(self.pilot_pattern)
 
-            # Setup remaining components...
+            # Setup remaining components
             print("[DEBUG] Setting up remaining components...")
             self.modulation_schemes = {
                 "QPSK": sn.mapping.QPSK(),
