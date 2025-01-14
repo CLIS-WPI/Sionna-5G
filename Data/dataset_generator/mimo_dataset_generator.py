@@ -89,6 +89,7 @@ class MIMODatasetGenerator:
             from sionna.channel import RayleighBlockFading
             from sionna.mapping import Mapper
             from sionna.ofdm import ResourceGrid, LSChannelEstimator, PilotPattern
+            import numpy as np
 
             # Create OFDM Resource Grid
             self.resource_grid = ResourceGrid(
@@ -99,7 +100,7 @@ class MIMODatasetGenerator:
                 num_streams_per_tx=self.system_params.num_streams
             )
 
-            # Create pilot pattern
+            # Create pilot pattern with more frequent pilots
             pilot_mask = np.zeros([
                 self.system_params.num_tx_antennas,
                 self.system_params.num_streams,
@@ -107,37 +108,44 @@ class MIMODatasetGenerator:
                 self.system_params.num_subcarriers
             ], dtype=bool)
 
-            # Set pilot positions
+            # Set pilot positions more frequently
             pilot_freq_spacing = 4  # Every 4th subcarrier
             pilot_time_spacing = 3  # Every 3rd OFDM symbol
             
             for tx in range(self.system_params.num_tx_antennas):
                 for stream in range(self.system_params.num_streams):
                     for t in range(0, self.system_params.num_ofdm_symbols, pilot_time_spacing):
-                        pilot_mask[tx, stream, t, ::pilot_freq_spacing] = True
+                        for f in range(0, self.system_params.num_subcarriers, pilot_freq_spacing):
+                            pilot_mask[tx, stream, t, f] = True
 
-            # Count number of pilots per antenna/stream
+            # Count number of pilots and verify it's not zero
             num_pilots = np.sum(pilot_mask[0, 0])
+            if num_pilots == 0:
+                raise ValueError("No pilots were created. Check pilot spacing parameters.")
 
             # Generate QPSK pilot symbols
-            pilot_symbols = np.exp(1j * np.pi/4) * np.ones([
+            pilot_symbols = (1/np.sqrt(2)) * (1 + 1j) * np.ones([
                 self.system_params.num_tx_antennas,
                 self.system_params.num_streams,
                 num_pilots
             ], dtype=np.complex64)
 
-            # Create pilot pattern
+            # Create pilot pattern and verify it's not empty
             pilot_pattern = PilotPattern(
                 pilot_mask,
                 pilot_symbols
             )
+
+            # Verify pilot pattern is not empty
+            if pilot_pattern.num_pilot_symbols == 0:
+                raise ValueError("Created pilot pattern is empty")
 
             # Initialize LSChannelEstimator
             self.channel_estimator = LSChannelEstimator(
                 resource_grid=self.resource_grid,
                 interpolation_type="lin"
             )
-            
+
             # Set the pilot pattern
             self.channel_estimator.set_pilot_pattern(pilot_pattern)
 
