@@ -150,12 +150,14 @@ class MIMODatasetGenerator:
             if pilot_pattern.num_pilot_symbols == 0:
                 raise ValueError("Created pilot pattern has no pilot symbols")
 
-            # Create channel estimator with verified pilot pattern
+            # First create channel estimator
             self.channel_estimator = LSChannelEstimator(
                 resource_grid=self.resource_grid,
-                interpolation_type="lin",
-                pilot_pattern=pilot_pattern  # Pass pilot pattern directly during initialization
+                interpolation_type="lin"
             )
+
+            # Then set the pilot pattern
+            self.channel_estimator.set_pilot_pattern(pilot_pattern)
 
             # Setup modulation schemes
             self.modulation_schemes = {
