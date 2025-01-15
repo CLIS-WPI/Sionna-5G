@@ -179,9 +179,13 @@ class MetricsCalculator:
                 num_bits_per_symbol=mod_params["num_bits_per_symbol"]
             )
             
-            # Create mapper and demapper
+            # Create mapper and demapper with specified method
             mapper = sn.mapping.Mapper(constellation=constellation)
-            demapper = sn.mapping.Demapper(constellation=constellation)
+            demapper = sn.mapping.Demapper(
+                constellation=constellation,
+                demapping_method="app",  # Using APP (a posteriori probability) method
+                num_bits_per_symbol=mod_params["num_bits_per_symbol"]
+            )
             
             # Cast inputs
             tx_symbols = tf.cast(tx_symbols, tf.complex64)
@@ -194,6 +198,7 @@ class MetricsCalculator:
             tx_bits = mapper.get_bits(tx_symbols)
             
             # Demap received symbols to LLRs using the demapper
+            # Note: Demapper expects a list of [received_symbols, noise_variance]
             llr = demapper([rx_symbols, noise_var])
             
             # Hard decisions on LLRs
