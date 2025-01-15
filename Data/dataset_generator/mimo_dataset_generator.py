@@ -265,13 +265,10 @@ class MIMODatasetGenerator:
             # Get the appropriate mapper
             mapper = self.mappers[modulation]
             
-            # Generate random bits based on modulation order
-            bits_per_symbol = {
-                "QPSK": 2,
-                "16QAM": 4,
-                "64QAM": 6
-            }[modulation]
+            # Get bits per symbol from the mapper's constellation
+            bits_per_symbol = mapper.constellation.num_bits_per_symbol
             
+            # Calculate total number of bits needed
             num_bits = batch_size * self.system_params.num_tx_antennas * bits_per_symbol
             
             # Generate random bits
@@ -282,10 +279,16 @@ class MIMODatasetGenerator:
                 dtype=tf.int32
             )
             
+            # Reshape bits to [total_symbols, bits_per_symbol] format
+            total_symbols = num_bits // bits_per_symbol
+            bits_reshaped = tf.reshape(bits, [total_symbols, bits_per_symbol])
+            
             # Map bits to symbols using Sionna
-            tx_symbols = mapper(bits)
+            tx_symbols = mapper(bits_reshaped)
+            
+            # Reshape symbols to [batch_size, num_tx_antennas]
             tx_symbols = tf.reshape(tx_symbols, 
-                [batch_size, self.system_params.num_tx_antennas, -1])
+                [batch_size, self.system_params.num_tx_antennas])
 
             # Generate SNR values with proper range
             snr_db = tf.random.uniform(
