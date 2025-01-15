@@ -205,8 +205,33 @@ class MIMOLogger:
         self.base_log_dir = base_log_dir
         self.channel_logger = create_channel_logger(os.path.join(base_log_dir, 'channel'))
         self.ber_logger = create_ber_logger(os.path.join(base_log_dir, 'ber'))
-        # Add this line to initialize the logger attribute
         self.logger = self.channel_logger  # Use channel_logger for general logging
+
+    # Add this new method
+    def log_generation_progress(self, batch_idx: int, total_batches: int, current_metrics: dict):
+        """
+        Log dataset generation progress and current batch metrics.
+        
+        Args:
+            batch_idx (int): Current batch index
+            total_batches (int): Total number of batches
+            current_metrics (dict): Dictionary containing current batch metrics
+        """
+        progress_pct = (batch_idx + 1) / total_batches * 100
+        
+        # Log progress
+        self.channel_logger.info(
+            f"Generation Progress: {progress_pct:.1f}% ({batch_idx + 1}/{total_batches} batches)"
+        )
+        
+        # Log summary of current metrics
+        if current_metrics:
+            metrics_summary = {
+                key: float(tf.reduce_mean(value).numpy()) 
+                for key, value in current_metrics.items() 
+                if isinstance(value, (tf.Tensor, np.ndarray))
+            }
+            self.channel_logger.debug(f"Batch {batch_idx} metrics: {metrics_summary}")
 
     def log_channel_stats(self, channel_response, snr):
         """Log channel response statistics."""
