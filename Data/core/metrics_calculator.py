@@ -179,7 +179,7 @@ class MetricsCalculator:
                 num_bits_per_symbol=mod_params["num_bits_per_symbol"]
             )
 
-            # Create demapper only since we don't need the mapper
+            # Create demapper
             demapper = sn.mapping.Demapper(
                 constellation=constellation,
                 demapping_method="app",
@@ -192,53 +192,55 @@ class MetricsCalculator:
             
             # Convert SNR to linear scale for demapping and reshape
             noise_var = tf.pow(10.0, -snr_db/10.0)
-            # Reshape noise_var to match rx_symbols dimensions
-            noise_var = tf.reshape(noise_var, [-1, 1])  # Shape: [batch_size, 1]
-            noise_var = tf.broadcast_to(noise_var, tf.shape(rx_symbols))  # Broadcast to match rx_symbols shape
+            noise_var = tf.reshape(noise_var, [-1, 1])
+            noise_var = tf.broadcast_to(noise_var, tf.shape(rx_symbols))
             
-            # Get symbol indices from transmitted symbols using SymbolDemapper
+            # Get symbol indices from transmitted symbols
             symbol_demapper = sn.mapping.SymbolDemapper(
                 constellation=constellation,
                 hard_out=True
             )
             tx_indices = symbol_demapper([tx_symbols, noise_var])
             
-            # Create bits converter instance
+            # Convert indices to bits
             bits_converter = sn.mapping.SymbolInds2Bits(num_bits_per_symbol=mod_params["num_bits_per_symbol"])
-                
-            # Convert indices to bits and ensure int32 type
             tx_bits = tf.cast(bits_converter(tx_indices), tf.int32)
-                
+            
+            # Reshape tx_bits to match expected shape
+            tx_bits = tf.reshape(tx_bits, [-1, tx_symbols.shape[1] * mod_params["num_bits_per_symbol"]])
+            
             # Demap received symbols to LLRs
             llr = demapper([rx_symbols, noise_var])
-                
-            # Hard decisions on LLRs and ensure int32 type
+            
+            # Reshape LLRs to match tx_bits shape
+            llr = tf.reshape(llr, tf.shape(tx_bits))
+            
+            # Hard decisions on LLRs
             detected_bits = tf.cast(llr > 0, tf.int32)
-                
-            # Calculate average BER (ensure both inputs are int32)
+            
+            # Calculate average BER
             ber = sn.utils.count_errors(detected_bits, tx_bits) / tf.size(tx_bits, out_type=tf.float32)
-                
+            
             # Calculate BER curve for different SNR points
             snr_points = tf.range(15, 31, delta=2, dtype=tf.float32)
             ber_curve = {}
-                
+            
             # Initialize target_met as False
             target_met = False
-                
+            
             for snr in snr_points:
                 mask = tf.abs(snr_db - snr) < 0.5
                 if tf.reduce_any(mask):
                     tx_bits_at_snr = tf.boolean_mask(tx_bits, mask)
                     detected_bits_at_snr = tf.boolean_mask(detected_bits, mask)
-                    # Both inputs are already int32, no need for additional casting
                     ber_at_snr = sn.utils.count_errors(detected_bits_at_snr, tx_bits_at_snr) / \
                                 tf.size(tx_bits_at_snr, out_type=tf.float32)
                     ber_curve[float(snr)] = float(ber_at_snr)
-                        
-                    # Check if this is the target SNR (15dB) and update target_met
+                    
+                    # Check if this is the target SNR (15dB)
                     if abs(float(snr) - 15.0) < 0.5:
                         target_met = float(ber_at_snr) < mod_params["target_ber"]
-                        
+                    
                     # Log BER measurements
                     self.logger.info(f"BER at {snr}dB: {ber_at_snr:.2e}")
                     if hasattr(self, 'ber_logger'):
@@ -262,7 +264,7 @@ class MetricsCalculator:
                     
         except Exception as e:
             self.logger.error(f"Error in BER calculation: {str(e)}")
-        raise RuntimeError(f"BER calculation failed: {str(e)}") from e
+            raise RuntimeError(f"BER calculation failed: {str(e)}") from e
         
     def calculate_enhanced_metrics(
         self, 
