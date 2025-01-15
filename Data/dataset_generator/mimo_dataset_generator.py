@@ -151,9 +151,9 @@ class MIMODatasetGenerator:
             print("[DEBUG] Initializing channel estimator...")
             self.channel_estimator = LSChannelEstimator(
                 resource_grid=self.resource_grid,
-                interpolation_type="linear"
+                interpolation_type="lin" 
             )
-
+            
             # Setup modulation schemes
             print("[DEBUG] Setting up modulation schemes...")
             self.modulation_schemes = {
