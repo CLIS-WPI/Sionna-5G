@@ -152,24 +152,32 @@ class MetricsCalculator:
             modulation_params = {
                 "QPSK": {
                     "bits_per_symbol": 2,
-                    "constellation": sn.mapping.Constellation("qam", num_bits_per_symbol=2),
+                    "constellation_type": "qam",
+                    "num_bits_per_symbol": 2,
                     "target_ber": 1e-5
                 },
                 "16QAM": {
                     "bits_per_symbol": 4,
-                    "constellation": sn.mapping.Constellation("qam", num_bits_per_symbol=4),
+                    "constellation_type": "qam",
+                    "num_bits_per_symbol": 4,
                     "target_ber": 1e-4
                 },
                 "64QAM": {
                     "bits_per_symbol": 6,
-                    "constellation": sn.mapping.Constellation("qam", num_bits_per_symbol=6),
+                    "constellation_type": "qam",
+                    "num_bits_per_symbol": 6,
                     "target_ber": 1e-3
                 }
             }
             
             # Get modulation parameters
             mod_params = modulation_params[modulation]
-            mapper = sn.mapping.Mapper(mod_params["constellation"])
+            
+            # Create mapper with correct constellation parameters
+            mapper = sn.mapping.Mapper(
+                constellation_type=mod_params["constellation_type"],
+                num_bits_per_symbol=mod_params["num_bits_per_symbol"]
+            )
             
             # Cast inputs
             tx_symbols = tf.cast(tx_symbols, tf.complex64)
