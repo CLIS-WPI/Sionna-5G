@@ -297,8 +297,12 @@ class MIMODatasetGenerator:
                 maxval=self.system_params.max_snr_db
             )
 
-            # Generate channel response using Sionna
-            h = self.channel_model()
+            # Generate channel response using Sionna with required parameters
+            h = self.channel_model(
+                batch_size=batch_size,
+                num_time_steps=self.system_params.num_ofdm_symbols  # Use num_ofdm_symbols as num_time_steps
+            )
+            
             self.mimo_logger.log_channel_stats(h, snr_db)
 
             # Apply channel
