@@ -157,9 +157,9 @@ class MIMODatasetGenerator:
             # Setup modulation schemes
             print("[DEBUG] Setting up modulation schemes...")
             self.modulation_schemes = {
-                "QPSK": sn.mapping.Constellation("qpsk", num_bits_per_symbol=2),    # QPSK uses 2 bits per symbol
-                "16QAM": sn.mapping.Constellation("qam", num_bits_per_symbol=4),    # 16QAM uses 4 bits per symbol
-                "64QAM": sn.mapping.Constellation("qam", num_bits_per_symbol=6)     # 64QAM uses 6 bits per symbol
+                "QPSK": sn.mapping.Constellation("qam", num_bits_per_symbol=2),     # QPSK is 4-QAM (2 bits)
+                "16QAM": sn.mapping.Constellation("qam", num_bits_per_symbol=4),    # 16QAM (4 bits)
+                "64QAM": sn.mapping.Constellation("qam", num_bits_per_symbol=6)     # 64QAM (6 bits)
             }
 
             self.mappers = {
