@@ -152,17 +152,17 @@ class MetricsCalculator:
             modulation_params = {
                 "QPSK": {
                     "bits_per_symbol": 2,
-                    "constellation": sn.mapping.QAMConstellation(num_bits_per_symbol=2),
+                    "constellation": sn.mapping.Constellation("qam", num_bits_per_symbol=2),
                     "target_ber": 1e-5
                 },
                 "16QAM": {
                     "bits_per_symbol": 4,
-                    "constellation": sn.mapping.QAMConstellation(num_bits_per_symbol=4),
+                    "constellation": sn.mapping.Constellation("qam", num_bits_per_symbol=4),
                     "target_ber": 1e-4
                 },
                 "64QAM": {
                     "bits_per_symbol": 6,
-                    "constellation": sn.mapping.QAMConstellation(num_bits_per_symbol=6),
+                    "constellation": sn.mapping.Constellation("qam", num_bits_per_symbol=6),
                     "target_ber": 1e-3
                 }
             }
