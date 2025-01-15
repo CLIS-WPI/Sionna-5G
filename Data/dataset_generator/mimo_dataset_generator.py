@@ -104,7 +104,7 @@ class MIMODatasetGenerator:
             print("\n[DEBUG] ResourceGrid Attributes:")
             print(f"num_ofdm_symbols: {self.resource_grid.num_ofdm_symbols}")
             print(f"fft_size: {self.resource_grid.fft_size}")
-            print(f"num_subcarriers: {self.resource_grid.num_subcarriers}")
+            print(f"num_subcarriers: {self.resource_grid.fft_size}")
             print(f"num_tx: {self.resource_grid.num_tx}")
             print(f"num_streams_per_tx: {self.resource_grid.num_streams_per_tx}")
             print(f"pilot_pattern: {self.resource_grid.pilot_pattern}")
