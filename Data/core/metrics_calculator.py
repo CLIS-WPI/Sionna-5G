@@ -173,21 +173,28 @@ class MetricsCalculator:
             # Get modulation parameters
             mod_params = modulation_params[modulation]
             
-            # Create mapper with correct constellation parameters
-            mapper = sn.mapping.Mapper(
+            # Create constellation
+            constellation = sn.mapping.Constellation(
                 constellation_type=mod_params["constellation_type"],
                 num_bits_per_symbol=mod_params["num_bits_per_symbol"]
             )
+            
+            # Create mapper and demapper
+            mapper = sn.mapping.Mapper(constellation=constellation)
+            demapper = sn.mapping.Demapper(constellation=constellation)
             
             # Cast inputs
             tx_symbols = tf.cast(tx_symbols, tf.complex64)
             rx_symbols = tf.cast(rx_symbols, tf.complex64)
             
-            # Demap received symbols to LLRs
-            llr = mapper.demap(rx_symbols)
+            # Convert SNR to linear scale for demapping
+            noise_var = tf.pow(10.0, -snr_db/10.0)
             
-            # Get transmitted bits from symbols using the same mapper
+            # Get transmitted bits from symbols using the mapper
             tx_bits = mapper.get_bits(tx_symbols)
+            
+            # Demap received symbols to LLRs using the demapper
+            llr = demapper([rx_symbols, noise_var])
             
             # Hard decisions on LLRs
             detected_bits = tf.cast(llr > 0, tf.int32)
@@ -196,7 +203,7 @@ class MetricsCalculator:
             ber = sn.utils.count_errors(detected_bits, tx_bits) / tf.size(tx_bits, out_type=tf.float32)
             
             # Calculate BER curve for different SNR points
-            snr_points = tf.range(15, 31, delta=2, dtype=tf.float32)  # Start from 15dB
+            snr_points = tf.range(15, 31, delta=2, dtype=tf.float32)
             ber_curve = {}
             
             # Initialize target_met as False
@@ -227,7 +234,6 @@ class MetricsCalculator:
                             }
                         )
 
-            # If we didn't find any samples at 15dB SNR, target_met remains False
             return {
                 'average_ber': float(ber),
                 'ber_curve': ber_curve,
