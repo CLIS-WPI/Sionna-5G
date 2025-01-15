@@ -178,9 +178,8 @@ class MetricsCalculator:
                 constellation_type=mod_params["constellation_type"],
                 num_bits_per_symbol=mod_params["num_bits_per_symbol"]
             )
-            
-            # Create mapper and demapper
-            mapper = sn.mapping.Mapper(constellation=constellation)
+
+            # Create demapper only since we don't need the mapper
             demapper = sn.mapping.Demapper(
                 constellation=constellation,
                 demapping_method="app",
@@ -204,22 +203,19 @@ class MetricsCalculator:
             )
             tx_indices = symbol_demapper([tx_symbols, noise_var])
             
-            # Convert indices to bits
-            bits_converter = sn.mapping.SymbolInds2Bits(
-                num_bits_per_symbol=mod_params["num_bits_per_symbol"]
-            )
-            tx_bits = bits_converter(tx_indices)
-            
+            # Create bits converter instance
+            bits_converter = sn.mapping.Bits(num_bits_per_symbol=mod_params["num_bits_per_symbol"])
+                
+            # Convert indices to bits and ensure int32 type
+            tx_bits = tf.cast(bits_converter(tx_indices), tf.int32)
+                
             # Demap received symbols to LLRs
             llr = demapper([rx_symbols, noise_var])
-            
-            # Hard decisions on LLRs
+                
+            # Hard decisions on LLRs and ensure int32 type
             detected_bits = tf.cast(llr > 0, tf.int32)
-            
-            # Calculate average BER
-            ber = sn.utils.count_errors(detected_bits, tx_bits) / tf.size(tx_bits, out_type=tf.float32)
-            
-            # Calculate average BER
+                
+            # Calculate average BER (ensure both inputs are int32)
             ber = sn.utils.count_errors(detected_bits, tx_bits) / tf.size(tx_bits, out_type=tf.float32)
                 
             # Calculate BER curve for different SNR points
@@ -228,12 +224,13 @@ class MetricsCalculator:
                 
             # Initialize target_met as False
             target_met = False
-            
+                
             for snr in snr_points:
                 mask = tf.abs(snr_db - snr) < 0.5
                 if tf.reduce_any(mask):
                     tx_bits_at_snr = tf.boolean_mask(tx_bits, mask)
                     detected_bits_at_snr = tf.boolean_mask(detected_bits, mask)
+                    # Both inputs are already int32, no need for additional casting
                     ber_at_snr = sn.utils.count_errors(detected_bits_at_snr, tx_bits_at_snr) / \
                                 tf.size(tx_bits_at_snr, out_type=tf.float32)
                     ber_curve[float(snr)] = float(ber_at_snr)
@@ -262,10 +259,10 @@ class MetricsCalculator:
                 'bits_per_symbol': mod_params["bits_per_symbol"],
                 'target_ber': mod_params["target_ber"]
             }
-                
+                    
         except Exception as e:
             self.logger.error(f"Error in BER calculation: {str(e)}")
-            raise
+        raise
         
     def calculate_enhanced_metrics(
         self, 
