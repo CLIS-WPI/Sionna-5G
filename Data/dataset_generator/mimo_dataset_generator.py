@@ -314,7 +314,7 @@ class MIMODatasetGenerator:
             h = tf.complex(h_real, h_imag) / tf.cast(tf.sqrt(2.0), tf.complex64)
             
             # Log channel stats with proper casting
-            self.mimo_logger.log_channel_stats(h)
+            self.mimo_logger.log_channel_stats(h, snr_db)
 
             # Apply channel
             noise_variance = tf.pow(10.0, -snr_db/10.0)

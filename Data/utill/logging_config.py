@@ -206,18 +206,28 @@ class MIMOLogger:
         self.channel_logger = create_channel_logger(os.path.join(base_log_dir, 'channel'))
         self.ber_logger = create_ber_logger(os.path.join(base_log_dir, 'ber'))
         
+    # In logging_config.py, MIMOLogger class
+
     def log_channel_stats(self, channel_response, snr):
-        """Log detailed channel statistics"""
-        stats = {
-            'magnitude_mean': tf.reduce_mean(tf.abs(channel_response)).numpy(),
-            'magnitude_std': tf.std(tf.abs(channel_response)).numpy(),
-            'snr_db': float(snr)
-        }
-        
-        self.channel_logger.debug(
-            "Channel Statistics: mean=%(magnitude_mean).4f, std=%(magnitude_std).4f, SNR=%(snr_db).2f dB",
-            stats
-        )
+        """Log channel response statistics."""
+        try:
+            # Use tf.math.reduce_std instead of tf.std
+            stats = {
+                'magnitude_mean': tf.reduce_mean(tf.abs(channel_response)).numpy(),
+                'magnitude_std': tf.math.reduce_std(tf.abs(channel_response)).numpy(),
+                'phase_mean': tf.reduce_mean(tf.math.angle(channel_response)).numpy(),
+                'phase_std': tf.math.reduce_std(tf.math.angle(channel_response)).numpy(),
+                'snr_mean': tf.reduce_mean(snr).numpy(),
+                'snr_std': tf.math.reduce_std(snr).numpy()
+            }
+            
+            # Log the statistics
+            self.logger.info(f"Channel Statistics: {stats}")
+            return stats
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating channel statistics: {str(e)}")
+            raise
         
     def log_ber_measurement(self, ber_value, snr_db, additional_info=None):
         """Log BER measurements with context"""
