@@ -179,11 +179,11 @@ class MetricsCalculator:
                 num_bits_per_symbol=mod_params["num_bits_per_symbol"]
             )
             
-            # Create mapper and demapper with specified method
+            # Create mapper and demapper
             mapper = sn.mapping.Mapper(constellation=constellation)
             demapper = sn.mapping.Demapper(
                 constellation=constellation,
-                demapping_method="app",  # Using APP (a posteriori probability) method
+                demapping_method="app",
                 num_bits_per_symbol=mod_params["num_bits_per_symbol"]
             )
             
@@ -194,11 +194,10 @@ class MetricsCalculator:
             # Convert SNR to linear scale for demapping
             noise_var = tf.pow(10.0, -snr_db/10.0)
             
-            # Get transmitted bits from symbols using the mapper
-            tx_bits = mapper.get_bits(tx_symbols)
+            # Map transmitted symbols back to bits using map2bits
+            tx_bits = constellation.map2bits(tx_symbols)
             
             # Demap received symbols to LLRs using the demapper
-            # Note: Demapper expects a list of [received_symbols, noise_variance]
             llr = demapper([rx_symbols, noise_var])
             
             # Hard decisions on LLRs
