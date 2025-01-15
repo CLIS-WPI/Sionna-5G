@@ -194,10 +194,20 @@ class MetricsCalculator:
             # Convert SNR to linear scale for demapping
             noise_var = tf.pow(10.0, -snr_db/10.0)
             
-            # Map transmitted symbols back to bits using map2bits
-            tx_bits = constellation.map2bits(tx_symbols)
+            # Get symbol indices from transmitted symbols using SymbolDemapper
+            symbol_demapper = sn.mapping.SymbolDemapper(
+                constellation=constellation,
+                hard_out=True
+            )
+            tx_indices = symbol_demapper([tx_symbols, noise_var])
             
-            # Demap received symbols to LLRs using the demapper
+            # Convert indices to bits
+            bits_converter = sn.mapping.SymbolInds2Bits(
+                num_bits_per_symbol=mod_params["num_bits_per_symbol"]
+            )
+            tx_bits = bits_converter(tx_indices)
+            
+            # Demap received symbols to LLRs
             llr = demapper([rx_symbols, noise_var])
             
             # Hard decisions on LLRs
