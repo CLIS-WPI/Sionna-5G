@@ -191,8 +191,11 @@ class MetricsCalculator:
             tx_symbols = tf.cast(tx_symbols, tf.complex64)
             rx_symbols = tf.cast(rx_symbols, tf.complex64)
             
-            # Convert SNR to linear scale for demapping
+            # Convert SNR to linear scale for demapping and reshape
             noise_var = tf.pow(10.0, -snr_db/10.0)
+            # Reshape noise_var to match rx_symbols dimensions
+            noise_var = tf.reshape(noise_var, [-1, 1])  # Shape: [batch_size, 1]
+            noise_var = tf.broadcast_to(noise_var, tf.shape(rx_symbols))  # Broadcast to match rx_symbols shape
             
             # Get symbol indices from transmitted symbols using SymbolDemapper
             symbol_demapper = sn.mapping.SymbolDemapper(
@@ -216,10 +219,13 @@ class MetricsCalculator:
             # Calculate average BER
             ber = sn.utils.count_errors(detected_bits, tx_bits) / tf.size(tx_bits, out_type=tf.float32)
             
+            # Calculate average BER
+            ber = sn.utils.count_errors(detected_bits, tx_bits) / tf.size(tx_bits, out_type=tf.float32)
+                
             # Calculate BER curve for different SNR points
             snr_points = tf.range(15, 31, delta=2, dtype=tf.float32)
             ber_curve = {}
-            
+                
             # Initialize target_met as False
             target_met = False
             
@@ -231,11 +237,11 @@ class MetricsCalculator:
                     ber_at_snr = sn.utils.count_errors(detected_bits_at_snr, tx_bits_at_snr) / \
                                 tf.size(tx_bits_at_snr, out_type=tf.float32)
                     ber_curve[float(snr)] = float(ber_at_snr)
-                    
+                        
                     # Check if this is the target SNR (15dB) and update target_met
                     if abs(float(snr) - 15.0) < 0.5:
                         target_met = float(ber_at_snr) < mod_params["target_ber"]
-                    
+                        
                     # Log BER measurements
                     self.logger.info(f"BER at {snr}dB: {ber_at_snr:.2e}")
                     if hasattr(self, 'ber_logger'):
@@ -256,7 +262,7 @@ class MetricsCalculator:
                 'bits_per_symbol': mod_params["bits_per_symbol"],
                 'target_ber': mod_params["target_ber"]
             }
-            
+                
         except Exception as e:
             self.logger.error(f"Error in BER calculation: {str(e)}")
             raise
