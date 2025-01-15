@@ -300,7 +300,6 @@ class MIMODatasetGenerator:
             )
 
             # Generate channel response using Sionna with required parameters
-            # Generate real and imaginary parts separately
             h_real = tf.random.normal(
                 [batch_size, self.system_params.num_rx_antennas, self.system_params.num_tx_antennas],
                 dtype=tf.float32
@@ -318,41 +317,36 @@ class MIMODatasetGenerator:
 
             # Apply channel
             noise_variance = tf.pow(10.0, -snr_db/10.0)
-            noise_variance = tf.reshape(noise_variance, [-1, 1, 1])
+            # Reshape noise_variance to match required dimensions
+            noise_variance = tf.reshape(noise_variance, [-1, 1])  # Shape: [batch_size, 1]
             
-            # Generate noise with proper complex casting
-            noise_real = tf.random.normal(tf.shape(h), stddev=tf.sqrt(noise_variance/2))
-            noise_imag = tf.random.normal(tf.shape(h), stddev=tf.sqrt(noise_variance/2))
+            # Generate noise with proper shape
+            noise_real = tf.random.normal(
+                [batch_size, self.system_params.num_rx_antennas],  # Match rx_symbols shape
+                stddev=tf.sqrt(noise_variance/2)
+            )
+            noise_imag = tf.random.normal(
+                [batch_size, self.system_params.num_rx_antennas],  # Match rx_symbols shape
+                stddev=tf.sqrt(noise_variance/2)
+            )
             noise = tf.complex(noise_real, noise_imag)
 
-            # Apply channel and add noise
-            rx_symbols = tf.matmul(h, tf.expand_dims(tx_symbols, -1))[:, :, 0] + noise
+            # Apply channel with correct shape handling
+            # Reshape tx_symbols for matrix multiplication
+            tx_symbols_expanded = tf.expand_dims(tx_symbols, axis=-1)  # Shape: [batch_size, num_tx_antennas, 1]
             
-            # Calculate BER if needed
-            if hasattr(self, 'metrics_calculator'):
-                ber = self.metrics_calculator.calculate_ber(
-                    tx_symbols=tx_symbols,
-                    rx_symbols=rx_symbols,
-                    snr_db=snr_db
-                )
-
-            # Log BER measurements
-            self.mimo_logger.log_ber_measurement(
-                ber_value=ber,
-                snr_db=snr_db,
-                additional_info={
-                    'modulation': modulation,
-                    'num_symbols': batch_size * self.system_params.num_tx_antennas,
-                    'batch_idx': batch_idx
-                }
-            )
+            # Perform matrix multiplication and reshape
+            rx_without_noise = tf.matmul(h, tx_symbols_expanded)  # Shape: [batch_size, num_rx_antennas, 1]
+            rx_without_noise = tf.squeeze(rx_without_noise, axis=-1)  # Shape: [batch_size, num_rx_antennas]
+            
+            # Add noise (shapes should now match)
+            rx_symbols = rx_without_noise + noise  # Both should be [batch_size, num_rx_antennas]
 
             return {
-                'channel_response': h,  # Already complex64
-                'tx_symbols': tx_symbols,  # Already complex64
-                'rx_symbols': rx_symbols,  # Already complex64
-                'snr_db': tf.cast(snr_db, tf.float32),
-                'modulation': modulation
+                'channel_response': h,  # Shape: [batch_size, num_rx_antennas, num_tx_antennas]
+                'tx_symbols': tx_symbols,  # Shape: [batch_size, num_tx_antennas]
+                'rx_symbols': rx_symbols,  # Shape: [batch_size, num_rx_antennas]
+                'snr_db': tf.cast(snr_db, tf.float32)  # Shape: [batch_size]
             }
 
         except Exception as e:
