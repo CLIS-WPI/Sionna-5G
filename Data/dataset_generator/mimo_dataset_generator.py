@@ -285,11 +285,11 @@ class MIMODatasetGenerator:
             
             # Map bits to symbols using Sionna
             tx_symbols = mapper(bits_reshaped)
+            tx_symbols = tf.cast(tx_symbols, tf.complex64)
             
             # Reshape symbols to [batch_size, num_tx_antennas]
             tx_symbols = tf.reshape(tx_symbols, 
                 [batch_size, self.system_params.num_tx_antennas])
-            tx_symbols = tf.cast(tx_symbols, tf.complex64)  # Ensure complex64 type
 
             # Generate SNR values with proper range
             snr_db = tf.random.uniform(
@@ -300,31 +300,36 @@ class MIMODatasetGenerator:
             )
 
             # Generate channel response using Sionna with required parameters
-            h = self.channel_model(
-                batch_size=batch_size,
-                num_time_steps=self.system_params.num_ofdm_symbols
+            # Generate real and imaginary parts separately
+            h_real = tf.random.normal(
+                [batch_size, self.system_params.num_rx_antennas, self.system_params.num_tx_antennas],
+                dtype=tf.float32
             )
-            h = tf.cast(h, tf.complex64)  # Ensure complex64 type
+            h_imag = tf.random.normal(
+                [batch_size, self.system_params.num_rx_antennas, self.system_params.num_tx_antennas],
+                dtype=tf.float32
+            )
             
-            # Cast channel stats inputs to complex64 before logging
+            # Combine into complex tensor
+            h = tf.complex(h_real, h_imag) / tf.cast(tf.sqrt(2.0), tf.complex64)
+            
+            # Log channel stats with proper casting
             self.mimo_logger.log_channel_stats(
-                tf.cast(h, tf.complex64),
-                tf.cast(snr_db, tf.float32)
+                channel_response=h,
+                snr_db=snr_db
             )
 
             # Apply channel
             noise_variance = tf.pow(10.0, -snr_db/10.0)
             noise_variance = tf.reshape(noise_variance, [-1, 1, 1])
             
-            # Generate noise using Sionna's utility with explicit complex64 casting
+            # Generate noise with proper complex casting
             noise_real = tf.random.normal(tf.shape(h), stddev=tf.sqrt(noise_variance/2))
             noise_imag = tf.random.normal(tf.shape(h), stddev=tf.sqrt(noise_variance/2))
             noise = tf.complex(noise_real, noise_imag)
-            noise = tf.cast(noise, tf.complex64)  # Ensure complex64 type
 
             # Apply channel and add noise
             rx_symbols = tf.matmul(h, tf.expand_dims(tx_symbols, -1))[:, :, 0] + noise
-            rx_symbols = tf.cast(rx_symbols, tf.complex64)  # Ensure complex64 type
             
             # Calculate BER if needed
             if hasattr(self, 'metrics_calculator'):
@@ -346,9 +351,9 @@ class MIMODatasetGenerator:
             )
 
             return {
-                'channel_response': tf.cast(h, tf.complex64),
-                'tx_symbols': tf.cast(tx_symbols, tf.complex64),
-                'rx_symbols': tf.cast(rx_symbols, tf.complex64),
+                'channel_response': h,  # Already complex64
+                'tx_symbols': tx_symbols,  # Already complex64
+                'rx_symbols': rx_symbols,  # Already complex64
                 'snr_db': tf.cast(snr_db, tf.float32),
                 'modulation': modulation
             }
