@@ -91,26 +91,8 @@ class MIMODatasetGenerator:
             import numpy as np
             import tensorflow as tf
 
-            print("[DEBUG] Initializing OFDM Resource Grid...")
-            self.resource_grid = ResourceGrid(
-                num_ofdm_symbols=self.system_params.num_ofdm_symbols,
-                fft_size=self.system_params.num_subcarriers,
-                subcarrier_spacing=self.system_params.subcarrier_spacing,
-                num_tx=self.system_params.num_tx_antennas,
-                num_streams_per_tx=self.system_params.num_streams
-            )
-
-            # Log ResourceGrid attributes
-            print("\n[DEBUG] ResourceGrid Attributes:")
-            print(f"num_ofdm_symbols: {self.resource_grid.num_ofdm_symbols}")
-            print(f"fft_size: {self.resource_grid.fft_size}")
-            print(f"num_subcarriers: {self.resource_grid.fft_size}")  # Corrected
-            print(f"num_tx: {self.resource_grid.num_tx}")
-            print(f"num_streams_per_tx: {self.resource_grid.num_streams_per_tx}")
-            print(f"pilot_pattern: {self.resource_grid.pilot_pattern}")
-
-            # Create pilot pattern with denser spacing
-            print("\n[DEBUG] Creating pilot mask...")
+            # Create pilot pattern first
+            print("[DEBUG] Creating pilot mask...")
             pilot_mask = np.zeros([
                 self.system_params.num_tx_antennas,
                 self.system_params.num_streams,
@@ -118,9 +100,9 @@ class MIMODatasetGenerator:
                 self.system_params.num_subcarriers
             ], dtype=bool)
 
-            # Set pilot positions with denser spacing
-            pilot_time_spacing = 4  # Increased spacing
-            pilot_freq_spacing = 4  # Increased spacing
+            # Set pilot positions with appropriate spacing based on simulation plan
+            pilot_time_spacing = 4  # Based on coherence time
+            pilot_freq_spacing = 4  # Based on coherence bandwidth
             
             for tx in range(self.system_params.num_tx_antennas):
                 for stream in range(self.system_params.num_streams):
@@ -131,7 +113,7 @@ class MIMODatasetGenerator:
             num_pilots = np.sum(pilot_mask[0, 0])
             print(f"[DEBUG] Number of pilots per stream: {num_pilots}")
 
-            # Generate pilot symbols
+            # Generate QPSK pilot symbols
             print("[DEBUG] Generating pilot symbols...")
             qpsk_symbols = np.array([1+1j, 1-1j, -1+1j, -1-1j]) / np.sqrt(2)
             pilot_symbols = np.zeros([
@@ -140,47 +122,40 @@ class MIMODatasetGenerator:
                 num_pilots
             ], dtype=np.complex64)
 
-            # Fill pilot symbols
-            rng = np.random.default_rng(42)
+            # Fill pilot symbols with fixed random seed for reproducibility
+            rng = np.random.default_rng(self.system_params.random_seed)
             for tx in range(self.system_params.num_tx_antennas):
                 for stream in range(self.system_params.num_streams):
                     pilot_symbols[tx, stream] = rng.choice(qpsk_symbols, num_pilots)
 
-            # Log shapes and dimensions
-            print("\n[DEBUG] Shape Information:")
-            print(f"Pilot symbols shape: {pilot_symbols.shape}")
-            print(f"Pilot mask shape: {pilot_mask.shape}")
-            print(f"Number of True values in mask: {np.sum(pilot_mask)}")
-            # Corrected the following line:
-            print(f"ResourceGrid shape: [{self.resource_grid.num_tx}, {self.resource_grid.num_streams_per_tx}, {self.resource_grid.num_ofdm_symbols}, {self.resource_grid.fft_size}]")
-
             # Create pilot pattern
-            print("\n[DEBUG] Creating pilot pattern...")
-            self.pilot_pattern = PilotPattern(
+            print("[DEBUG] Creating pilot pattern...")
+            pilot_pattern = PilotPattern(
                 mask=tf.cast(pilot_mask, tf.bool),
                 pilots=tf.cast(pilot_symbols, tf.complex64)
             )
-            
-            # Log PilotPattern attributes
-            print("\n[DEBUG] PilotPattern Attributes:")
-            print(f"Pilot pattern num_pilot_symbols: {self.pilot_pattern.num_pilot_symbols}")
-            print(f"Pilot pattern mask shape: {self.pilot_pattern.mask.shape}")
-            print(f"Pilot pattern pilots shape: {self.pilot_pattern.pilots.shape}")
-            print(f"Mask dtype: {self.pilot_pattern.mask.dtype}")
-            print(f"Pilots dtype: {self.pilot_pattern.pilots.dtype}")
 
-            # Initialize channel estimator
-            print("\n[DEBUG] Initializing channel estimator...")
+            # Initialize ResourceGrid with pilot pattern
+            print("[DEBUG] Initializing OFDM Resource Grid...")
+            self.resource_grid = ResourceGrid(
+                num_ofdm_symbols=self.system_params.num_ofdm_symbols,
+                fft_size=self.system_params.num_subcarriers,
+                subcarrier_spacing=self.system_params.subcarrier_spacing,
+                num_tx=self.system_params.num_tx_antennas,
+                num_streams_per_tx=self.system_params.num_streams,
+                pilot_pattern=pilot_pattern,  # Pass the pilot pattern here
+                cyclic_prefix_length=self.system_params.num_subcarriers // 4
+            )
+
+            # Initialize channel estimator with the resource grid
+            print("[DEBUG] Initializing channel estimator...")
             self.channel_estimator = LSChannelEstimator(
                 resource_grid=self.resource_grid,
-                interpolation_type="lin"
+                interpolation_type="linear"
             )
-            
-            print("[DEBUG] Setting pilot pattern...")
-            self.channel_estimator.set_pilot_pattern(self.pilot_pattern)
 
-            # Setup remaining components
-            print("\n[DEBUG] Setting up remaining components...")
+            # Setup modulation schemes
+            print("[DEBUG] Setting up modulation schemes...")
             self.modulation_schemes = {
                 "QPSK": sn.mapping.QPSK(),
                 "16QAM": sn.mapping.QAM(16),
@@ -192,6 +167,8 @@ class MIMODatasetGenerator:
                 for mod, scheme in self.modulation_schemes.items()
             }
 
+            # Initialize channel model
+            print("[DEBUG] Setting up channel model...")
             self.channel_model = RayleighBlockFading(
                 num_rx=1,
                 num_rx_ant=self.system_params.num_rx_antennas,

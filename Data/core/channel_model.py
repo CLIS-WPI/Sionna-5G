@@ -33,6 +33,7 @@ from config.system_parameters import SystemParameters
 from core.path_loss_model import PathLossManager
 from utill.tensor_shape_validator import normalize_complex_tensor
 from utill.logging_config import LoggerManager
+from sionna.ofdm import ResourceGrid, PilotPattern
 
 class ChannelModelManager:
     """Simplified channel model management for MIMO systems"""
@@ -82,13 +83,23 @@ class ChannelModelManager:
     def _setup_resource_grid(self):
         """Configure OFDM resource grid."""
         try:
+            # Create a pilot pattern first
+            pilot_pattern = PilotPattern(
+                num_tx=self.system_params.num_tx_antennas,
+                num_streams_per_tx=self.system_params.num_streams,
+                num_ofdm_symbols=self.system_params.num_ofdm_symbols,
+                num_subcarriers=self.system_params.num_subcarriers,
+                pilot_pattern_type="kronecker"  # or "diamond" based on your needs
+            )
+
             self.resource_grid = ResourceGrid(
                 num_ofdm_symbols=self.system_params.num_ofdm_symbols,
                 fft_size=self.system_params.num_subcarriers,
                 subcarrier_spacing=self.system_params.subcarrier_spacing,
-                num_tx=self.system_params.num_tx_antennas,  # Updated parameter name
-                num_streams_per_tx=self.system_params.num_streams,  # Added streams
-                cyclic_prefix_length=self.system_params.num_subcarriers // 4,  # Dynamic CP length
+                num_tx=self.system_params.num_tx_antennas,
+                num_streams_per_tx=self.system_params.num_streams,
+                cyclic_prefix_length=self.system_params.num_subcarriers // 4,
+                pilot_pattern=pilot_pattern  # Add the pilot pattern here
             )
             
             self.logger.info("Resource grid configured successfully")
