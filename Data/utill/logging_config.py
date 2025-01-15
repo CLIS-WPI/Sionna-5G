@@ -205,8 +205,8 @@ class MIMOLogger:
         self.base_log_dir = base_log_dir
         self.channel_logger = create_channel_logger(os.path.join(base_log_dir, 'channel'))
         self.ber_logger = create_ber_logger(os.path.join(base_log_dir, 'ber'))
-        
-    # In logging_config.py, MIMOLogger class
+        # Add this line to initialize the logger attribute
+        self.logger = self.channel_logger  # Use channel_logger for general logging
 
     def log_channel_stats(self, channel_response, snr):
         """Log channel response statistics."""
@@ -221,12 +221,12 @@ class MIMOLogger:
                 'snr_std': tf.math.reduce_std(snr).numpy()
             }
             
-            # Log the statistics
-            self.logger.info(f"Channel Statistics: {stats}")
+            # Use channel_logger instead of self.logger
+            self.channel_logger.info(f"Channel Statistics: {stats}")
             return stats
             
         except Exception as e:
-            self.logger.error(f"Error calculating channel statistics: {str(e)}")
+            self.channel_logger.error(f"Error calculating channel statistics: {str(e)}")
             raise
         
     def log_ber_measurement(self, ber_value, snr_db, additional_info=None):
