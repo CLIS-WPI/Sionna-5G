@@ -204,7 +204,7 @@ class MetricsCalculator:
             tx_indices = symbol_demapper([tx_symbols, noise_var])
             
             # Create bits converter instance
-            bits_converter = sn.mapping.Bits(num_bits_per_symbol=mod_params["num_bits_per_symbol"])
+            bits_converter = sn.mapping.SymbolInds2Bits(num_bits_per_symbol=mod_params["num_bits_per_symbol"])
                 
             # Convert indices to bits and ensure int32 type
             tx_bits = tf.cast(bits_converter(tx_indices), tf.int32)
@@ -262,7 +262,7 @@ class MetricsCalculator:
                     
         except Exception as e:
             self.logger.error(f"Error in BER calculation: {str(e)}")
-        raise
+        raise RuntimeError(f"BER calculation failed: {str(e)}") from e
         
     def calculate_enhanced_metrics(
         self, 
