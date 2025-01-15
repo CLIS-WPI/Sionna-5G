@@ -9,6 +9,7 @@ from typing import Optional, Union, TextIO
 import os
 from datetime import datetime
 import tensorflow as tf
+import numpy as np 
 
 def configure_logging(
     log_level: Union[int, str] = logging.INFO,
