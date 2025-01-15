@@ -11,10 +11,11 @@ import tensorflow as tf
 import numpy as np
 from sionna.utils import compute_ber
 from typing import Dict, List, Any, Optional
-from utill.logging_config import LoggerManager
+from utill.logging_config import LoggerManager, create_ber_logger
 from config.system_parameters import SystemParameters
 from utill.tensor_shape_validator import validate_mimo_tensor_shapes
-import logging
+
+
 class MetricsCalculator:
     """Metrics calculator for MIMO dataset generation"""
     
@@ -22,6 +23,7 @@ class MetricsCalculator:
         """Initialize metrics calculator"""
         self.system_params = system_params or SystemParameters()
         self.logger = LoggerManager.get_logger(__name__)
+        self.ber_logger = create_ber_logger()
         
         # Define validation thresholds
         self.validation_thresholds = {
@@ -150,17 +152,17 @@ class MetricsCalculator:
             modulation_params = {
                 "QPSK": {
                     "bits_per_symbol": 2,
-                    "constellation": sn.mapping.QPSK(),
+                    "constellation": sn.mapping.Constellation("qam", num_bits_per_symbol=2),
                     "target_ber": 1e-5
                 },
                 "16QAM": {
                     "bits_per_symbol": 4,
-                    "constellation": sn.mapping.QAM(16),
+                    "constellation": sn.mapping.Constellation("qam", num_bits_per_symbol=4),
                     "target_ber": 1e-4
                 },
                 "64QAM": {
                     "bits_per_symbol": 6,
-                    "constellation": sn.mapping.QAM(64),
+                    "constellation": sn.mapping.Constellation("qam", num_bits_per_symbol=6),
                     "target_ber": 1e-3
                 }
             }
@@ -189,6 +191,9 @@ class MetricsCalculator:
             snr_points = tf.range(15, 31, delta=2, dtype=tf.float32)  # Start from 15dB
             ber_curve = {}
             
+            # Initialize target_met as False
+            target_met = False
+            
             for snr in snr_points:
                 mask = tf.abs(snr_db - snr) < 0.5
                 if tf.reduce_any(mask):
@@ -197,18 +202,24 @@ class MetricsCalculator:
                     ber_at_snr = sn.utils.count_errors(detected_bits_at_snr, tx_bits_at_snr) / \
                                 tf.size(tx_bits_at_snr, out_type=tf.float32)
                     ber_curve[float(snr)] = float(ber_at_snr)
-            
-            # Check BER at target SNR (15dB)
-            snr_15db_mask = tf.abs(snr_db - 15.0) < 0.5
-            if tf.reduce_any(snr_15db_mask):
-                tx_bits_at_15db = tf.boolean_mask(tx_bits, snr_15db_mask)
-                detected_bits_at_15db = tf.boolean_mask(detected_bits, snr_15db_mask)
-                ber_at_15db = sn.utils.count_errors(detected_bits_at_15db, tx_bits_at_15db) / \
-                            tf.size(tx_bits_at_15db, out_type=tf.float32)
-                target_met = ber_at_15db < mod_params["target_ber"]
-            else:
-                target_met = False
+                    
+                    # Check if this is the target SNR (15dB) and update target_met
+                    if abs(float(snr) - 15.0) < 0.5:
+                        target_met = float(ber_at_snr) < mod_params["target_ber"]
+                    
+                    # Log BER measurements
+                    self.logger.info(f"BER at {snr}dB: {ber_at_snr:.2e}")
+                    if hasattr(self, 'ber_logger'):
+                        self.ber_logger.info(
+                            "BER Measurement",
+                            extra={
+                                'snr': float(snr),
+                                'ber': float(ber_at_snr),
+                                'modulation': modulation
+                            }
+                        )
 
+            # If we didn't find any samples at 15dB SNR, target_met remains False
             return {
                 'average_ber': float(ber),
                 'ber_curve': ber_curve,
